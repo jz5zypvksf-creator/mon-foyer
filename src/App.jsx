@@ -391,7 +391,11 @@ export default function App() {
 
   const deleteOperation = async (id) => {
     if (USE_REMOTE_BUDGET) {
-      await supabase.from('operations').delete().eq('id', id).eq('household_id', householdId);
+      const { error } = await supabase.from('operations').delete().eq('id', id).eq('household_id', householdId);
+      if (error) {
+        setSyncStatus(`Suppression impossible: ${error.message}`);
+        return;
+      }
     }
     saveData({ ...data, operations: data.operations.filter((operation) => operation.id !== id) });
   };
@@ -401,7 +405,10 @@ export default function App() {
     if (!store || data.stores.includes(store)) return;
     if (USE_REMOTE_BUDGET) {
       const { error } = await supabase.from('stores').insert({ household_id: householdId, name: store });
-      if (error) return;
+      if (error) {
+        setMigrationStatus(`Point de vente non envoye: ${error.message}`);
+        return;
+      }
     }
     saveData({ ...data, stores: [...data.stores, store] });
     setNewStore('');
@@ -415,13 +422,69 @@ export default function App() {
   };
 
   const updateGoal = async (id, field, value) => {
-    const savingsGoals = data.savingsGoals.map((goal) =>
-      goal.id === id ? { ...goal, [field]: Number(value) } : goal,
-    );
+    const numericValue = Number(value);
+    setData((current) => {
+      const nextData = {
+        ...current,
+        savingsGoals: current.savingsGoals.map((goal) =>
+          goal.id === id ? { ...goal, [field]: numericValue } : goal,
+        ),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      return nextData;
+    });
+
     if (USE_REMOTE_BUDGET) {
-      await supabase.from('savings_goals').update({ [field]: Number(value) }).eq('id', id).eq('household_id', householdId);
+      const { error } = await supabase
+        .from('savings_goals')
+        .update({ [field]: numericValue })
+        .eq('id', id)
+        .eq('household_id', householdId);
+
+      if (error) {
+        setSyncStatus(`Erreur epargne: ${error.message}`);
+      }
     }
-    saveData({ ...data, savingsGoals });
+  };
+
+  const refreshFromSupabase = async () => {
+    if (!USE_REMOTE_BUDGET) {
+      setMigrationStatus('Supabase ou le foyer ne sont pas configures.');
+      return;
+    }
+
+    setMigrationStatus('Rechargement depuis Supabase...');
+
+    const [operationsResult, storesResult, goalsResult] = await Promise.all([
+      supabase
+        .from('operations')
+        .select('id, date, person, type, category, store, label, amount')
+        .eq('household_id', householdId)
+        .order('date', { ascending: false }),
+      supabase
+        .from('stores')
+        .select('id, name')
+        .eq('household_id', householdId)
+        .order('name', { ascending: true }),
+      supabase
+        .from('savings_goals')
+        .select('id, label, target, saved')
+        .eq('household_id', householdId)
+        .order('created_at', { ascending: true }),
+    ]);
+
+    if (operationsResult.error || storesResult.error || goalsResult.error) {
+      setMigrationStatus('Rechargement impossible: Supabase indisponible.');
+      return;
+    }
+
+    mergeData(normalizeRemoteState({
+      operations: operationsResult.data || [],
+      stores: storesResult.data || [],
+      savingsGoals: goalsResult.data || [],
+    }));
+    setSyncStatus('Synchronise avec Supabase');
+    setMigrationStatus('Donnees locales remplacees par Supabase.');
   };
 
   const migrateLocalData = async () => {
@@ -877,6 +940,9 @@ export default function App() {
               <p className="hint">
                 {syncStatus}. Les donnees sont separees en operations, categories, points de vente et objectifs d'epargne.
               </p>
+              <button className="secondary-button" type="button" onClick={refreshFromSupabase}>
+                Recharger depuis Supabase
+              </button>
               <button className="secondary-button" type="button" onClick={migrateLocalData}>
                 Envoyer les donnees locales vers Supabase
               </button>
