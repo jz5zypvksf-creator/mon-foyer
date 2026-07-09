@@ -361,6 +361,14 @@ export default function App() {
     });
   }, [data.categories, historyCategory, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
 
+  const historyTotals = useMemo(() => {
+    const filteredTotals = calculateTotals(filteredMonthOperations);
+    return {
+      ...filteredTotals,
+      expenses: filteredTotals.fixed + filteredTotals.variable,
+    };
+  }, [filteredMonthOperations]);
+
   const foodRatio = Math.min((totals.food / FOOD_BUDGET) * 100, 100);
 
   const annualReview = useMemo(() => {
@@ -1367,6 +1375,22 @@ export default function App() {
                   >
                     À vérifier {reviewMap.size > 0 ? `(${reviewMap.size})` : ''}
                   </button>
+                </div>
+              </div>
+              <div className="history-summary">
+                <div>
+                  <span>Total affiché</span>
+                  <strong className={historyTotals.balance >= 0 ? 'income' : 'expense'}>
+                    {formatCurrency(historyTotals.balance)}
+                  </strong>
+                </div>
+                <div>
+                  <span>Revenus</span>
+                  <strong className="income">{formatCurrency(historyTotals.income)}</strong>
+                </div>
+                <div>
+                  <span>Dépenses</span>
+                  <strong className="expense">{formatCurrency(historyTotals.expenses)}</strong>
                 </div>
               </div>
               <div className="operation-list">

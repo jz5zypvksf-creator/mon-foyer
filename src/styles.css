@@ -494,6 +494,48 @@ h2 {
   color: white;
 }
 
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.history-summary div {
+  display: grid;
+  gap: 4px;
+  min-height: 66px;
+  padding: 10px;
+  border-radius: 14px;
+  background: #f7faf8;
+}
+
+.history-summary span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-summary strong {
+  align-self: end;
+  overflow: hidden;
+  color: var(--blue);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-summary strong.income {
+  color: #2e8d55;
+}
+
+.history-summary strong.expense {
+  color: var(--danger);
+}
+
 .recurring-form {
   display: grid;
   gap: 10px;
@@ -1034,6 +1076,10 @@ h2 {
 
   .annual-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .history-summary {
+    grid-template-columns: 1fr;
   }
 
   .annual-month-row {
