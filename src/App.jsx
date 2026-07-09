@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   Beef,
@@ -195,12 +195,15 @@ export default function App() {
   const [chatDraft, setChatDraft] = useState('');
   const [chatAuthor, setChatAuthor] = useState('Alain');
   const [chatStatus, setChatStatus] = useState('');
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [messageNotice, setMessageNotice] = useState('');
   const [syncStatus, setSyncStatus] = useState(USE_REMOTE_BUDGET ? 'Synchronisation...' : 'Mode local');
   const [operationStatus, setOperationStatus] = useState('');
   const [migrationStatus, setMigrationStatus] = useState('');
   const [recurringStatus, setRecurringStatus] = useState('');
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const activeViewRef = useRef(activeView);
 
   const saveData = (nextData) => {
     setData(nextData);
@@ -242,6 +245,14 @@ export default function App() {
   }, [data.categories, monthOperations]);
 
   const foodRatio = Math.min((totals.food / FOOD_BUDGET) * 100, 100);
+
+  useEffect(() => {
+    activeViewRef.current = activeView;
+    if (activeView === 'messages') {
+      setUnreadMessages(0);
+      setMessageNotice('');
+    }
+  }, [activeView]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return undefined;
@@ -755,6 +766,10 @@ export default function App() {
           if (payload.new.household_id !== householdId) return;
           setMessages((current) => {
             if (current.some((message) => message.id === payload.new.id)) return current;
+            if (activeViewRef.current !== 'messages') {
+              setUnreadMessages((count) => count + 1);
+              setMessageNotice(`Nouveau message de ${payload.new.author}`);
+            }
             return [...current, payload.new];
           });
         },
@@ -821,6 +836,13 @@ export default function App() {
           <input type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
         </label>
       </header>
+
+      {messageNotice && activeView !== 'messages' && (
+        <button type="button" className="message-notice" onClick={() => setActiveView('messages')}>
+          <MessageCircle size={18} />
+          <span>{messageNotice}</span>
+        </button>
+      )}
 
       <main className="content">
         {activeView === 'home' && (
@@ -1198,7 +1220,7 @@ export default function App() {
         <NavButton icon={Home} label="Accueil" active={activeView === 'home'} onClick={() => setActiveView('home')} />
         <NavButton icon={Plus} label="Ajouter" active={activeView === 'add'} onClick={() => setActiveView('add')} />
         <NavButton icon={ReceiptText} label="Historique" active={activeView === 'history'} onClick={() => setActiveView('history')} />
-        <NavButton icon={MessageCircle} label="Messages" active={activeView === 'messages'} onClick={() => setActiveView('messages')} />
+        <NavButton icon={MessageCircle} label="Messages" badge={unreadMessages} active={activeView === 'messages'} onClick={() => setActiveView('messages')} />
         <NavButton icon={Settings} label="Reglages" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
       </nav>
     </div>
@@ -1343,9 +1365,10 @@ function OperationRow({ operation, categories, onEdit, onDelete }) {
   );
 }
 
-function NavButton({ icon: Icon, label, active, onClick }) {
+function NavButton({ icon: Icon, label, active, badge = 0, onClick }) {
   return (
     <button type="button" className={active ? 'nav-item active' : 'nav-item'} onClick={onClick}>
+      {badge > 0 && <span className="nav-badge">{badge > 9 ? '9+' : badge}</span>}
       <Icon size={22} />
       <span>{label}</span>
     </button>
