@@ -218,6 +218,13 @@ function normalizeRemoteState(remote) {
       store: operation.store || '',
     })),
     stores: remote.stores.map((store) => store.name),
+    categories: mergeCategories(defaultState.categories, (remote.categories || []).map((category) => ({
+      id: category.category_id,
+      label: category.label,
+      icon: category.icon || 'divers',
+      type: category.type,
+      custom: true,
+    }))),
     savingsGoals: remote.savingsGoals.map((goal) => ({
       ...goal,
       target: Number(goal.target),
@@ -425,10 +432,11 @@ export default function App() {
     let ignore = false;
 
     async function loadBudget() {
-      const [operationsResult, storesResult, goalsResult] = await Promise.all([
+      const [operationsResult, storesResult, goalsResult, categoriesResult] = await Promise.all([
         supabase.from('operations').select('id, date, person, type, category, store, label, amount').eq('household_id', householdId).order('date', { ascending: false }),
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
       ]);
 
       if (ignore) return;
@@ -461,6 +469,7 @@ export default function App() {
         operations: operationsResult.data || [],
         stores: remoteStores,
         savingsGoals: remoteGoals,
+        categories: categoriesResult.error ? [] : categoriesResult.data || [],
       }));
       setSyncStatus('Synchronise avec Supabase');
     }
@@ -490,6 +499,24 @@ export default function App() {
         if (rows) {
           mergeData({
             savingsGoals: rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved) })),
+          });
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, async () => {
+        const { data: rows } = await supabase
+          .from('categories')
+          .select('category_id, label, type, icon')
+          .eq('household_id', householdId)
+          .order('label', { ascending: true });
+        if (rows) {
+          mergeData({
+            categories: mergeCategories(defaultState.categories, rows.map((category) => ({
+              id: category.category_id,
+              label: category.label,
+              icon: category.icon || 'divers',
+              type: category.type,
+              custom: true,
+            }))),
           });
         }
       })
@@ -609,7 +636,7 @@ export default function App() {
     saveData({ ...data, stores: data.stores.filter((item) => item !== store) });
   };
 
-  const addCategory = () => {
+  const addCategory = async () => {
     const label = newCategory.trim();
     if (!label) return;
 
@@ -619,25 +646,39 @@ export default function App() {
       return;
     }
 
+    const category = {
+      id,
+      label,
+      icon: 'divers',
+      type: newCategoryType,
+      custom: true,
+    };
+
+    if (USE_REMOTE_BUDGET) {
+      const { error } = await supabase.from('categories').insert({
+        household_id: householdId,
+        category_id: category.id,
+        label: category.label,
+        type: category.type,
+        icon: category.icon,
+      });
+
+      if (error) {
+        setCategoryStatus(`Catégorie non envoyée: ${error.message}`);
+        return;
+      }
+    }
+
     saveData({
       ...data,
-      categories: [
-        ...data.categories,
-        {
-          id,
-          label,
-          icon: 'divers',
-          type: newCategoryType,
-          custom: true,
-        },
-      ],
+      categories: [...data.categories, category],
     });
     setNewCategory('');
     setNewCategoryType('variable');
     setCategoryStatus('Catégorie ajoutée.');
   };
 
-  const deleteCategory = (category) => {
+  const deleteCategory = async (category) => {
     if (!category.custom) {
       setCategoryStatus('Les catégories standard ne peuvent pas être supprimées.');
       return;
@@ -649,6 +690,19 @@ export default function App() {
     }
 
     if (!window.confirm(`Supprimer la catégorie "${category.label}" ?`)) return;
+    if (USE_REMOTE_BUDGET) {
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('household_id', householdId)
+        .eq('category_id', category.id);
+
+      if (error) {
+        setCategoryStatus(`Suppression impossible: ${error.message}`);
+        return;
+      }
+    }
+
     saveData({
       ...data,
       categories: data.categories.filter((item) => item.id !== category.id),
@@ -797,7 +851,7 @@ export default function App() {
 
     setMigrationStatus('Rechargement depuis Supabase...');
 
-    const [operationsResult, storesResult, goalsResult] = await Promise.all([
+    const [operationsResult, storesResult, goalsResult, categoriesResult] = await Promise.all([
       supabase
         .from('operations')
         .select('id, date, person, type, category, store, label, amount')
@@ -813,6 +867,11 @@ export default function App() {
         .select('id, label, target, saved')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
+      supabase
+        .from('categories')
+        .select('category_id, label, type, icon')
+        .eq('household_id', householdId)
+        .order('label', { ascending: true }),
     ]);
 
     if (operationsResult.error || storesResult.error || goalsResult.error) {
@@ -824,6 +883,7 @@ export default function App() {
       operations: operationsResult.data || [],
       stores: storesResult.data || [],
       savingsGoals: goalsResult.data || [],
+      categories: categoriesResult.error ? [] : categoriesResult.data || [],
     }));
     setSyncStatus('Synchronise avec Supabase');
     setMigrationStatus('Données locales remplacées par Supabase.');
@@ -837,7 +897,7 @@ export default function App() {
 
     setMigrationStatus('Migration en cours...');
 
-    const [operationsResult, storesResult, goalsResult] = await Promise.all([
+    const [operationsResult, storesResult, goalsResult, categoriesResult] = await Promise.all([
       supabase
         .from('operations')
         .select('date, person, type, category, store, label, amount')
@@ -849,6 +909,10 @@ export default function App() {
       supabase
         .from('savings_goals')
         .select('label')
+        .eq('household_id', householdId),
+      supabase
+        .from('categories')
+        .select('category_id')
         .eq('household_id', householdId),
     ]);
 
@@ -896,6 +960,17 @@ export default function App() {
         saved: Number(saved),
       }));
 
+    const existingCategories = new Set((categoriesResult.data || []).map((category) => category.category_id));
+    const missingCategories = data.categories
+      .filter((category) => category.custom && !existingCategories.has(category.id))
+      .map((category) => ({
+        household_id: householdId,
+        category_id: category.id,
+        label: category.label,
+        type: category.type,
+        icon: category.icon || 'divers',
+      }));
+
     if (missingOperations.length > 0) {
       const { error: insertError } = await supabase.from('operations').insert(missingOperations);
       if (insertError) {
@@ -920,7 +995,15 @@ export default function App() {
       }
     }
 
-    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente et ${missingGoals.length} objectif(s) envoyé(s) vers Supabase.`);
+    if (missingCategories.length > 0) {
+      const { error: categoryError } = await supabase.from('categories').insert(missingCategories);
+      if (categoryError) {
+        setMigrationStatus(`Migration catégories impossible: ${categoryError.message}`);
+        return;
+      }
+    }
+
+    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s) et ${missingCategories.length} catégorie(s) envoyé(s) vers Supabase.`);
   };
 
   useEffect(() => {
