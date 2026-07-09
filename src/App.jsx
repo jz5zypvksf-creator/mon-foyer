@@ -39,6 +39,7 @@ import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
+const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
 const iconMap = {
   nourriture: ShoppingBasket,
@@ -167,6 +168,18 @@ function fixedExpenseSignature(operation) {
   ].join('|');
 }
 
+function calculateTotals(operations) {
+  const base = { income: 0, fixed: 0, variable: 0, food: 0 };
+  operations.forEach((operation) => {
+    const amount = Number(operation.amount);
+    if (operation.type === 'income') base.income += amount;
+    if (operation.type === 'fixed') base.fixed += amount;
+    if (operation.type === 'variable') base.variable += amount;
+    if (operation.category === 'nourriture') base.food += amount;
+  });
+  return { ...base, balance: base.income - base.fixed - base.variable };
+}
+
 function normalizeRemoteState(remote) {
   return {
     operations: remote.operations.map((operation) => ({
@@ -197,6 +210,11 @@ export default function App() {
   const [chatStatus, setChatStatus] = useState('');
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [messageNotice, setMessageNotice] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyType, setHistoryType] = useState('all');
+  const [historyPerson, setHistoryPerson] = useState('all');
+  const [historyCategory, setHistoryCategory] = useState('all');
+  const [showReviewOnly, setShowReviewOnly] = useState(false);
   const [syncStatus, setSyncStatus] = useState(USE_REMOTE_BUDGET ? 'Synchronisation...' : 'Mode local');
   const [operationStatus, setOperationStatus] = useState('');
   const [migrationStatus, setMigrationStatus] = useState('');
@@ -224,15 +242,7 @@ export default function App() {
   );
 
   const totals = useMemo(() => {
-    const base = { income: 0, fixed: 0, variable: 0, food: 0 };
-    monthOperations.forEach((operation) => {
-      const amount = Number(operation.amount);
-      if (operation.type === 'income') base.income += amount;
-      if (operation.type === 'fixed') base.fixed += amount;
-      if (operation.type === 'variable') base.variable += amount;
-      if (operation.category === 'nourriture') base.food += amount;
-    });
-    return { ...base, balance: base.income - base.fixed - base.variable };
+    return calculateTotals(monthOperations);
   }, [monthOperations]);
 
   const categoryTotals = useMemo(() => {
@@ -244,7 +254,107 @@ export default function App() {
     }));
   }, [data.categories, monthOperations]);
 
+  const reviewMap = useMemo(() => {
+    const signatures = new Map();
+    monthOperations.forEach((operation) => {
+      const signature = [
+        operation.date,
+        operation.person,
+        operation.type,
+        operation.category,
+        operation.store || '',
+        operation.label.trim().toLowerCase(),
+        Number(operation.amount).toFixed(2),
+      ].join('|');
+      signatures.set(signature, (signatures.get(signature) || 0) + 1);
+    });
+
+    return monthOperations.reduce((alerts, operation) => {
+      const reasons = [];
+      const amount = Number(operation.amount);
+      const signature = [
+        operation.date,
+        operation.person,
+        operation.type,
+        operation.category,
+        operation.store || '',
+        operation.label.trim().toLowerCase(),
+        amount.toFixed(2),
+      ].join('|');
+
+      if (!operation.label.trim()) reasons.push('libellé manquant');
+      if (!amount || amount <= 0) reasons.push('montant à vérifier');
+      if (operation.type !== 'income' && amount >= 1000) reasons.push('montant élevé');
+      if (signatures.get(signature) > 1) reasons.push('doublon possible');
+
+      if (reasons.length > 0) alerts.set(operation.id, reasons);
+      return alerts;
+    }, new Map());
+  }, [monthOperations]);
+
+  const filteredMonthOperations = useMemo(() => {
+    const search = historySearch.trim().toLowerCase();
+    return monthOperations.filter((operation) => {
+      const category = data.categories.find((item) => item.id === operation.category);
+      const haystack = [
+        operation.label,
+        operation.person,
+        operation.store,
+        category?.label,
+        operation.date,
+      ].join(' ').toLowerCase();
+
+      if (showReviewOnly && !reviewMap.has(operation.id)) return false;
+      if (historyType !== 'all' && operation.type !== historyType) return false;
+      if (historyPerson !== 'all' && operation.person !== historyPerson) return false;
+      if (historyCategory !== 'all' && operation.category !== historyCategory) return false;
+      if (search && !haystack.includes(search)) return false;
+      return true;
+    });
+  }, [data.categories, historyCategory, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
+
   const foodRatio = Math.min((totals.food / FOOD_BUDGET) * 100, 100);
+
+  const annualReview = useMemo(() => {
+    const selectedYear = selectedMonth.slice(0, 4);
+    const previousYear = String(Number(selectedYear) - 1);
+    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear));
+    const previousOperations = data.operations.filter((operation) => operation.date.startsWith(previousYear));
+    const annualTotals = calculateTotals(annualOperations);
+    const previousTotals = calculateTotals(previousOperations);
+    const annualExpenseTotal = annualTotals.fixed + annualTotals.variable;
+    const previousExpenseTotal = previousTotals.fixed + previousTotals.variable;
+
+    const months = MONTH_LABELS.map((label, index) => {
+      const monthKey = `${selectedYear}-${String(index + 1).padStart(2, '0')}`;
+      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey)));
+      return {
+        label,
+        monthKey,
+        ...monthTotals,
+        expenses: monthTotals.fixed + monthTotals.variable,
+      };
+    });
+
+    const categories = data.categories.map((category) => ({
+      ...category,
+      total: annualOperations
+        .filter((operation) => operation.category === category.id && operation.type !== 'income')
+        .reduce((sum, operation) => sum + Number(operation.amount), 0),
+    }));
+
+    return {
+      year: selectedYear,
+      previousYear,
+      totals: annualTotals,
+      expenses: annualExpenseTotal,
+      previousExpenses: previousExpenseTotal,
+      difference: annualExpenseTotal - previousExpenseTotal,
+      hasPreviousYear: previousOperations.length > 0,
+      months,
+      categories,
+    };
+  }, [data.operations, data.categories, selectedMonth]);
 
   useEffect(() => {
     activeViewRef.current = activeView;
@@ -431,6 +541,8 @@ export default function App() {
   };
 
   const deleteOperation = async (id) => {
+    if (!window.confirm('Supprimer cette opération ?')) return;
+
     if (USE_REMOTE_BUDGET) {
       const { error } = await supabase.from('operations').delete().eq('id', id).eq('household_id', householdId);
       if (error) {
@@ -456,6 +568,8 @@ export default function App() {
   };
 
   const deleteStore = async (store) => {
+    if (!window.confirm(`Supprimer le point de vente "${store}" ?`)) return;
+
     if (USE_REMOTE_BUDGET) {
       await supabase.from('stores').delete().eq('name', store).eq('household_id', householdId);
     }
@@ -516,6 +630,8 @@ export default function App() {
   };
 
   const deleteRecurringFixedExpense = (id) => {
+    if (!window.confirm('Supprimer ce frais fixe récurrent ?')) return;
+
     saveData({
       ...data,
       recurringFixedExpenses: (data.recurringFixedExpenses || []).filter((expense) => expense.id !== id),
@@ -874,6 +990,8 @@ export default function App() {
 
             <ExpenseChart categories={categoryTotals} />
 
+            <AnnualReview review={annualReview} />
+
             <section className="panel">
               <div className="section-title">
                 <h2>Categories</h2>
@@ -1005,15 +1123,52 @@ export default function App() {
             <div className="panel">
               <div className="section-title">
                 <h2>Historique</h2>
-                <span>{monthOperations.length} lignes</span>
+                <span>{filteredMonthOperations.length} / {monthOperations.length} lignes</span>
+              </div>
+              <div className="history-tools">
+                <input
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  placeholder="Rechercher"
+                />
+                <div className="filter-grid">
+                  <select value={historyType} onChange={(event) => setHistoryType(event.target.value)} aria-label="Type">
+                    <option value="all">Tous les types</option>
+                    <option value="income">Revenus</option>
+                    <option value="fixed">Frais fixes</option>
+                    <option value="variable">Dépenses variables</option>
+                  </select>
+                  <select value={historyPerson} onChange={(event) => setHistoryPerson(event.target.value)} aria-label="Personne">
+                    <option value="all">Toutes les personnes</option>
+                    <option>Foyer</option>
+                    <option>Alain</option>
+                    <option>Esther</option>
+                  </select>
+                </div>
+                <div className="filter-grid">
+                  <select value={historyCategory} onChange={(event) => setHistoryCategory(event.target.value)} aria-label="Catégorie">
+                    <option value="all">Toutes les catégories</option>
+                    {data.categories.map((category) => (
+                      <option key={category.id} value={category.id}>{category.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className={showReviewOnly ? 'review-filter active' : 'review-filter'}
+                    onClick={() => setShowReviewOnly((current) => !current)}
+                  >
+                    À vérifier {reviewMap.size > 0 ? `(${reviewMap.size})` : ''}
+                  </button>
+                </div>
               </div>
               <div className="operation-list">
-                {monthOperations.length === 0 && <p className="empty-state">Aucune operation pour ce mois.</p>}
-                {monthOperations.map((operation) => (
+                {filteredMonthOperations.length === 0 && <p className="empty-state">Aucune opération pour ces critères.</p>}
+                {filteredMonthOperations.map((operation) => (
                   <OperationRow
                     key={operation.id}
                     operation={operation}
                     categories={data.categories}
+                    alerts={reviewMap.get(operation.id)}
                     onEdit={editOperation}
                     onDelete={deleteOperation}
                   />
@@ -1340,17 +1495,80 @@ function ExpenseChart({ categories }) {
   );
 }
 
-function OperationRow({ operation, categories, onEdit, onDelete }) {
+function AnnualReview({ review }) {
+  const topCategories = review.categories
+    .filter((category) => category.type !== 'income' && category.total > 0)
+    .sort((left, right) => right.total - left.total)
+    .slice(0, 4);
+  const comparisonText = review.hasPreviousYear
+    ? `${review.difference >= 0 ? '+' : ''}${formatCurrency(review.difference)} vs ${review.previousYear}`
+    : 'Comparaison disponible après une année complète';
+
+  return (
+    <section className="panel annual-panel">
+      <div className="section-title">
+        <h2>Bilan annuel {review.year}</h2>
+        <span>{formatCurrency(review.expenses)}</span>
+      </div>
+
+      <div className="annual-summary">
+        <div>
+          <span>Revenus</span>
+          <strong>{formatCurrency(review.totals.income)}</strong>
+        </div>
+        <div>
+          <span>Frais fixes</span>
+          <strong>{formatCurrency(review.totals.fixed)}</strong>
+        </div>
+        <div>
+          <span>Variables</span>
+          <strong>{formatCurrency(review.totals.variable)}</strong>
+        </div>
+        <div>
+          <span>Solde</span>
+          <strong>{formatCurrency(review.totals.balance)}</strong>
+        </div>
+      </div>
+
+      <p className="hint">
+        Nourriture: {formatCurrency(review.totals.food)} / {formatCurrency(FOOD_BUDGET * 12)} sur l'année. {comparisonText}.
+      </p>
+
+      {topCategories.length > 0 && (
+        <div className="annual-categories">
+          {topCategories.map((category) => (
+            <span key={category.id}>
+              {category.label}: <strong>{formatCurrency(category.total)}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="annual-months">
+        {review.months.map((month) => (
+          <div className="annual-month-row" key={month.monthKey}>
+            <span>{month.label}</span>
+            <strong>{formatCurrency(month.expenses)}</strong>
+            <em>{formatCurrency(month.balance)}</em>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
   const category = categories.find((item) => item.id === operation.category);
   const Icon = iconMap[category?.icon] || CircleEllipsis;
   const sign = operation.type === 'income' ? '+' : '-';
 
   return (
-    <article className="operation-row">
+    <article className={alerts?.length ? 'operation-row needs-review' : 'operation-row'}>
       <span className="icon-bubble"><Icon size={18} /></span>
       <div>
         <strong>{operation.label}</strong>
         <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''}</span>
+        {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
       </div>
       <strong className={operation.type === 'income' ? 'amount income' : 'amount'}>
         {sign}{formatCurrency(operation.amount)}

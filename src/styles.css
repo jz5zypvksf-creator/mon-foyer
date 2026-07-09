@@ -332,6 +332,22 @@ h2 {
   font-size: 0.82rem;
 }
 
+.operation-row em {
+  display: block;
+  margin-top: 4px;
+  color: var(--danger);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 800;
+  white-space: normal;
+}
+
+.operation-row.needs-review {
+  padding-inline: 8px;
+  border-radius: 14px;
+  background: rgba(179, 75, 75, 0.06);
+}
+
 .operation-row button {
   display: grid;
   place-items: center;
@@ -436,6 +452,44 @@ h2 {
 
 .form-row.single {
   grid-template-columns: 1fr;
+}
+
+.history-tools {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.history-tools input,
+.history-tools select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  color: var(--text);
+  outline-color: var(--green);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.review-filter {
+  min-height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--green-soft);
+  color: var(--blue);
+  font-weight: 850;
+}
+
+.review-filter.active {
+  background: var(--blue);
+  color: white;
 }
 
 .recurring-form {
@@ -669,6 +723,96 @@ h2 {
   text-align: right;
 }
 
+.annual-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.annual-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.annual-summary div {
+  display: grid;
+  gap: 5px;
+  min-height: 72px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--green-soft);
+}
+
+.annual-summary span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.annual-summary strong {
+  align-self: end;
+  overflow: hidden;
+  color: var(--blue);
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annual-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.annual-categories span {
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #eef4f1;
+  color: var(--blue);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.annual-months {
+  display: grid;
+  gap: 6px;
+}
+
+.annual-month-row {
+  display: grid;
+  grid-template-columns: 42px 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: #f7faf8;
+}
+
+.annual-month-row span {
+  color: var(--blue);
+  font-weight: 850;
+}
+
+.annual-month-row strong,
+.annual-month-row em {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annual-month-row strong {
+  color: var(--danger);
+}
+
+.annual-month-row em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 800;
+}
+
 .bottom-nav {
   position: fixed;
   left: 50%;
@@ -851,6 +995,7 @@ h2 {
 
   .form-row,
   .recurring-grid,
+  .filter-grid,
   .goal-inputs {
     grid-template-columns: 1fr;
     flex-direction: column;
@@ -863,6 +1008,14 @@ h2 {
 
   .chart-legend {
     width: 100%;
+  }
+
+  .annual-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .annual-month-row {
+    grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .bottom-nav {
