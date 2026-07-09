@@ -101,6 +101,7 @@ const defaultState = {
     { id: 'urgence', label: "Fonds d'urgence", target: 5000, saved: 1800 },
     { id: 'autre', label: 'Autre', target: 1000, saved: 150 },
   ],
+  recurringFixedExpenses: [],
   operations: [
     { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Alain', type: 'income', category: 'divers', store: '', label: 'Salaire Alain', amount: 2450 },
     { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Esther', type: 'income', category: 'divers', store: '', label: 'Salaire Esther', amount: 2180 },
@@ -139,6 +140,33 @@ function makeEmptyOperation() {
   };
 }
 
+function makeEmptyRecurringFixedExpense() {
+  return {
+    label: '',
+    amount: '',
+    day: 1,
+    person: 'Foyer',
+    category: 'habitation',
+  };
+}
+
+function dateInMonth(month, day) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  const safeDay = Math.min(Math.max(Number(day) || 1, 1), lastDay);
+  return `${month}-${String(safeDay).padStart(2, '0')}`;
+}
+
+function fixedExpenseSignature(operation) {
+  return [
+    operation.date,
+    operation.person,
+    operation.category,
+    operation.label.trim().toLowerCase(),
+    Number(operation.amount).toFixed(2),
+  ].join('|');
+}
+
 function normalizeRemoteState(remote) {
   return {
     operations: remote.operations.map((operation) => ({
@@ -160,6 +188,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('home');
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [draft, setDraft] = useState(makeEmptyOperation);
+  const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
   const [editingId, setEditingId] = useState(null);
   const [newStore, setNewStore] = useState('');
   const [messages, setMessages] = useState([]);
@@ -169,6 +198,7 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState(USE_REMOTE_BUDGET ? 'Synchronisation...' : 'Mode local');
   const [operationStatus, setOperationStatus] = useState('');
   const [migrationStatus, setMigrationStatus] = useState('');
+  const [recurringStatus, setRecurringStatus] = useState('');
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
 
@@ -445,6 +475,111 @@ export default function App() {
         setSyncStatus(`Erreur epargne: ${error.message}`);
       }
     }
+  };
+
+  const addRecurringFixedExpense = (event) => {
+    event.preventDefault();
+    const amount = Number(recurringDraft.amount);
+    const label = recurringDraft.label.trim();
+
+    if (!label || !amount) {
+      setRecurringStatus('Indique un libelle et un montant.');
+      return;
+    }
+
+    const fixedExpense = {
+      id: crypto.randomUUID(),
+      label,
+      amount,
+      day: Math.min(Math.max(Number(recurringDraft.day) || 1, 1), 31),
+      person: recurringDraft.person,
+      category: recurringDraft.category,
+    };
+
+    saveData({
+      ...data,
+      recurringFixedExpenses: [...(data.recurringFixedExpenses || []), fixedExpense],
+    });
+    setRecurringDraft(makeEmptyRecurringFixedExpense());
+    setRecurringStatus('Frais fixe recurrent ajoute.');
+  };
+
+  const deleteRecurringFixedExpense = (id) => {
+    saveData({
+      ...data,
+      recurringFixedExpenses: (data.recurringFixedExpenses || []).filter((expense) => expense.id !== id),
+    });
+    setRecurringStatus('Frais fixe recurrent supprime.');
+  };
+
+  const generateRecurringFixedExpenses = async () => {
+    const fixedExpenses = data.recurringFixedExpenses || [];
+
+    if (fixedExpenses.length === 0) {
+      setRecurringStatus('Ajoute d abord au moins un frais fixe recurrent.');
+      return;
+    }
+
+    const existing = new Set(
+      data.operations
+        .filter((operation) => operation.type === 'fixed' && operation.date.startsWith(selectedMonth))
+        .map(fixedExpenseSignature),
+    );
+
+    const generatedOperations = fixedExpenses
+      .map((expense) => ({
+        id: crypto.randomUUID(),
+        date: dateInMonth(selectedMonth, expense.day),
+        person: expense.person,
+        type: 'fixed',
+        category: expense.category,
+        store: '',
+        label: expense.label,
+        amount: Number(expense.amount),
+      }))
+      .filter((operation) => !existing.has(fixedExpenseSignature(operation)));
+
+    if (generatedOperations.length === 0) {
+      setRecurringStatus('Tous les frais fixes existent deja pour ce mois.');
+      return;
+    }
+
+    let savedOperations = generatedOperations;
+
+    if (USE_REMOTE_BUDGET) {
+      const payload = generatedOperations.map((operation) => ({
+        household_id: householdId,
+        date: operation.date,
+        person: operation.person,
+        type: operation.type,
+        category: operation.category,
+        store: null,
+        label: operation.label,
+        amount: operation.amount,
+      }));
+
+      const { data: insertedRows, error } = await supabase
+        .from('operations')
+        .insert(payload)
+        .select('id, date, person, type, category, store, label, amount');
+
+      if (error) {
+        setRecurringStatus(`Generation impossible: ${error.message}`);
+        return;
+      }
+
+      savedOperations = (insertedRows || []).map((operation) => ({
+        ...operation,
+        amount: Number(operation.amount),
+        store: operation.store || '',
+      }));
+    }
+
+    saveData({
+      ...data,
+      operations: [...savedOperations, ...data.operations],
+    });
+    setRecurringStatus(`${savedOperations.length} frais fixe(s) ajoute(s) pour ${selectedMonth}.`);
   };
 
   const refreshFromSupabase = async () => {
@@ -930,6 +1065,102 @@ export default function App() {
                   </button>
                 ))}
               </div>
+            </section>
+
+            <section className="panel">
+              <div className="section-title">
+                <h2>Frais fixes recurrents</h2>
+                <span>{(data.recurringFixedExpenses || []).length}</span>
+              </div>
+
+              <form className="recurring-form" onSubmit={addRecurringFixedExpense}>
+                <label>
+                  Libelle
+                  <input
+                    value={recurringDraft.label}
+                    onChange={(event) => setRecurringDraft({ ...recurringDraft, label: event.target.value })}
+                    placeholder="Ex. Emprunt maison"
+                  />
+                </label>
+                <div className="recurring-grid">
+                  <label>
+                    Montant
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={recurringDraft.amount}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, amount: event.target.value })}
+                      placeholder="0,00"
+                    />
+                  </label>
+                  <label>
+                    Jour
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={recurringDraft.day}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, day: event.target.value })}
+                    />
+                  </label>
+                </div>
+                <div className="recurring-grid">
+                  <label>
+                    Personne
+                    <select
+                      value={recurringDraft.person}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, person: event.target.value })}
+                    >
+                      <option>Foyer</option>
+                      <option>Alain</option>
+                      <option>Esther</option>
+                    </select>
+                  </label>
+                  <label>
+                    Categorie
+                    <select
+                      value={recurringDraft.category}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, category: event.target.value })}
+                    >
+                      {data.categories
+                        .filter((category) => category.type === 'fixed')
+                        .map((category) => (
+                          <option key={category.id} value={category.id}>{category.label}</option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+                <button className="primary-button" type="submit">
+                  <Plus size={20} />
+                  Ajouter le frais fixe
+                </button>
+              </form>
+
+              <div className="recurring-list">
+                {(data.recurringFixedExpenses || []).length === 0 && (
+                  <p className="empty-state">Aucun frais fixe recurrent configure.</p>
+                )}
+                {(data.recurringFixedExpenses || []).map((expense) => {
+                  const category = data.categories.find((item) => item.id === expense.category);
+                  return (
+                    <article className="recurring-row" key={expense.id}>
+                      <div>
+                        <strong>{expense.label}</strong>
+                        <span>{formatCurrency(expense.amount)} - jour {expense.day} - {expense.person} - {category?.label || 'Frais fixe'}</span>
+                      </div>
+                      <button type="button" onClick={() => deleteRecurringFixedExpense(expense.id)} aria-label="Supprimer">
+                        <Trash2 size={16} />
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <button className="secondary-button" type="button" onClick={generateRecurringFixedExpenses}>
+                Generer les frais fixes du mois
+              </button>
+              {recurringStatus && <p className="hint">{recurringStatus}</p>}
             </section>
 
             <section className="panel">

@@ -393,7 +393,9 @@ h2 {
 
 .form-panel input,
 .form-panel select,
-.inline-form input {
+.inline-form input,
+.recurring-form input,
+.recurring-form select {
   width: 100%;
   min-height: 48px;
   padding: 11px 12px;
@@ -412,6 +414,68 @@ h2 {
 
 .form-row.single {
   grid-template-columns: 1fr;
+}
+
+.recurring-form {
+  display: grid;
+  gap: 10px;
+}
+
+.recurring-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.recurring-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recurring-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.recurring-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.recurring-row div {
+  min-width: 0;
+}
+
+.recurring-row strong,
+.recurring-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recurring-row span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.recurring-row button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--danger);
 }
 
 .primary-button,
@@ -745,6 +809,7 @@ h2 {
   }
 
   .form-row,
+  .recurring-grid,
   .goal-inputs {
     grid-template-columns: 1fr;
     flex-direction: column;
