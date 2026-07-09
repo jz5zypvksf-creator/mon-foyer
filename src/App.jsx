@@ -363,7 +363,7 @@ export default function App() {
     };
 
     if (isSupabaseConfigured && !householdId) {
-      setOperationStatus("Foyer non configure: VITE_HOUSEHOLD_ID est manquant.");
+      setOperationStatus("Foyer non configuré: VITE_HOUSEHOLD_ID est manquant.");
       return;
     }
 
@@ -472,7 +472,7 @@ export default function App() {
         .eq('household_id', householdId);
 
       if (error) {
-        setSyncStatus(`Erreur epargne: ${error.message}`);
+        setSyncStatus(`Erreur épargne: ${error.message}`);
       }
     }
   };
@@ -501,7 +501,7 @@ export default function App() {
       recurringFixedExpenses: [...(data.recurringFixedExpenses || []), fixedExpense],
     });
     setRecurringDraft(makeEmptyRecurringFixedExpense());
-    setRecurringStatus('Frais fixe recurrent ajoute.');
+    setRecurringStatus('Frais fixe récurrent ajouté.');
   };
 
   const deleteRecurringFixedExpense = (id) => {
@@ -509,14 +509,14 @@ export default function App() {
       ...data,
       recurringFixedExpenses: (data.recurringFixedExpenses || []).filter((expense) => expense.id !== id),
     });
-    setRecurringStatus('Frais fixe recurrent supprime.');
+    setRecurringStatus('Frais fixe récurrent supprimé.');
   };
 
   const generateRecurringFixedExpenses = async () => {
     const fixedExpenses = data.recurringFixedExpenses || [];
 
     if (fixedExpenses.length === 0) {
-      setRecurringStatus('Ajoute d abord au moins un frais fixe recurrent.');
+      setRecurringStatus("Ajoute d'abord au moins un frais fixe récurrent.");
       return;
     }
 
@@ -540,7 +540,7 @@ export default function App() {
       .filter((operation) => !existing.has(fixedExpenseSignature(operation)));
 
     if (generatedOperations.length === 0) {
-      setRecurringStatus('Tous les frais fixes existent deja pour ce mois.');
+      setRecurringStatus('Tous les frais fixes existent déjà pour ce mois.');
       return;
     }
 
@@ -584,7 +584,7 @@ export default function App() {
 
   const refreshFromSupabase = async () => {
     if (!USE_REMOTE_BUDGET) {
-      setMigrationStatus('Supabase ou le foyer ne sont pas configures.');
+      setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
       return;
     }
 
@@ -619,12 +619,12 @@ export default function App() {
       savingsGoals: goalsResult.data || [],
     }));
     setSyncStatus('Synchronise avec Supabase');
-    setMigrationStatus('Donnees locales remplacees par Supabase.');
+    setMigrationStatus('Données locales remplacées par Supabase.');
   };
 
   const migrateLocalData = async () => {
     if (!USE_REMOTE_BUDGET) {
-      setMigrationStatus('Supabase ou le foyer ne sont pas configures.');
+      setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
       return;
     }
 
@@ -708,7 +708,7 @@ export default function App() {
     if (missingGoals.length > 0) {
       const { error: goalError } = await supabase.from('savings_goals').insert(missingGoals);
       if (goalError) {
-        setMigrationStatus(`Migration epargne impossible: ${goalError.message}`);
+        setMigrationStatus(`Migration épargne impossible: ${goalError.message}`);
         return;
       }
     }
@@ -718,7 +718,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
-      setChatStatus('Supabase non configure.');
+      setChatStatus('Supabase non configuré.');
       return undefined;
     }
 
@@ -847,7 +847,7 @@ export default function App() {
               <div className="progress-track">
                 <div className="progress-fill" style={{ width: `${foodRatio}%` }} />
               </div>
-              <p className="hint">{FOOD_BUDGET - totals.food >= 0 ? `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles` : `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'ideal`}</p>
+              <p className="hint">{FOOD_BUDGET - totals.food >= 0 ? `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles` : `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'idéal`}</p>
             </section>
 
             <ExpenseChart categories={categoryTotals} />
@@ -855,7 +855,7 @@ export default function App() {
             <section className="panel">
               <div className="section-title">
                 <h2>Categories</h2>
-                <span>{monthOperations.length} operations</span>
+                <span>{monthOperations.length} opérations</span>
               </div>
               <div className="category-list">
                 {categoryTotals.map((category) => (
@@ -1069,7 +1069,7 @@ export default function App() {
 
             <section className="panel">
               <div className="section-title">
-                <h2>Frais fixes recurrents</h2>
+                <h2>Frais fixes récurrents</h2>
                 <span>{(data.recurringFixedExpenses || []).length}</span>
               </div>
 
@@ -1139,7 +1139,7 @@ export default function App() {
 
               <div className="recurring-list">
                 {(data.recurringFixedExpenses || []).length === 0 && (
-                  <p className="empty-state">Aucun frais fixe recurrent configure.</p>
+                  <p className="empty-state">Aucun frais fixe récurrent configuré.</p>
                 )}
                 {(data.recurringFixedExpenses || []).map((expense) => {
                   const category = data.categories.find((item) => item.id === expense.category);
@@ -1158,7 +1158,7 @@ export default function App() {
               </div>
 
               <button className="secondary-button" type="button" onClick={generateRecurringFixedExpenses}>
-                Generer les frais fixes du mois
+                Générer les frais fixes du mois
               </button>
               {recurringStatus && <p className="hint">{recurringStatus}</p>}
             </section>
@@ -1169,13 +1169,13 @@ export default function App() {
                 <span>Supabase</span>
               </div>
               <p className="hint">
-                {syncStatus}. Les donnees sont separees en operations, categories, points de vente et objectifs d'epargne.
+                {syncStatus}. Les données sont séparées en opérations, catégories, points de vente et objectifs d'épargne.
               </p>
               <button className="secondary-button" type="button" onClick={refreshFromSupabase}>
                 Recharger depuis Supabase
               </button>
               <button className="secondary-button" type="button" onClick={migrateLocalData}>
-                Envoyer les donnees locales vers Supabase
+                Envoyer les données locales vers Supabase
               </button>
               {migrationStatus && <p className="hint">{migrationStatus}</p>}
             </section>
@@ -1187,7 +1187,7 @@ export default function App() {
               </div>
               <p className="hint">{session?.user?.email}</p>
               <button className="secondary-button" type="button" onClick={signOut}>
-                Se deconnecter
+                Se déconnecter
               </button>
             </section>
           </section>
