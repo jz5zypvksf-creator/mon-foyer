@@ -137,7 +137,15 @@ function mergeCategories(baseCategories, storedCategories) {
       merged.push(category);
     }
   });
-  return merged;
+  return sortCategories(merged);
+}
+
+function sortCategories(categories) {
+  return [...categories].sort((left, right) => {
+    if (left.type === 'income' && right.type !== 'income') return 1;
+    if (left.type !== 'income' && right.type === 'income') return -1;
+    return left.label.localeCompare(right.label, 'fr', { sensitivity: 'base' });
+  });
 }
 
 function makeCategoryId(label) {
@@ -671,7 +679,7 @@ export default function App() {
 
     saveData({
       ...data,
-      categories: [...data.categories, category],
+      categories: sortCategories([...data.categories, category]),
     });
     setNewCategory('');
     setNewCategoryType('variable');
@@ -705,7 +713,7 @@ export default function App() {
 
     saveData({
       ...data,
-      categories: data.categories.filter((item) => item.id !== category.id),
+      categories: sortCategories(data.categories.filter((item) => item.id !== category.id)),
     });
     setCategoryStatus('Catégorie supprimée.');
   };
