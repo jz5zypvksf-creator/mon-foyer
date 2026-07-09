@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   Beef,
+  BusFront,
   CalendarDays,
   Car,
   CircleEllipsis,
@@ -46,6 +47,7 @@ const iconMap = {
   restaurant: Utensils,
   jardin: Leaf,
   carburant: Fuel,
+  transports_publics: BusFront,
   sante: HeartPulse,
   habitation: HomeIcon,
   assurances: ShieldCheck,
@@ -64,6 +66,7 @@ const categoryColors = {
   restaurant: '#d07a3f',
   jardin: '#7bbf91',
   carburant: '#b34b4b',
+  transports_publics: '#2f6f9f',
   sante: '#bf5f82',
   habitation: '#24618a',
   assurances: '#6f7cb8',
@@ -83,14 +86,15 @@ const defaultState = {
     { id: 'restaurant', label: 'Restaurant', icon: 'restaurant', type: 'variable' },
     { id: 'jardin', label: 'Jardin', icon: 'jardin', type: 'variable' },
     { id: 'carburant', label: 'Carburant', icon: 'carburant', type: 'variable' },
-    { id: 'sante', label: 'Sante', icon: 'sante', type: 'variable' },
+    { id: 'transports_publics', label: 'Transports publics', icon: 'transports_publics', type: 'variable' },
+    { id: 'sante', label: 'Santé', icon: 'sante', type: 'variable' },
     { id: 'habitation', label: 'Habitation', icon: 'habitation', type: 'fixed' },
     { id: 'assurances', label: 'Assurances', icon: 'assurances', type: 'fixed' },
     { id: 'emprunt_maison', label: 'Emprunt maison', icon: 'emprunt_maison', type: 'fixed' },
     { id: 'emprunt_voiture', label: 'Emprunt voiture', icon: 'emprunt_voiture', type: 'fixed' },
     { id: 'eau', label: 'Eau', icon: 'eau', type: 'fixed' },
     { id: 'gaz', label: 'Gaz', icon: 'gaz', type: 'fixed' },
-    { id: 'electricite', label: 'Electricite', icon: 'electricite', type: 'fixed' },
+    { id: 'electricite', label: 'Électricité', icon: 'electricite', type: 'fixed' },
     { id: 'loisirs', label: 'Loisirs', icon: 'loisirs', type: 'variable' },
     { id: 'divers', label: 'Divers', icon: 'divers', type: 'variable' },
     { id: 'revenus', label: 'Revenus', icon: 'revenus', type: 'income' },
@@ -114,10 +118,36 @@ const defaultState = {
 function loadState() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? { ...defaultState, ...JSON.parse(stored) } : defaultState;
+    if (!stored) return defaultState;
+    const parsed = JSON.parse(stored);
+    return {
+      ...defaultState,
+      ...parsed,
+      categories: mergeCategories(defaultState.categories, parsed.categories || []),
+    };
   } catch {
     return defaultState;
   }
+}
+
+function mergeCategories(baseCategories, storedCategories) {
+  const merged = [...baseCategories];
+  storedCategories.forEach((category) => {
+    if (!merged.some((item) => item.id === category.id)) {
+      merged.push(category);
+    }
+  });
+  return merged;
+}
+
+function makeCategoryId(label) {
+  return label
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `categorie_${Date.now()}`;
 }
 
 function formatCurrency(value) {
@@ -204,6 +234,9 @@ export default function App() {
   const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
   const [editingId, setEditingId] = useState(null);
   const [newStore, setNewStore] = useState('');
+  const [newCategory, setNewCategory] = useState('');
+  const [newCategoryType, setNewCategoryType] = useState('variable');
+  const [categoryStatus, setCategoryStatus] = useState('');
   const [messages, setMessages] = useState([]);
   const [chatDraft, setChatDraft] = useState('');
   const [chatAuthor, setChatAuthor] = useState('Alain');
@@ -514,13 +547,13 @@ export default function App() {
           .single();
 
       if (error) {
-        setOperationStatus(`Supabase refuse l'operation: ${error.message}`);
+        setOperationStatus(`Supabase refuse l'opération: ${error.message}`);
         return;
       }
       operation.id = savedOperation.id;
-      setOperationStatus('Operation envoyee vers Supabase.');
+      setOperationStatus('Opération envoyée vers Supabase.');
     } else if (isSupabaseConfigured) {
-      setOperationStatus('Mode local: redemarre Vite pour relire le fichier .env.');
+      setOperationStatus('Mode local: redémarre Vite pour relire le fichier .env.');
       return;
     }
 
@@ -559,7 +592,7 @@ export default function App() {
     if (USE_REMOTE_BUDGET) {
       const { error } = await supabase.from('stores').insert({ household_id: householdId, name: store });
       if (error) {
-        setMigrationStatus(`Point de vente non envoye: ${error.message}`);
+        setMigrationStatus(`Point de vente non envoyé: ${error.message}`);
         return;
       }
     }
@@ -574,6 +607,53 @@ export default function App() {
       await supabase.from('stores').delete().eq('name', store).eq('household_id', householdId);
     }
     saveData({ ...data, stores: data.stores.filter((item) => item !== store) });
+  };
+
+  const addCategory = () => {
+    const label = newCategory.trim();
+    if (!label) return;
+
+    const id = makeCategoryId(label);
+    if (data.categories.some((category) => category.id === id || category.label.toLowerCase() === label.toLowerCase())) {
+      setCategoryStatus('Cette catégorie existe déjà.');
+      return;
+    }
+
+    saveData({
+      ...data,
+      categories: [
+        ...data.categories,
+        {
+          id,
+          label,
+          icon: 'divers',
+          type: newCategoryType,
+          custom: true,
+        },
+      ],
+    });
+    setNewCategory('');
+    setNewCategoryType('variable');
+    setCategoryStatus('Catégorie ajoutée.');
+  };
+
+  const deleteCategory = (category) => {
+    if (!category.custom) {
+      setCategoryStatus('Les catégories standard ne peuvent pas être supprimées.');
+      return;
+    }
+
+    if (data.operations.some((operation) => operation.category === category.id)) {
+      setCategoryStatus('Cette catégorie est utilisée dans l’historique.');
+      return;
+    }
+
+    if (!window.confirm(`Supprimer la catégorie "${category.label}" ?`)) return;
+    saveData({
+      ...data,
+      categories: data.categories.filter((item) => item.id !== category.id),
+    });
+    setCategoryStatus('Catégorie supprimée.');
   };
 
   const updateGoal = async (id, field, value) => {
@@ -608,7 +688,7 @@ export default function App() {
     const label = recurringDraft.label.trim();
 
     if (!label || !amount) {
-      setRecurringStatus('Indique un libelle et un montant.');
+      setRecurringStatus('Indique un libellé et un montant.');
       return;
     }
 
@@ -773,7 +853,7 @@ export default function App() {
     ]);
 
     if (operationsResult.error || storesResult.error || goalsResult.error) {
-      setMigrationStatus('Migration impossible: lecture Supabase refusee.');
+      setMigrationStatus('Migration impossible: lecture Supabase refusée.');
       return;
     }
 
@@ -840,7 +920,7 @@ export default function App() {
       }
     }
 
-    setMigrationStatus(`${missingOperations.length} operation(s), ${missingStores.length} point(s) de vente et ${missingGoals.length} objectif(s) envoyes vers Supabase.`);
+    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente et ${missingGoals.length} objectif(s) envoyé(s) vers Supabase.`);
   };
 
   useEffect(() => {
@@ -911,7 +991,7 @@ export default function App() {
       .single();
 
     if (error) {
-      setChatStatus("Le message n'a pas pu etre envoye.");
+      setChatStatus("Le message n'a pas pu être envoyé.");
       return;
     }
 
@@ -994,7 +1074,7 @@ export default function App() {
 
             <section className="panel">
               <div className="section-title">
-                <h2>Categories</h2>
+                <h2>Catégories</h2>
                 <span>{monthOperations.length} opérations</span>
               </div>
               <div className="category-list">
@@ -1002,6 +1082,43 @@ export default function App() {
                   <CategoryRow key={category.id} category={category} />
                 ))}
               </div>
+            </section>
+
+            <section className="panel">
+              <div className="section-title">
+                <h2>Catégories</h2>
+                <span>{data.categories.filter((category) => category.type !== 'income').length}</span>
+              </div>
+              <div className="category-form">
+                <input
+                  value={newCategory}
+                  onChange={(event) => setNewCategory(event.target.value)}
+                  placeholder="Nouvelle catégorie"
+                />
+                <select value={newCategoryType} onChange={(event) => setNewCategoryType(event.target.value)}>
+                  <option value="variable">Dépense variable</option>
+                  <option value="fixed">Frais fixe</option>
+                </select>
+                <button type="button" onClick={addCategory}>
+                  <Plus size={20} />
+                </button>
+              </div>
+              <div className="chip-list">
+                {data.categories
+                  .filter((category) => category.type !== 'income')
+                  .map((category) => (
+                    <button
+                      className={category.custom ? 'chip' : 'chip locked'}
+                      key={category.id}
+                      type="button"
+                      onClick={() => deleteCategory(category)}
+                    >
+                      {category.label}
+                      {category.custom ? <Trash2 size={14} /> : null}
+                    </button>
+                  ))}
+              </div>
+              {categoryStatus && <p className="hint">{categoryStatus}</p>}
             </section>
 
             <section className="panel">
@@ -1057,7 +1174,7 @@ export default function App() {
               </label>
 
               <label>
-                Libelle
+                Libellé
                 <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Ex. Courses, salaire, assurance" />
               </label>
 
@@ -1083,7 +1200,7 @@ export default function App() {
                 </label>
                 {draft.type !== 'income' && (
                   <label>
-                    Categorie
+                    Catégorie
                     <select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>
                       {data.categories
                         .filter((category) => {
@@ -1252,7 +1369,7 @@ export default function App() {
 
               <form className="recurring-form" onSubmit={addRecurringFixedExpense}>
                 <label>
-                  Libelle
+                  Libellé
                   <input
                     value={recurringDraft.label}
                     onChange={(event) => setRecurringDraft({ ...recurringDraft, label: event.target.value })}
@@ -1295,7 +1412,7 @@ export default function App() {
                     </select>
                   </label>
                   <label>
-                    Categorie
+                    Catégorie
                     <select
                       value={recurringDraft.category}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, category: event.target.value })}
@@ -1376,7 +1493,7 @@ export default function App() {
         <NavButton icon={Plus} label="Ajouter" active={activeView === 'add'} onClick={() => setActiveView('add')} />
         <NavButton icon={ReceiptText} label="Historique" active={activeView === 'history'} onClick={() => setActiveView('history')} />
         <NavButton icon={MessageCircle} label="Messages" badge={unreadMessages} active={activeView === 'messages'} onClick={() => setActiveView('messages')} />
-        <NavButton icon={Settings} label="Reglages" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
+        <NavButton icon={Settings} label="Réglages" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
       </nav>
     </div>
   );

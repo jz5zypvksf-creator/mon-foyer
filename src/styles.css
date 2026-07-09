@@ -432,6 +432,8 @@ h2 {
 .form-panel input,
 .form-panel select,
 .inline-form input,
+.category-form input,
+.category-form select,
 .recurring-form input,
 .recurring-form select {
   width: 100%;
@@ -595,9 +597,24 @@ h2 {
   gap: 8px;
 }
 
+.category-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 48px;
+  gap: 8px;
+}
+
 .inline-form button {
   display: grid;
   place-items: center;
+  border-radius: 14px;
+  background: var(--blue);
+  color: white;
+}
+
+.category-form button {
+  display: grid;
+  place-items: center;
+  border: 0;
   border-radius: 14px;
   background: var(--blue);
   color: white;
@@ -621,6 +638,10 @@ h2 {
   background: var(--green-soft);
   color: var(--blue);
   font-weight: 750;
+}
+
+.chip.locked {
+  cursor: default;
 }
 
 .empty-state {
@@ -996,6 +1017,7 @@ h2 {
   .form-row,
   .recurring-grid,
   .filter-grid,
+  .category-form,
   .goal-inputs {
     grid-template-columns: 1fr;
     flex-direction: column;
