@@ -1,0 +1,18 @@
+{
+  "name": "Mon Foyer",
+  "short_name": "Mon Foyer",
+  "description": "Application familiale partagée pour suivre revenus, dépenses, budget nourriture et épargne.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f8f6",
+  "theme_color": "#163a5f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
