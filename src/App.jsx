@@ -148,6 +148,12 @@ function sortCategories(categories) {
   });
 }
 
+function isExpenseCategory(category) {
+  return category.type !== 'income'
+    && category.id !== 'revenus'
+    && category.label.trim().toLowerCase() !== 'revenus';
+}
+
 function makeCategoryId(label) {
   return label
     .trim()
@@ -164,6 +170,19 @@ function formatSupabaseCategoryError(error) {
     return "Type de frais non envoyé: la table Supabase 'categories' n'existe pas encore. Lance le script supabase-categories-sync.sql dans Supabase.";
   }
   return `Type de frais non envoyé: ${error.message}`;
+}
+
+function formatSupabaseRecurringError(error) {
+  if (!error?.message) return 'Frais fixe non envoyé vers Supabase.';
+  if (error.message.includes("Could not find the table 'public.recurring_fixed_expenses'")) {
+    return "Frais fixe non envoyé: la table Supabase 'recurring_fixed_expenses' n'existe pas encore. Lance le script supabase-recurring-fixed-expenses.sql dans Supabase.";
+  }
+  return `Frais fixe non envoyé: ${error.message}`;
+}
+
+function parseDecimal(value) {
+  if (typeof value === 'number') return value;
+  return Number(String(value).replace(',', '.').trim());
 }
 
 function formatCurrency(value) {
@@ -580,7 +599,7 @@ export default function App() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const amount = Number(draft.amount);
+    const amount = parseDecimal(draft.amount);
     if (!draft.label.trim() || !amount) return;
 
     setOperationStatus('');
@@ -761,7 +780,7 @@ export default function App() {
   };
 
   const updateGoal = async (id, field, value) => {
-    const numericValue = Number(value);
+    const numericValue = parseDecimal(value);
     setData((current) => {
       const nextData = {
         ...current,
@@ -788,7 +807,7 @@ export default function App() {
 
   const addRecurringFixedExpense = async (event) => {
     event.preventDefault();
-    const amount = Number(recurringDraft.amount);
+    const amount = parseDecimal(recurringDraft.amount);
     const label = recurringDraft.label.trim();
 
     if (!label || !amount) {
@@ -820,7 +839,7 @@ export default function App() {
         .single();
 
       if (error) {
-        setRecurringStatus(`Frais fixe non envoye: ${error.message}`);
+        setRecurringStatus(formatSupabaseRecurringError(error));
         return;
       }
 
@@ -885,7 +904,7 @@ export default function App() {
         category: expense.category,
         store: '',
         label: expense.label,
-        amount: Number(expense.amount),
+        amount: parseDecimal(expense.amount),
       }))
       .filter((operation) => !existing.has(fixedExpenseSignature(operation)));
 
@@ -1072,7 +1091,7 @@ export default function App() {
 
     const recurringSignature = (expense) => [
       expense.label.trim().toLowerCase(),
-      Number(expense.amount).toFixed(2),
+      parseDecimal(expense.amount).toFixed(2),
       Number(expense.day),
       expense.person,
       expense.category,
@@ -1086,7 +1105,7 @@ export default function App() {
       .map((expense) => ({
         household_id: householdId,
         label: expense.label,
-        amount: Number(expense.amount),
+        amount: parseDecimal(expense.amount),
         day: Math.min(Math.max(Number(expense.day) || 1, 1), 31),
         person: expense.person,
         category: expense.category,
@@ -1290,16 +1309,18 @@ export default function App() {
                 <span>{monthOperations.length} opérations</span>
               </div>
               <div className="category-list">
-                {categoryTotals.map((category) => (
-                  <CategoryRow key={category.id} category={category} />
-                ))}
+                {categoryTotals
+                  .filter(isExpenseCategory)
+                  .map((category) => (
+                    <CategoryRow key={category.id} category={category} />
+                  ))}
               </div>
             </section>
 
             <section className="panel">
               <div className="section-title">
                 <h2>Types de frais</h2>
-                <span>{data.categories.filter((category) => category.type !== 'income').length}</span>
+                <span>{data.categories.filter(isExpenseCategory).length}</span>
               </div>
               <div className="category-form">
                 <input
@@ -1317,7 +1338,7 @@ export default function App() {
               </div>
               <div className="chip-list">
                 {data.categories
-                  .filter((category) => category.type !== 'income')
+                  .filter(isExpenseCategory)
                   .map((category) => (
                     <button
                       className={category.custom ? 'chip' : 'chip locked'}
@@ -1367,11 +1388,9 @@ export default function App() {
                     const type = event.target.value;
                     const nextCategory = type === 'income'
                       ? 'revenus'
-                      : type === 'fixed'
-                        ? 'habitation'
-                        : draft.category === 'revenus' || data.categories.find((category) => category.id === draft.category)?.type === 'fixed'
-                          ? 'nourriture'
-                          : draft.category;
+                      : draft.category === 'revenus'
+                        ? 'nourriture'
+                        : draft.category;
                     setDraft({
                       ...draft,
                       type,
@@ -1393,7 +1412,7 @@ export default function App() {
               <div className="form-row">
                 <label>
                   Montant
-                  <input type="number" min="0" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="0,00" />
+                  <input type="text" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="0,00" />
                 </label>
                 <label>
                   Date
@@ -1415,10 +1434,7 @@ export default function App() {
                     Type de frais
                     <select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>
                       {data.categories
-                        .filter((category) => {
-                          if (draft.type === 'fixed') return category.type === 'fixed';
-                          return category.type !== 'income';
-                        })
+                        .filter(isExpenseCategory)
                         .map((category) => (
                           <option key={category.id} value={category.id}>{category.label}</option>
                         ))}
@@ -1608,9 +1624,8 @@ export default function App() {
                   <label>
                     Montant
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={recurringDraft.amount}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, amount: event.target.value })}
                       placeholder="0,00"
@@ -1646,7 +1661,7 @@ export default function App() {
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, category: event.target.value })}
                     >
                       {data.categories
-                        .filter((category) => category.type === 'fixed')
+                        .filter(isExpenseCategory)
                         .map((category) => (
                           <option key={category.id} value={category.id}>{category.label}</option>
                         ))}
@@ -1763,7 +1778,7 @@ function GoalCard({ goal, onUpdate }) {
   }, [goal.saved, goal.target]);
 
   const commit = (field) => {
-    const value = draft[field] === '' ? 0 : Number(draft[field]);
+    const value = draft[field] === '' ? 0 : parseDecimal(draft[field]);
     onUpdate(goal.id, field, Number.isFinite(value) ? value : 0);
   };
 
@@ -1786,10 +1801,8 @@ function GoalCard({ goal, onUpdate }) {
         <label>
           Mis de côté (épargne)
           <input
-            type="number"
+            type="text"
             inputMode="decimal"
-            min="0"
-            step="0.01"
             value={draft.saved}
             onChange={(event) => setDraft({ ...draft, saved: event.target.value })}
             onBlur={() => commit('saved')}
@@ -1799,10 +1812,8 @@ function GoalCard({ goal, onUpdate }) {
         <label>
           Objectif
           <input
-            type="number"
+            type="text"
             inputMode="decimal"
-            min="0"
-            step="0.01"
             value={draft.target}
             onChange={(event) => setDraft({ ...draft, target: event.target.value })}
             onBlur={() => commit('target')}
@@ -1816,7 +1827,7 @@ function GoalCard({ goal, onUpdate }) {
 
 function ExpenseChart({ categories }) {
   const rows = categories
-    .filter((category) => category.type !== 'income' && category.total > 0)
+    .filter((category) => isExpenseCategory(category) && category.total > 0)
     .sort((left, right) => right.total - left.total);
   const total = rows.reduce((sum, category) => sum + category.total, 0);
   const radius = 54;
@@ -1883,7 +1894,7 @@ function ExpenseChart({ categories }) {
 
 function AnnualReview({ review }) {
   const topCategories = review.categories
-    .filter((category) => category.type !== 'income' && category.total > 0)
+    .filter((category) => isExpenseCategory(category) && category.total > 0)
     .sort((left, right) => right.total - left.total)
     .slice(0, 4);
   const comparisonText = review.hasPreviousYear
