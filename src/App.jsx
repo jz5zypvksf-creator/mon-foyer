@@ -158,6 +158,14 @@ function makeCategoryId(label) {
     .replace(/^_+|_+$/g, '') || `categorie_${Date.now()}`;
 }
 
+function formatSupabaseCategoryError(error) {
+  if (!error?.message) return 'Type de frais non envoyé vers Supabase.';
+  if (error.message.includes("Could not find the table 'public.categories'")) {
+    return "Type de frais non envoyé: la table Supabase 'categories' n'existe pas encore. Lance le script supabase-categories-sync.sql dans Supabase.";
+  }
+  return `Type de frais non envoyé: ${error.message}`;
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(value || 0);
 }
@@ -237,6 +245,14 @@ function normalizeRemoteState(remote) {
       ...goal,
       target: Number(goal.target),
       saved: Number(goal.saved),
+    })),
+    recurringFixedExpenses: (remote.recurringFixedExpenses || []).map((expense) => ({
+      id: expense.id,
+      label: expense.label,
+      amount: Number(expense.amount),
+      day: Number(expense.day),
+      person: expense.person,
+      category: expense.category,
     })),
   };
 }
@@ -448,11 +464,12 @@ export default function App() {
     let ignore = false;
 
     async function loadBudget() {
-      const [operationsResult, storesResult, goalsResult, categoriesResult] = await Promise.all([
+      const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
         supabase.from('operations').select('id, date, person, type, category, store, label, amount').eq('household_id', householdId).order('date', { ascending: false }),
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
+        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category').eq('household_id', householdId).order('created_at', { ascending: true }),
       ]);
 
       if (ignore) return;
@@ -486,6 +503,7 @@ export default function App() {
         stores: remoteStores,
         savingsGoals: remoteGoals,
         categories: categoriesResult.error ? [] : categoriesResult.data || [],
+        recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
       }));
       setSyncStatus('Synchronise avec Supabase');
     }
@@ -533,6 +551,22 @@ export default function App() {
               type: category.type,
               custom: true,
             }))),
+          });
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_fixed_expenses' }, async () => {
+        const { data: rows } = await supabase
+          .from('recurring_fixed_expenses')
+          .select('id, label, amount, day, person, category')
+          .eq('household_id', householdId)
+          .order('created_at', { ascending: true });
+        if (rows) {
+          mergeData({
+            recurringFixedExpenses: rows.map((expense) => ({
+              ...expense,
+              amount: Number(expense.amount),
+              day: Number(expense.day),
+            })),
           });
         }
       })
@@ -658,7 +692,7 @@ export default function App() {
 
     const id = makeCategoryId(label);
     if (data.categories.some((category) => category.id === id || category.label.toLowerCase() === label.toLowerCase())) {
-      setCategoryStatus('Cette catégorie existe déjà.');
+      setCategoryStatus('Ce type de frais existe déjà.');
       return;
     }
 
@@ -680,7 +714,7 @@ export default function App() {
       });
 
       if (error) {
-        setCategoryStatus(`Catégorie non envoyée: ${error.message}`);
+        setCategoryStatus(formatSupabaseCategoryError(error));
         return;
       }
     }
@@ -691,21 +725,21 @@ export default function App() {
     });
     setNewCategory('');
     setNewCategoryType('variable');
-    setCategoryStatus('Catégorie ajoutée.');
+    setCategoryStatus('Type de frais ajouté.');
   };
 
   const deleteCategory = async (category) => {
     if (!category.custom) {
-      setCategoryStatus('Les catégories standard ne peuvent pas être supprimées.');
+      setCategoryStatus('Les types de frais standard ne peuvent pas être supprimés.');
       return;
     }
 
     if (data.operations.some((operation) => operation.category === category.id)) {
-      setCategoryStatus('Cette catégorie est utilisée dans l’historique.');
+      setCategoryStatus('Ce type de frais est utilisé dans l’historique.');
       return;
     }
 
-    if (!window.confirm(`Supprimer la catégorie "${category.label}" ?`)) return;
+    if (!window.confirm(`Supprimer le type de frais "${category.label}" ?`)) return;
     if (USE_REMOTE_BUDGET) {
       const { error } = await supabase
         .from('categories')
@@ -723,7 +757,7 @@ export default function App() {
       ...data,
       categories: sortCategories(data.categories.filter((item) => item.id !== category.id)),
     });
-    setCategoryStatus('Catégorie supprimée.');
+    setCategoryStatus('Type de frais supprimé.');
   };
 
   const updateGoal = async (id, field, value) => {
@@ -752,7 +786,7 @@ export default function App() {
     }
   };
 
-  const addRecurringFixedExpense = (event) => {
+  const addRecurringFixedExpense = async (event) => {
     event.preventDefault();
     const amount = Number(recurringDraft.amount);
     const label = recurringDraft.label.trim();
@@ -762,7 +796,7 @@ export default function App() {
       return;
     }
 
-    const fixedExpense = {
+    let fixedExpense = {
       id: crypto.randomUUID(),
       label,
       amount,
@@ -770,6 +804,32 @@ export default function App() {
       person: recurringDraft.person,
       category: recurringDraft.category,
     };
+
+    if (USE_REMOTE_BUDGET) {
+      const { data: insertedExpense, error } = await supabase
+        .from('recurring_fixed_expenses')
+        .insert({
+          household_id: householdId,
+          label: fixedExpense.label,
+          amount: fixedExpense.amount,
+          day: fixedExpense.day,
+          person: fixedExpense.person,
+          category: fixedExpense.category,
+        })
+        .select('id, label, amount, day, person, category')
+        .single();
+
+      if (error) {
+        setRecurringStatus(`Frais fixe non envoye: ${error.message}`);
+        return;
+      }
+
+      fixedExpense = {
+        ...insertedExpense,
+        amount: Number(insertedExpense.amount),
+        day: Number(insertedExpense.day),
+      };
+    }
 
     saveData({
       ...data,
@@ -779,8 +839,21 @@ export default function App() {
     setRecurringStatus('Frais fixe récurrent ajouté.');
   };
 
-  const deleteRecurringFixedExpense = (id) => {
+  const deleteRecurringFixedExpense = async (id) => {
     if (!window.confirm('Supprimer ce frais fixe récurrent ?')) return;
+
+    if (USE_REMOTE_BUDGET) {
+      const { error } = await supabase
+        .from('recurring_fixed_expenses')
+        .delete()
+        .eq('id', id)
+        .eq('household_id', householdId);
+
+      if (error) {
+        setRecurringStatus(`Suppression impossible: ${error.message}`);
+        return;
+      }
+    }
 
     saveData({
       ...data,
@@ -867,7 +940,7 @@ export default function App() {
 
     setMigrationStatus('Rechargement depuis Supabase...');
 
-    const [operationsResult, storesResult, goalsResult, categoriesResult] = await Promise.all([
+    const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
       supabase
         .from('operations')
         .select('id, date, person, type, category, store, label, amount')
@@ -888,6 +961,11 @@ export default function App() {
         .select('category_id, label, type, icon')
         .eq('household_id', householdId)
         .order('label', { ascending: true }),
+      supabase
+        .from('recurring_fixed_expenses')
+        .select('id, label, amount, day, person, category')
+        .eq('household_id', householdId)
+        .order('created_at', { ascending: true }),
     ]);
 
     if (operationsResult.error || storesResult.error || goalsResult.error) {
@@ -900,6 +978,7 @@ export default function App() {
       stores: storesResult.data || [],
       savingsGoals: goalsResult.data || [],
       categories: categoriesResult.error ? [] : categoriesResult.data || [],
+      recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
     }));
     setSyncStatus('Synchronise avec Supabase');
     setMigrationStatus('Données locales remplacées par Supabase.');
@@ -913,7 +992,7 @@ export default function App() {
 
     setMigrationStatus('Migration en cours...');
 
-    const [operationsResult, storesResult, goalsResult, categoriesResult] = await Promise.all([
+    const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
       supabase
         .from('operations')
         .select('date, person, type, category, store, label, amount')
@@ -929,6 +1008,10 @@ export default function App() {
       supabase
         .from('categories')
         .select('category_id')
+        .eq('household_id', householdId),
+      supabase
+        .from('recurring_fixed_expenses')
+        .select('label, amount, day, person, category')
         .eq('household_id', householdId),
     ]);
 
@@ -987,6 +1070,28 @@ export default function App() {
         icon: category.icon || 'divers',
       }));
 
+    const recurringSignature = (expense) => [
+      expense.label.trim().toLowerCase(),
+      Number(expense.amount).toFixed(2),
+      Number(expense.day),
+      expense.person,
+      expense.category,
+    ].join('|');
+
+    const existingRecurringExpenses = new Set(
+      (recurringResult.error ? [] : recurringResult.data || []).map(recurringSignature),
+    );
+    const missingRecurringExpenses = (data.recurringFixedExpenses || [])
+      .filter((expense) => !existingRecurringExpenses.has(recurringSignature(expense)))
+      .map((expense) => ({
+        household_id: householdId,
+        label: expense.label,
+        amount: Number(expense.amount),
+        day: Math.min(Math.max(Number(expense.day) || 1, 1), 31),
+        person: expense.person,
+        category: expense.category,
+      }));
+
     if (missingOperations.length > 0) {
       const { error: insertError } = await supabase.from('operations').insert(missingOperations);
       if (insertError) {
@@ -1014,12 +1119,20 @@ export default function App() {
     if (missingCategories.length > 0) {
       const { error: categoryError } = await supabase.from('categories').insert(missingCategories);
       if (categoryError) {
-        setMigrationStatus(`Migration catégories impossible: ${categoryError.message}`);
+        setMigrationStatus(`Migration types de frais impossible: ${categoryError.message}`);
         return;
       }
     }
 
-    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s) et ${missingCategories.length} catégorie(s) envoyé(s) vers Supabase.`);
+    if (missingRecurringExpenses.length > 0) {
+      const { error: recurringError } = await supabase.from('recurring_fixed_expenses').insert(missingRecurringExpenses);
+      if (recurringError) {
+        setMigrationStatus(`Migration frais fixes récurrents impossible: ${recurringError.message}`);
+        return;
+      }
+    }
+
+    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais et ${missingRecurringExpenses.length} frais fixe(s) récurrent(s) envoyé(s) vers Supabase.`);
   };
 
   useEffect(() => {
@@ -1173,7 +1286,7 @@ export default function App() {
 
             <section className="panel">
               <div className="section-title">
-                <h2>Catégories</h2>
+                <h2>Dépenses par type de frais</h2>
                 <span>{monthOperations.length} opérations</span>
               </div>
               <div className="category-list">
@@ -1185,14 +1298,14 @@ export default function App() {
 
             <section className="panel">
               <div className="section-title">
-                <h2>Catégories</h2>
+                <h2>Types de frais</h2>
                 <span>{data.categories.filter((category) => category.type !== 'income').length}</span>
               </div>
               <div className="category-form">
                 <input
                   value={newCategory}
                   onChange={(event) => setNewCategory(event.target.value)}
-                  placeholder="Nouvelle catégorie"
+                  placeholder="Nouveau type de frais"
                 />
                 <select value={newCategoryType} onChange={(event) => setNewCategoryType(event.target.value)}>
                   <option value="variable">Dépense variable</option>
@@ -1299,7 +1412,7 @@ export default function App() {
                 </label>
                 {draft.type !== 'income' && (
                   <label>
-                    Catégorie
+                    Type de frais
                     <select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>
                       {data.categories
                         .filter((category) => {
@@ -1362,8 +1475,8 @@ export default function App() {
                   </select>
                 </div>
                 <div className="filter-grid">
-                  <select value={historyCategory} onChange={(event) => setHistoryCategory(event.target.value)} aria-label="Catégorie">
-                    <option value="all">Toutes les catégories</option>
+                  <select value={historyCategory} onChange={(event) => setHistoryCategory(event.target.value)} aria-label="Type de frais">
+                    <option value="all">Tous les types de frais</option>
                     {data.categories.map((category) => (
                       <option key={category.id} value={category.id}>{category.label}</option>
                     ))}
@@ -1527,7 +1640,7 @@ export default function App() {
                     </select>
                   </label>
                   <label>
-                    Catégorie
+                    Type de frais
                     <select
                       value={recurringDraft.category}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, category: event.target.value })}
@@ -1578,7 +1691,7 @@ export default function App() {
                 <span>Supabase</span>
               </div>
               <p className="hint">
-                {syncStatus}. Les données sont séparées en opérations, catégories, points de vente et objectifs d'épargne.
+                {syncStatus}. Les données sont séparées en opérations, types de frais, points de vente et objectifs d'épargne.
               </p>
               <button className="secondary-button" type="button" onClick={refreshFromSupabase}>
                 Recharger depuis Supabase
@@ -1636,7 +1749,30 @@ function CategoryRow({ category }) {
 }
 
 function GoalCard({ goal, onUpdate }) {
+  const [draft, setDraft] = useState({
+    saved: String(goal.saved ?? 0),
+    target: String(goal.target ?? 0),
+  });
   const ratio = goal.target ? Math.min((goal.saved / goal.target) * 100, 100) : 0;
+
+  useEffect(() => {
+    setDraft({
+      saved: String(goal.saved ?? 0),
+      target: String(goal.target ?? 0),
+    });
+  }, [goal.saved, goal.target]);
+
+  const commit = (field) => {
+    const value = draft[field] === '' ? 0 : Number(draft[field]);
+    onUpdate(goal.id, field, Number.isFinite(value) ? value : 0);
+  };
+
+  const handleKeyDown = (event, field) => {
+    if (event.key === 'Enter') {
+      event.currentTarget.blur();
+    }
+  };
+
   return (
     <article className="goal-card">
       <div className="goal-head">
@@ -1649,11 +1785,29 @@ function GoalCard({ goal, onUpdate }) {
       <div className="goal-inputs">
         <label>
           Mis de côté (épargne)
-          <input type="number" min="0" value={goal.saved} onChange={(event) => onUpdate(goal.id, 'saved', event.target.value)} />
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={draft.saved}
+            onChange={(event) => setDraft({ ...draft, saved: event.target.value })}
+            onBlur={() => commit('saved')}
+            onKeyDown={(event) => handleKeyDown(event, 'saved')}
+          />
         </label>
         <label>
           Objectif
-          <input type="number" min="0" value={goal.target} onChange={(event) => onUpdate(goal.id, 'target', event.target.value)} />
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={draft.target}
+            onChange={(event) => setDraft({ ...draft, target: event.target.value })}
+            onBlur={() => commit('target')}
+            onKeyDown={(event) => handleKeyDown(event, 'target')}
+          />
         </label>
       </div>
     </article>
@@ -1680,7 +1834,7 @@ function ExpenseChart({ categories }) {
         <p className="empty-state">Aucune dépense à afficher pour ce mois.</p>
       ) : (
         <div className="expense-chart">
-          <div className="donut-wrap" aria-label="Répartition des dépenses par catégorie">
+          <div className="donut-wrap" aria-label="Répartition des dépenses par type de frais">
             <svg className="donut" viewBox="0 0 140 140" role="img">
               <circle className="donut-bg" cx="70" cy="70" r={radius} />
               {rows.map((category) => {
