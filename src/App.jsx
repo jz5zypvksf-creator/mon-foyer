@@ -1632,6 +1632,16 @@ export default function App() {
                   <strong className="expense">{formatCurrency(historyTotals.expenses)}</strong>
                 </div>
               </div>
+              <div className="history-summary">
+                {PAYMENT_METHODS.map((method) => (
+                  <div key={method}>
+                    <span>{method}</span>
+                    <strong className={paymentBalances[method] >= 0 ? 'income' : 'expense'}>
+                      {formatCurrency(paymentBalances[method])}
+                    </strong>
+                  </div>
+                ))}
+              </div>
               <div className="operation-list">
                 {filteredMonthOperations.length === 0 && <p className="empty-state">Aucune opération pour ces critères.</p>}
                 {filteredMonthOperations.map((operation) => (
