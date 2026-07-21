@@ -41,7 +41,7 @@ const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
-const PAYMENT_METHODS = ['Compte Belfius', 'Cash', 'Chèques repas Alain', 'Chèques repas Esther'];
+const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
@@ -1362,6 +1362,16 @@ export default function App() {
               <div>
                 <span>Solde du mois</span>
                 <strong>{formatCurrency(totals.balance)}</strong>
+                <div className="hero-balance-grid">
+                  {PAYMENT_METHODS.map((method) => (
+                    <div key={method}>
+                      <span>{method}</span>
+                      <em className={paymentBalances[method] >= 0 ? 'positive' : 'negative'}>
+                        {formatCurrency(paymentBalances[method])}
+                      </em>
+                    </div>
+                  ))}
+                </div>
               </div>
               <PiggyBank size={42} />
             </div>
