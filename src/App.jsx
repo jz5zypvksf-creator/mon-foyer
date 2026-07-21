@@ -41,6 +41,10 @@ const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+const PAYMENT_METHODS = ['Compte Belfius', 'Cash', 'Chèques repas Alain', 'Chèques repas Esther'];
+const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
+const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
+const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 
 const iconMap = {
   nourriture: ShoppingBasket,
@@ -108,10 +112,10 @@ const defaultState = {
   ],
   recurringFixedExpenses: [],
   operations: [
-    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Alain', type: 'income', category: 'divers', store: '', label: 'Salaire Alain', amount: 2450 },
-    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Esther', type: 'income', category: 'divers', store: '', label: 'Salaire Esther', amount: 2180 },
-    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Foyer', type: 'fixed', category: 'habitation', store: '', label: 'Loyer', amount: 980 },
-    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Esther', type: 'variable', category: 'nourriture', store: 'Colruyt', label: 'Courses semaine', amount: 86.4 },
+    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Alain', type: 'income', category: 'divers', store: '', paymentMethod: 'Compte Belfius', label: 'Salaire Alain', amount: 2450 },
+    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Esther', type: 'income', category: 'divers', store: '', paymentMethod: 'Compte Belfius', label: 'Salaire Esther', amount: 2180 },
+    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Foyer', type: 'fixed', category: 'habitation', store: '', paymentMethod: 'Compte Belfius', label: 'Loyer', amount: 980 },
+    { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), person: 'Esther', type: 'variable', category: 'nourriture', store: 'Colruyt', paymentMethod: 'Compte Belfius', label: 'Courses semaine', amount: 86.4 },
   ],
 };
 
@@ -123,6 +127,7 @@ function loadState() {
     return {
       ...defaultState,
       ...parsed,
+      operations: (parsed.operations || defaultState.operations).map(normalizeOperation),
       categories: mergeCategories(defaultState.categories, parsed.categories || []),
     };
   } catch {
@@ -185,6 +190,44 @@ function parseDecimal(value) {
   return Number(String(value).replace(',', '.').trim());
 }
 
+function normalizeOperation(operation) {
+  return {
+    ...operation,
+    amount: Number(operation.amount),
+    store: operation.store || '',
+    paymentMethod: operation.payment_method || operation.paymentMethod || 'Compte Belfius',
+  };
+}
+
+function canPaymentMethodGoNegative(method) {
+  return OVERDRAFT_PAYMENT_METHODS.includes(method);
+}
+
+function calculatePaymentBalances(operations) {
+  const balances = Object.fromEntries(PAYMENT_METHODS.map((method) => [method, 0]));
+
+  operations.forEach((operation) => {
+    const method = operation.paymentMethod || 'Compte Belfius';
+    if (!PAYMENT_METHODS.includes(method)) return;
+
+    const amount = Number(operation.amount) || 0;
+    balances[method] += operation.type === 'income' ? amount : -amount;
+  });
+
+  return balances;
+}
+
+function isMissingPaymentColumn(error) {
+  return error?.message?.includes('payment_method') || error?.message?.includes('schema cache');
+}
+
+function formatSupabaseOperationError(error) {
+  if (isMissingPaymentColumn(error)) {
+    return "Opération non envoyée: la colonne Supabase 'payment_method' n'existe pas encore. Lance le script supabase-payment-method.sql dans Supabase.";
+  }
+  return `Supabase refuse l'opération: ${error.message}`;
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(value || 0);
 }
@@ -201,6 +244,7 @@ function makeEmptyOperation() {
     type: 'variable',
     category: 'nourriture',
     store: 'Colruyt',
+    paymentMethod: 'Compte Belfius',
     label: '',
     amount: '',
   };
@@ -247,11 +291,7 @@ function calculateTotals(operations) {
 
 function normalizeRemoteState(remote) {
   return {
-    operations: remote.operations.map((operation) => ({
-      ...operation,
-      amount: Number(operation.amount),
-      store: operation.store || '',
-    })),
+    operations: remote.operations.map(normalizeOperation),
     stores: remote.stores.map((store) => store.name),
     categories: mergeCategories(defaultState.categories, (remote.categories || []).map((category) => ({
       id: category.category_id,
@@ -276,6 +316,26 @@ function normalizeRemoteState(remote) {
   };
 }
 
+async function selectOperations(order = true) {
+  let query = supabase
+    .from('operations')
+    .select(OPERATION_COLUMNS)
+    .eq('household_id', householdId);
+
+  if (order) query = query.order('date', { ascending: false });
+  const result = await query;
+
+  if (!isMissingPaymentColumn(result.error)) return result;
+
+  let fallbackQuery = supabase
+    .from('operations')
+    .select(LEGACY_OPERATION_COLUMNS)
+    .eq('household_id', householdId);
+
+  if (order) fallbackQuery = fallbackQuery.order('date', { ascending: false });
+  return fallbackQuery;
+}
+
 export default function App() {
   const [data, setData] = useState(loadState);
   const [activeView, setActiveView] = useState('home');
@@ -297,6 +357,7 @@ export default function App() {
   const [historyType, setHistoryType] = useState('all');
   const [historyPerson, setHistoryPerson] = useState('all');
   const [historyCategory, setHistoryCategory] = useState('all');
+  const [historyPaymentMethod, setHistoryPaymentMethod] = useState('all');
   const [showReviewOnly, setShowReviewOnly] = useState(false);
   const [syncStatus, setSyncStatus] = useState(USE_REMOTE_BUDGET ? 'Synchronisation...' : 'Mode local');
   const [operationStatus, setOperationStatus] = useState('');
@@ -327,6 +388,28 @@ export default function App() {
   const totals = useMemo(() => {
     return calculateTotals(monthOperations);
   }, [monthOperations]);
+
+  const paymentBalances = useMemo(() => {
+    return calculatePaymentBalances(monthOperations);
+  }, [monthOperations]);
+
+  const editingOperation = useMemo(() => {
+    return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
+  }, [data.operations, editingId]);
+
+  const getAvailablePaymentBalance = (method) => {
+    const currentBalance = paymentBalances[method] || 0;
+    if (
+      editingOperation
+      && editingOperation.date.startsWith(selectedMonth)
+      && editingOperation.type !== 'income'
+      && (editingOperation.paymentMethod || 'Compte Belfius') === method
+    ) {
+      return currentBalance + Number(editingOperation.amount || 0);
+    }
+
+    return currentBalance;
+  };
 
   const categoryTotals = useMemo(() => {
     return data.categories.map((category) => ({
@@ -383,6 +466,7 @@ export default function App() {
         operation.label,
         operation.person,
         operation.store,
+        operation.paymentMethod,
         category?.label,
         operation.date,
       ].join(' ').toLowerCase();
@@ -391,10 +475,11 @@ export default function App() {
       if (historyType !== 'all' && operation.type !== historyType) return false;
       if (historyPerson !== 'all' && operation.person !== historyPerson) return false;
       if (historyCategory !== 'all' && operation.category !== historyCategory) return false;
+      if (historyPaymentMethod !== 'all' && (operation.paymentMethod || 'Compte Belfius') !== historyPaymentMethod) return false;
       if (search && !haystack.includes(search)) return false;
       return true;
     });
-  }, [data.categories, historyCategory, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
+  }, [data.categories, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => {
     const filteredTotals = calculateTotals(filteredMonthOperations);
@@ -484,7 +569,7 @@ export default function App() {
 
     async function loadBudget() {
       const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
-        supabase.from('operations').select('id, date, person, type, category, store, label, amount').eq('household_id', householdId).order('date', { ascending: false }),
+        selectOperations(),
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
@@ -532,12 +617,8 @@ export default function App() {
     const channel = supabase
       .channel('budget-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'operations' }, async () => {
-        const { data: rows } = await supabase
-          .from('operations')
-          .select('id, date, person, type, category, store, label, amount')
-          .eq('household_id', householdId)
-          .order('date', { ascending: false });
-        if (rows) mergeData({ operations: rows.map((row) => ({ ...row, amount: Number(row.amount), store: row.store || '' })) });
+        const { data: rows } = await selectOperations();
+        if (rows) mergeData({ operations: rows.map(normalizeOperation) });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, async () => {
         const { data: rows } = await supabase.from('stores').select('name').eq('household_id', householdId).order('name', { ascending: true });
@@ -609,8 +690,17 @@ export default function App() {
       amount,
       store: draft.type === 'income' || draft.type === 'fixed' ? '' : draft.store,
       category: draft.type === 'income' ? 'revenus' : draft.category,
+      paymentMethod: draft.paymentMethod || 'Compte Belfius',
       id: editingId || crypto.randomUUID(),
     };
+
+    if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
+      const availableBalance = getAvailablePaymentBalance(operation.paymentMethod);
+      if (amount > availableBalance) {
+        setOperationStatus(`${operation.paymentMethod}: solde disponible ${formatCurrency(availableBalance)}. Paiement impossible.`);
+        return;
+      }
+    }
 
     if (isSupabaseConfigured && !householdId) {
       setOperationStatus("Foyer non configuré: VITE_HOUSEHOLD_ID est manquant.");
@@ -627,6 +717,7 @@ export default function App() {
         store: operation.store || null,
         label: operation.label,
         amount: operation.amount,
+        payment_method: operation.paymentMethod,
       };
 
       const { data: savedOperation, error } = editingId
@@ -634,16 +725,16 @@ export default function App() {
           .from('operations')
           .update(payload)
           .eq('id', editingId)
-          .select('id, household_id, date, person, type, category, store, label, amount')
+          .select(OPERATION_COLUMNS)
           .single()
         : await supabase
           .from('operations')
           .insert(payload)
-          .select('id, household_id, date, person, type, category, store, label, amount')
+          .select(OPERATION_COLUMNS)
           .single();
 
       if (error) {
-        setOperationStatus(`Supabase refuse l'opération: ${error.message}`);
+        setOperationStatus(formatSupabaseOperationError(error));
         return;
       }
       operation.id = savedOperation.id;
@@ -903,6 +994,7 @@ export default function App() {
         type: 'fixed',
         category: expense.category,
         store: '',
+        paymentMethod: 'Compte Belfius',
         label: expense.label,
         amount: parseDecimal(expense.amount),
       }))
@@ -923,6 +1015,7 @@ export default function App() {
         type: operation.type,
         category: operation.category,
         store: null,
+        payment_method: operation.paymentMethod || 'Compte Belfius',
         label: operation.label,
         amount: operation.amount,
       }));
@@ -930,18 +1023,14 @@ export default function App() {
       const { data: insertedRows, error } = await supabase
         .from('operations')
         .insert(payload)
-        .select('id, date, person, type, category, store, label, amount');
+        .select(OPERATION_COLUMNS);
 
       if (error) {
-        setRecurringStatus(`Generation impossible: ${error.message}`);
+        setRecurringStatus(isMissingPaymentColumn(error) ? "Generation impossible: lance le script supabase-payment-method.sql dans Supabase." : `Generation impossible: ${error.message}`);
         return;
       }
 
-      savedOperations = (insertedRows || []).map((operation) => ({
-        ...operation,
-        amount: Number(operation.amount),
-        store: operation.store || '',
-      }));
+      savedOperations = (insertedRows || []).map(normalizeOperation);
     }
 
     saveData({
@@ -960,11 +1049,7 @@ export default function App() {
     setMigrationStatus('Rechargement depuis Supabase...');
 
     const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
-      supabase
-        .from('operations')
-        .select('id, date, person, type, category, store, label, amount')
-        .eq('household_id', householdId)
-        .order('date', { ascending: false }),
+      selectOperations(),
       supabase
         .from('stores')
         .select('id, name')
@@ -1012,10 +1097,7 @@ export default function App() {
     setMigrationStatus('Migration en cours...');
 
     const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
-      supabase
-        .from('operations')
-        .select('date, person, type, category, store, label, amount')
-        .eq('household_id', householdId),
+      selectOperations(false),
       supabase
         .from('stores')
         .select('name')
@@ -1045,6 +1127,7 @@ export default function App() {
       operation.type,
       operation.category,
       operation.store || '',
+      operation.payment_method || operation.paymentMethod || 'Compte Belfius',
       operation.label,
       Number(operation.amount).toFixed(2),
     ].join('|');
@@ -1059,6 +1142,7 @@ export default function App() {
         type: operation.type,
         category: operation.category,
         store: operation.store || null,
+        payment_method: operation.paymentMethod || operation.payment_method || 'Compte Belfius',
         label: operation.label,
         amount: Number(operation.amount),
       }));
@@ -1420,6 +1504,24 @@ export default function App() {
                 </label>
               </div>
 
+              <label>
+                Moyen de paiement
+                <select value={draft.paymentMethod} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>
+                  {PAYMENT_METHODS.map((method) => {
+                    const availableBalance = getAvailablePaymentBalance(method);
+                    const disabled = draft.type !== 'income'
+                      && !canPaymentMethodGoNegative(method)
+                      && availableBalance <= 0;
+
+                    return (
+                      <option key={method} disabled={disabled}>
+                        {method}{draft.type !== 'income' && !canPaymentMethodGoNegative(method) ? ` (${formatCurrency(availableBalance)} dispo)` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+
               <div className={draft.type === 'income' ? 'form-row single' : 'form-row'}>
                 <label>
                   Personne
@@ -1504,6 +1606,14 @@ export default function App() {
                   >
                     À vérifier {reviewMap.size > 0 ? `(${reviewMap.size})` : ''}
                   </button>
+                </div>
+                <div className="filter-grid">
+                  <select value={historyPaymentMethod} onChange={(event) => setHistoryPaymentMethod(event.target.value)} aria-label="Moyen de paiement">
+                    <option value="all">Tous les moyens de paiement</option>
+                    {PAYMENT_METHODS.map((method) => (
+                      <option key={method}>{method}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div className="history-summary">
@@ -1964,7 +2074,7 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
       <span className="icon-bubble"><Icon size={18} /></span>
       <div>
         <strong>{operation.label}</strong>
-        <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''}</span>
+        <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
         {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
       </div>
       <strong className={operation.type === 'income' ? 'amount income' : 'amount'}>
