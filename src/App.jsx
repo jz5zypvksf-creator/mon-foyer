@@ -390,25 +390,24 @@ export default function App() {
   }, [monthOperations]);
 
   const paymentBalances = useMemo(() => {
-    return calculatePaymentBalances(monthOperations);
-  }, [monthOperations]);
+    const endOfSelectedMonth = `${selectedMonth}-31`;
+    const operationsUpToSelectedMonth = data.operations.filter(
+      (operation) => operation.date <= endOfSelectedMonth,
+    );
+    return calculatePaymentBalances(operationsUpToSelectedMonth);
+  }, [data.operations, selectedMonth]);
 
   const editingOperation = useMemo(() => {
     return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
   }, [data.operations, editingId]);
 
-  const getAvailablePaymentBalance = (method) => {
-    const currentBalance = paymentBalances[method] || 0;
-    if (
-      editingOperation
-      && editingOperation.date.startsWith(selectedMonth)
-      && editingOperation.type !== 'income'
-      && (editingOperation.paymentMethod || 'Compte Belfius') === method
-    ) {
-      return currentBalance + Number(editingOperation.amount || 0);
-    }
+  const getAvailablePaymentBalance = (method, operationDate = draft.date) => {
+    const operationsBeforePayment = data.operations.filter((operation) => {
+      if (editingId && operation.id === editingId) return false;
+      return operation.date <= operationDate;
+    });
 
-    return currentBalance;
+    return calculatePaymentBalances(operationsBeforePayment)[method] || 0;
   };
 
   const categoryTotals = useMemo(() => {
@@ -695,7 +694,7 @@ export default function App() {
     };
 
     if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
-      const availableBalance = getAvailablePaymentBalance(operation.paymentMethod);
+      const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
       if (amount > availableBalance) {
         setOperationStatus(`${operation.paymentMethod}: solde disponible ${formatCurrency(availableBalance)}. Paiement impossible.`);
         return;
@@ -1524,7 +1523,7 @@ export default function App() {
                       && availableBalance <= 0;
 
                     return (
-                      <option key={method} disabled={disabled}>
+                      <option key={method} value={method} disabled={disabled}>
                         {method}{draft.type !== 'income' && !canPaymentMethodGoNegative(method) ? ` (${formatCurrency(availableBalance)} dispo)` : ''}
                       </option>
                     );
