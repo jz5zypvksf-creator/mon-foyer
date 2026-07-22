@@ -397,6 +397,11 @@ export default function App() {
     return calculatePaymentBalances(operationsUpToSelectedMonth);
   }, [data.operations, selectedMonth]);
 
+  const availableForPayments = useMemo(
+    () => PAYMENT_METHODS.reduce((sum, method) => sum + (paymentBalances[method] || 0), 0),
+    [paymentBalances],
+  );
+
   const editingOperation = useMemo(() => {
     return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
   }, [data.operations, editingId]);
@@ -1359,8 +1364,8 @@ export default function App() {
           <section className="view">
             <div className="hero-panel">
               <div>
-                <span>Solde du mois</span>
-                <strong>{formatCurrency(totals.balance)}</strong>
+                <span>Disponible pour les paiements</span>
+                <strong>{formatCurrency(availableForPayments)}</strong>
                 <div className="hero-balance-grid">
                   {PAYMENT_METHODS.map((method) => (
                     <div key={method}>
@@ -1377,6 +1382,7 @@ export default function App() {
 
             <div className="stats-grid">
               <StatCard icon={Banknote} label="Revenus" value={formatCurrency(totals.income)} />
+              <StatCard icon={WalletCards} label="Dépenses du mois" value={formatCurrency(totals.fixed + totals.variable)} />
               <StatCard icon={Landmark} label="Frais fixes" value={formatCurrency(totals.fixed)} />
               <StatCard icon={WalletCards} label="Variables" value={formatCurrency(totals.variable)} />
             </div>
