@@ -225,6 +225,72 @@ h2 {
   font-weight: 650;
 }
 
+.scheduled-panel .section-title > strong {
+  color: var(--blue);
+  font-size: 1.15rem;
+}
+
+.scheduled-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--green-soft);
+}
+
+.scheduled-summary span {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.scheduled-summary strong,
+.scheduled-row > strong {
+  color: var(--blue);
+}
+
+.scheduled-summary strong.negative {
+  color: var(--danger);
+}
+
+.scheduled-list {
+  display: grid;
+}
+
+.scheduled-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.scheduled-row:last-child {
+  border-bottom: 0;
+}
+
+.scheduled-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scheduled-row div > strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-row span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .message-notice {
   display: flex;
   align-items: center;

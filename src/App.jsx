@@ -236,6 +236,14 @@ function currentMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function currentDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function makeEmptyOperation() {
   return {
     id: '',
@@ -385,21 +393,41 @@ export default function App() {
     [data.operations, selectedMonth],
   );
 
+  const today = currentDate();
+  const endOfSelectedMonth = `${selectedMonth}-31`;
+  const balanceCutoff = selectedMonth < today.slice(0, 7) ? endOfSelectedMonth : today;
+
+  const effectiveMonthOperations = useMemo(
+    () => monthOperations.filter((operation) => operation.date <= balanceCutoff),
+    [balanceCutoff, monthOperations],
+  );
+
   const totals = useMemo(() => {
-    return calculateTotals(monthOperations);
-  }, [monthOperations]);
+    return calculateTotals(effectiveMonthOperations);
+  }, [effectiveMonthOperations]);
 
   const paymentBalances = useMemo(() => {
-    const endOfSelectedMonth = `${selectedMonth}-31`;
-    const operationsUpToSelectedMonth = data.operations.filter(
-      (operation) => operation.date <= endOfSelectedMonth,
+    const operationsUpToCutoff = data.operations.filter(
+      (operation) => operation.date <= balanceCutoff,
     );
-    return calculatePaymentBalances(operationsUpToSelectedMonth);
-  }, [data.operations, selectedMonth]);
+    return calculatePaymentBalances(operationsUpToCutoff);
+  }, [balanceCutoff, data.operations]);
 
   const availableForPayments = useMemo(
     () => PAYMENT_METHODS.reduce((sum, method) => sum + (paymentBalances[method] || 0), 0),
     [paymentBalances],
+  );
+
+  const scheduledExpenses = useMemo(
+    () => monthOperations
+      .filter((operation) => operation.type !== 'income' && operation.date > balanceCutoff)
+      .sort((left, right) => left.date.localeCompare(right.date)),
+    [balanceCutoff, monthOperations],
+  );
+
+  const scheduledExpenseTotal = useMemo(
+    () => scheduledExpenses.reduce((sum, operation) => sum + Number(operation.amount || 0), 0),
+    [scheduledExpenses],
   );
 
   const editingOperation = useMemo(() => {
@@ -418,11 +446,11 @@ export default function App() {
   const categoryTotals = useMemo(() => {
     return data.categories.map((category) => ({
       ...category,
-      total: monthOperations
+      total: effectiveMonthOperations
         .filter((operation) => operation.category === category.id && operation.type !== 'income')
         .reduce((sum, operation) => sum + Number(operation.amount), 0),
     }));
-  }, [data.categories, monthOperations]);
+  }, [data.categories, effectiveMonthOperations]);
 
   const reviewMap = useMemo(() => {
     const signatures = new Map();
@@ -1386,6 +1414,33 @@ export default function App() {
               <StatCard icon={Landmark} label="Frais fixes" value={formatCurrency(totals.fixed)} />
               <StatCard icon={WalletCards} label="Variables" value={formatCurrency(totals.variable)} />
             </div>
+
+            <section className="panel scheduled-panel">
+              <div className="section-title">
+                <h2>Dépenses programmées</h2>
+                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>
+              </div>
+              <div className="scheduled-summary">
+                <span>Disponible après dépenses programmées</span>
+                <strong className={availableForPayments - scheduledExpenseTotal >= 0 ? 'positive' : 'negative'}>
+                  {formatCurrency(availableForPayments - scheduledExpenseTotal)}
+                </strong>
+              </div>
+              <div className="scheduled-list">
+                {scheduledExpenses.length === 0 && (
+                  <p className="empty-state">Aucune dépense programmée pour ce mois.</p>
+                )}
+                {scheduledExpenses.map((operation) => (
+                  <article className="scheduled-row" key={operation.id}>
+                    <div>
+                      <strong>{operation.label}</strong>
+                      <span>{operation.date} · {operation.paymentMethod || 'Compte Belfius'}</span>
+                    </div>
+                    <strong>{formatCurrency(operation.amount)}</strong>
+                  </article>
+                ))}
+              </div>
+            </section>
 
             <section className="panel">
               <div className="section-title">
