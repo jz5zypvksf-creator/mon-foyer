@@ -293,7 +293,7 @@ function calculateTotals(operations) {
     if (operation.type === 'income') base.income += amount;
     if (operation.type === 'fixed') base.fixed += amount;
     if (operation.type === 'variable') base.variable += amount;
-    if (operation.category === 'nourriture') base.food += amount;
+    if (operation.category === 'nourriture' && operation.person !== 'Nonna') base.food += amount;
   });
   return { ...base, balance: base.income - base.fixed - base.variable };
 }
