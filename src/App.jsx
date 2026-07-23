@@ -42,6 +42,7 @@ const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
+const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna'];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
@@ -522,6 +523,7 @@ export default function App() {
   }, [filteredMonthOperations]);
 
   const foodRatio = Math.min((totals.food / FOOD_BUDGET) * 100, 100);
+  const foodOverBudget = totals.food > FOOD_BUDGET;
 
   const annualReview = useMemo(() => {
     const selectedYear = selectedMonth.slice(0, 4);
@@ -1448,9 +1450,11 @@ export default function App() {
                 <span>{formatCurrency(totals.food)} / {formatCurrency(FOOD_BUDGET)}</span>
               </div>
               <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${foodRatio}%` }} />
+                <div className={foodOverBudget ? 'progress-fill danger' : 'progress-fill'} style={{ width: `${foodRatio}%` }} />
               </div>
-              <p className="hint">{FOOD_BUDGET - totals.food >= 0 ? `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles` : `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'idéal`}</p>
+              <p className={foodOverBudget ? 'hint status-error' : 'hint'}>
+                {foodOverBudget ? `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'idéal` : `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles`}
+              </p>
             </section>
 
             <ExpenseChart categories={categoryTotals} />
@@ -1596,9 +1600,7 @@ export default function App() {
                 <label>
                   Personne
                   <select value={draft.person} onChange={(event) => setDraft({ ...draft, person: event.target.value })}>
-                    <option>Foyer</option>
-                    <option>Alain</option>
-                    <option>Esther</option>
+                    {PEOPLE.map((person) => <option key={person}>{person}</option>)}
                   </select>
                 </label>
                 {draft.type !== 'income' && (
@@ -1657,9 +1659,7 @@ export default function App() {
                   </select>
                   <select value={historyPerson} onChange={(event) => setHistoryPerson(event.target.value)} aria-label="Personne">
                     <option value="all">Toutes les personnes</option>
-                    <option>Foyer</option>
-                    <option>Alain</option>
-                    <option>Esther</option>
+                    {PEOPLE.map((person) => <option key={person}>{person}</option>)}
                   </select>
                 </div>
                 <div className="filter-grid">
@@ -1839,9 +1839,7 @@ export default function App() {
                       value={recurringDraft.person}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, person: event.target.value })}
                     >
-                      <option>Foyer</option>
-                      <option>Alain</option>
-                      <option>Esther</option>
+                      {PEOPLE.map((person) => <option key={person}>{person}</option>)}
                     </select>
                   </label>
                   <label>

@@ -335,6 +335,10 @@ h2 {
   background: var(--green);
 }
 
+.progress-fill.danger {
+  background: var(--danger);
+}
+
 .hint {
   margin-top: 10px;
   line-height: 1.45;
