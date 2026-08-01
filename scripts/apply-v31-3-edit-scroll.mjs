@@ -19,3 +19,4 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v[^']+';/, "const CACHE_NAME = 'm
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.3 appliquée : le crayon ouvre visiblement le formulaire de modification.');
+// trigger deployment
