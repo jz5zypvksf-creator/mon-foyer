@@ -101,3 +101,4 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v[^']+';/, "const CACHE_NAME = 'm
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.4 appliquée : calcul prévisionnel détaillé et migration des récurrences sécurisée.');
+// trigger 2026-08-01
