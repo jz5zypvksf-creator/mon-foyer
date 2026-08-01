@@ -43,6 +43,13 @@ const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
 const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna'];
+const RECURRENCE_OPTIONS = [
+  { value: 'once', label: 'Une seule fois', months: 0 },
+  { value: 'monthly', label: 'Mensuelle', months: 1 },
+  { value: 'quarterly', label: 'Trimestrielle', months: 3 },
+  { value: 'semiannual', label: 'Semestrielle', months: 6 },
+  { value: 'annual', label: 'Annuelle', months: 12 },
+];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
@@ -256,7 +263,7 @@ function makeEmptyOperation() {
     paymentMethod: 'Compte Belfius',
     label: '',
     amount: '',
-    recurringEnabled: false,
+    recurrence: 'once',
     recurringDay: new Date().getDate(),
     recurringId: '',
   };
@@ -267,6 +274,8 @@ function makeEmptyRecurringFixedExpense() {
     label: '',
     amount: '',
     day: 1,
+    frequency: 'monthly',
+    startDate: currentDate(),
     person: 'Foyer',
     category: 'habitation',
   };
@@ -277,6 +286,20 @@ function dateInMonth(month, day) {
   const lastDay = new Date(year, monthNumber, 0).getDate();
   const safeDay = Math.min(Math.max(Number(day) || 1, 1), lastDay);
   return `${month}-${String(safeDay).padStart(2, '0')}`;
+}
+
+function recurrenceLabel(value) {
+  return RECURRENCE_OPTIONS.find((option) => option.value === value)?.label || 'Mensuelle';
+}
+
+function isRecurringDueInMonth(expense, month) {
+  const frequency = expense.frequency || 'monthly';
+  const interval = RECURRENCE_OPTIONS.find((option) => option.value === frequency)?.months || 1;
+  const start = expense.startDate || expense.start_date || `${month}-01`;
+  const [startYear, startMonth] = start.slice(0, 7).split('-').map(Number);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const distance = (year - startYear) * 12 + (monthNumber - startMonth);
+  return distance >= 0 && distance % interval === 0;
 }
 
 function fixedExpenseSignature(operation) {
@@ -296,6 +319,7 @@ function recurringExpenseSignature(expense) {
     Number(expense.day),
     expense.person,
     expense.category,
+    expense.frequency || 'monthly',
   ].join('|');
 }
 
@@ -339,6 +363,8 @@ function normalizeRemoteState(remote) {
       day: Number(expense.day),
       person: expense.person,
       category: expense.category,
+      frequency: expense.frequency || 'monthly',
+      startDate: expense.start_date || currentDate(),
     })),
   };
 }
@@ -468,6 +494,7 @@ export default function App() {
     );
 
     const recurringScheduledExpenses = (data.recurringFixedExpenses || [])
+      .filter((expense) => isRecurringDueInMonth(expense, selectedMonth))
       .map((expense) => ({
         id: `recurring-${expense.id}-${selectedMonth}`,
         date: dateInMonth(selectedMonth, expense.day),
@@ -480,6 +507,7 @@ export default function App() {
         amount: Number(expense.amount) || 0,
         projectedRecurring: true,
         recurringExpenseId: expense.id,
+        frequency: expense.frequency || 'monthly',
       }))
       .filter((operation) => (
         operation.date > balanceCutoff
@@ -676,7 +704,7 @@ export default function App() {
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
-        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date').eq('household_id', householdId).order('created_at', { ascending: true }),
       ]);
 
       if (ignore) return;
@@ -760,7 +788,7 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_fixed_expenses' }, async () => {
         const { data: rows } = await supabase
           .from('recurring_fixed_expenses')
-          .select('id, label, amount, day, person, category')
+          .select('id, label, amount, day, person, category, frequency, start_date')
           .eq('household_id', householdId)
           .order('created_at', { ascending: true });
         if (rows) {
@@ -790,7 +818,7 @@ export default function App() {
   };
 
   const saveRecurringExpenseFromOperation = async (operation) => {
-    if (!operation.recurringEnabled || operation.type === 'income') return null;
+    if (operation.recurrence === 'once' || operation.type === 'income') return null;
 
     const day = Math.min(Math.max(Number(operation.recurringDay) || 1, 1), 31);
     const existing = operation.recurringId
@@ -804,6 +832,8 @@ export default function App() {
       day,
       person: operation.person,
       category: operation.category,
+      frequency: operation.recurrence || 'monthly',
+      startDate: operation.date,
     };
 
     if (USE_REMOTE_BUDGET) {
@@ -814,13 +844,15 @@ export default function App() {
         day: recurringExpense.day,
         person: recurringExpense.person,
         category: recurringExpense.category,
+        frequency: recurringExpense.frequency,
+        start_date: recurringExpense.startDate,
       };
 
       const query = existing
         ? supabase.from('recurring_fixed_expenses').update(payload).eq('id', existing.id).eq('household_id', householdId)
         : supabase.from('recurring_fixed_expenses').insert(payload);
 
-      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category');
+      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date');
       if (error) throw new Error(formatSupabaseRecurringError(error));
       const saved = savedRows?.[0];
       if (saved) {
@@ -840,13 +872,14 @@ export default function App() {
 
     setOperationStatus('');
 
-    if (draft.recurringEnabled && draft.type !== 'income' && !draft.recurringId) {
+    if (draft.recurrence !== 'once' && draft.type !== 'income' && !draft.recurringId) {
       const recurringCandidate = {
         label: draft.label.trim(),
         amount,
         day: Math.min(Math.max(Number(draft.recurringDay) || 1, 1), 31),
         person: draft.person,
         category: draft.category,
+        frequency: draft.recurrence,
       };
       const identicalRecurring = (data.recurringFixedExpenses || []).find(
         (expense) => recurringExpenseSignature(expense) === recurringExpenseSignature(recurringCandidate),
@@ -874,7 +907,7 @@ export default function App() {
       paymentMethod: draft.paymentMethod || 'Compte Belfius',
       id: editingId || crypto.randomUUID(),
     };
-    delete operation.recurringEnabled;
+    delete operation.recurrence;
     delete operation.recurringDay;
     delete operation.recurringId;
 
@@ -933,11 +966,11 @@ export default function App() {
       : [operation, ...data.operations];
 
     let recurringFixedExpenses = data.recurringFixedExpenses || [];
-    if (draft.recurringEnabled && operation.type !== 'income') {
+    if (draft.recurrence !== 'once' && operation.type !== 'income') {
       try {
         const savedRecurring = await saveRecurringExpenseFromOperation({
           ...operation,
-          recurringEnabled: true,
+          recurrence: draft.recurrence,
           recurringDay: draft.recurringDay,
           recurringId: draft.recurringId,
         });
@@ -965,7 +998,7 @@ export default function App() {
     setDraft({
       ...operation,
       amount: String(operation.amount),
-      recurringEnabled: Boolean(recurringExpense),
+      recurrence: recurringExpense?.frequency || 'once',
       recurringDay: recurringExpense?.day || Number(operation.date.slice(8, 10)),
       recurringId: recurringExpense?.id || '',
     });
@@ -1126,6 +1159,8 @@ export default function App() {
       day: Math.min(Math.max(Number(recurringDraft.day) || 1, 1), 31),
       person: recurringDraft.person,
       category: recurringDraft.category,
+      frequency: recurringDraft.frequency || 'monthly',
+      startDate: recurringDraft.startDate || currentDate(),
     };
 
     const identicalRecurring = (data.recurringFixedExpenses || []).find(
@@ -1155,8 +1190,10 @@ export default function App() {
           day: fixedExpense.day,
           person: fixedExpense.person,
           category: fixedExpense.category,
+          frequency: fixedExpense.frequency,
+          start_date: fixedExpense.startDate,
         })
-        .select('id, label, amount, day, person, category')
+        .select('id, label, amount, day, person, category, frequency, start_date')
         .single();
 
       if (error) {
@@ -1297,7 +1334,7 @@ export default function App() {
         .order('label', { ascending: true }),
       supabase
         .from('recurring_fixed_expenses')
-        .select('id, label, amount, day, person, category')
+        .select('id, label, amount, day, person, category, frequency, start_date')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
     ]);
@@ -1638,7 +1675,7 @@ export default function App() {
                         <strong>{operation.label}</strong>
                         <span>
                           {operation.date} · {category?.label || 'Frais fixe'} · {operation.paymentMethod || 'Compte Belfius'}
-                          {operation.projectedRecurring ? ' · Récurrente' : ' · Prévue'}
+                          {operation.projectedRecurring ? ` · ${recurrenceLabel(operation.frequency)}` : ' · Prévue'}
                         </span>
                       </div>
                       <strong>{formatCurrency(operation.amount)}</strong>
@@ -1833,19 +1870,22 @@ export default function App() {
 
               {draft.type !== 'income' && (
                 <section className="recurring-inline-panel">
-                  <label className="recurring-toggle">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(draft.recurringEnabled)}
+                  <label>
+                    Fréquence
+                    <select
+                      value={draft.recurrence}
                       onChange={(event) => setDraft({
                         ...draft,
-                        recurringEnabled: event.target.checked,
+                        recurrence: event.target.value,
                         recurringDay: draft.recurringDay || Number(draft.date.slice(8, 10)),
                       })}
-                    />
-                    <span>Dépense récurrente</span>
+                    >
+                      {RECURRENCE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
                   </label>
-                  {draft.recurringEnabled && (
+                  {draft.recurrence !== 'once' && (
                     <label>
                       Jour habituel du prélèvement
                       <input
@@ -2086,6 +2126,19 @@ export default function App() {
                     </select>
                   </label>
                   <label>
+                    Fréquence
+                    <select
+                      value={recurringDraft.frequency}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, frequency: event.target.value })}
+                    >
+                      {RECURRENCE_OPTIONS.filter((option) => option.value !== 'once').map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="recurring-grid">
+                  <label>
                     Type de frais
                     <select
                       value={recurringDraft.category}
@@ -2115,7 +2168,7 @@ export default function App() {
                     <article className="recurring-row" key={expense.id}>
                       <div>
                         <strong>{expense.label}</strong>
-                        <span>{formatCurrency(expense.amount)} - jour {expense.day} - {expense.person} - {category?.label || 'Frais fixe'}</span>
+                        <span>{formatCurrency(expense.amount)} · jour {expense.day} · {recurrenceLabel(expense.frequency)} · {expense.person} · {category?.label || 'Frais fixe'}</span>
                       </div>
                       <button type="button" onClick={() => deleteRecurringFixedExpense(expense.id)} aria-label="Supprimer">
                         <Trash2 size={16} />
