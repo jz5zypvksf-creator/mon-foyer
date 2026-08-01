@@ -395,6 +395,7 @@ export default function App() {
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [draft, setDraft] = useState(makeEmptyOperation);
   const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
+  const [recurringEditingId, setRecurringEditingId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [newStore, setNewStore] = useState('');
   const [newCategory, setNewCategory] = useState('');
@@ -1142,6 +1143,21 @@ export default function App() {
     }
   };
 
+  const editRecurringFixedExpense = (expense) => {
+    setRecurringEditingId(expense.id);
+    setRecurringDraft({
+      label: expense.label,
+      amount: String(expense.amount ?? ''),
+      day: expense.day || 1,
+      frequency: expense.frequency || 'monthly',
+      startDate: expense.startDate || expense.start_date || currentDate(),
+      person: expense.person || 'Foyer',
+      category: expense.category || 'habitation',
+    });
+    setRecurringStatus('Modification du frais récurrent en cours.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const addRecurringFixedExpense = async (event) => {
     event.preventDefault();
     const amount = parseDecimal(recurringDraft.amount);
@@ -1153,7 +1169,7 @@ export default function App() {
     }
 
     let fixedExpense = {
-      id: crypto.randomUUID(),
+      id: recurringEditingId || crypto.randomUUID(),
       label,
       amount,
       day: Math.min(Math.max(Number(recurringDraft.day) || 1, 1), 31),
@@ -1164,37 +1180,47 @@ export default function App() {
     };
 
     const identicalRecurring = (data.recurringFixedExpenses || []).find(
-      (expense) => recurringExpenseSignature(expense) === recurringExpenseSignature(fixedExpense),
+      (expense) => expense.id !== recurringEditingId
+        && recurringExpenseSignature(expense) === recurringExpenseSignature(fixedExpense),
     );
 
     if (identicalRecurring) {
       const category = data.categories.find((item) => item.id === identicalRecurring.category);
       setRecurringStatus(
-        'Attention : cette récurrence existe déjà — '
-        + identicalRecurring.label + ', '
-        + formatCurrency(identicalRecurring.amount) + ', jour '
-        + identicalRecurring.day + ', '
-        + (category?.label || 'Frais fixe') + ', '
-        + identicalRecurring.person + '.',
+        'Attention : cette récurrence existe déjà — ' + identicalRecurring.label + ', '
+        + formatCurrency(identicalRecurring.amount) + ', jour ' + identicalRecurring.day + ', '
+        + (category?.label || 'Frais fixe') + ', ' + identicalRecurring.person + '.',
       );
       return;
     }
 
     if (USE_REMOTE_BUDGET) {
-      const { data: insertedExpense, error } = await supabase
-        .from('recurring_fixed_expenses')
-        .insert({
-          household_id: householdId,
-          label: fixedExpense.label,
-          amount: fixedExpense.amount,
-          day: fixedExpense.day,
-          person: fixedExpense.person,
-          category: fixedExpense.category,
-          frequency: fixedExpense.frequency,
-          start_date: fixedExpense.startDate,
-        })
-        .select('id, label, amount, day, person, category, frequency, start_date')
-        .single();
+      const payload = {
+        household_id: householdId,
+        label: fixedExpense.label,
+        amount: fixedExpense.amount,
+        day: fixedExpense.day,
+        person: fixedExpense.person,
+        category: fixedExpense.category,
+        frequency: fixedExpense.frequency,
+        start_date: fixedExpense.startDate,
+      };
+
+      const query = recurringEditingId
+        ? supabase
+          .from('recurring_fixed_expenses')
+          .update(payload)
+          .eq('id', recurringEditingId)
+          .eq('household_id', householdId)
+          .select('id, label, amount, day, person, category, frequency, start_date')
+          .single()
+        : supabase
+          .from('recurring_fixed_expenses')
+          .insert(payload)
+          .select('id, label, amount, day, person, category, frequency, start_date')
+          .single();
+
+      const { data: savedExpense, error } = await query;
 
       if (error) {
         setRecurringStatus(formatSupabaseRecurringError(error));
@@ -1202,18 +1228,29 @@ export default function App() {
       }
 
       fixedExpense = {
-        ...insertedExpense,
-        amount: Number(insertedExpense.amount),
-        day: Number(insertedExpense.day),
+        id: savedExpense.id,
+        label: savedExpense.label,
+        amount: Number(savedExpense.amount),
+        day: Number(savedExpense.day),
+        person: savedExpense.person,
+        category: savedExpense.category,
+        frequency: savedExpense.frequency || 'monthly',
+        startDate: savedExpense.start_date || currentDate(),
       };
     }
 
+    const currentExpenses = data.recurringFixedExpenses || [];
+    const nextExpenses = recurringEditingId
+      ? currentExpenses.map((expense) => (expense.id === recurringEditingId ? fixedExpense : expense))
+      : [...currentExpenses, fixedExpense];
+
     saveData({
       ...data,
-      recurringFixedExpenses: [...(data.recurringFixedExpenses || []), fixedExpense],
+      recurringFixedExpenses: nextExpenses,
     });
     setRecurringDraft(makeEmptyRecurringFixedExpense());
-    setRecurringStatus('Frais fixe récurrent ajouté.');
+    setRecurringEditingId(null);
+    setRecurringStatus(recurringEditingId ? 'Frais fixe récurrent modifié.' : 'Frais fixe récurrent ajouté.');
   };
 
   const deleteRecurringFixedExpense = async (id) => {
@@ -2170,9 +2207,14 @@ export default function App() {
                         <strong>{expense.label}</strong>
                         <span>{formatCurrency(expense.amount)} · jour {expense.day} · {recurrenceLabel(expense.frequency)} · {expense.person} · {category?.label || 'Frais fixe'}</span>
                       </div>
-                      <button type="button" onClick={() => deleteRecurringFixedExpense(expense.id)} aria-label="Supprimer">
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="row-actions">
+                        <button type="button" onClick={() => editRecurringFixedExpense(expense)} aria-label="Modifier" title="Modifier">
+                          <Edit3 size={16} />
+                        </button>
+                        <button type="button" onClick={() => deleteRecurringFixedExpense(expense.id)} aria-label="Supprimer" title="Supprimer">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </article>
                   );
                 })}
