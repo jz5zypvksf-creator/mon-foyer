@@ -2252,7 +2252,8 @@ function GoalCard({ goal, onUpdate }) {
     saved: String(goal.saved ?? 0),
     target: String(goal.target ?? 0),
   });
-  const ratio = goal.target ? Math.min((goal.saved / goal.target) * 100, 100) : 0;
+  const actualRatio = goal.target ? (goal.saved / goal.target) * 100 : 0;
+  const progressRatio = Math.min(Math.max(actualRatio, 0), 100);
 
   useEffect(() => {
     setDraft({
@@ -2276,10 +2277,10 @@ function GoalCard({ goal, onUpdate }) {
     <article className="goal-card">
       <div className="goal-head">
         <strong>{goal.label}</strong>
-        <span>{Math.round(ratio)}%</span>
+        <span>{Math.round(actualRatio)}%</span>
       </div>
       <div className="progress-track slim">
-        <div className="progress-fill green" style={{ width: `${ratio}%` }} />
+        <div className="progress-fill green" style={{ width: `${progressRatio}%` }} />
       </div>
       <div className="goal-inputs">
         <label>
