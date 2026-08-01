@@ -286,9 +286,14 @@ function fixedExpenseSignature(operation) {
   ].join('|');
 }
 
+function isBelfiusAdjustment(operation) {
+  return operation.label?.startsWith('Ajustement Belfius');
+}
+
 function calculateTotals(operations) {
   const base = { income: 0, fixed: 0, variable: 0, food: 0 };
   operations.forEach((operation) => {
+    if (isBelfiusAdjustment(operation)) return;
     const amount = Number(operation.amount);
     if (operation.type === 'income') base.income += amount;
     if (operation.type === 'fixed') base.fixed += amount;
@@ -407,6 +412,26 @@ export default function App() {
     return calculateTotals(effectiveMonthOperations);
   }, [effectiveMonthOperations]);
 
+  const fullMonthTotals = useMemo(() => {
+    return calculateTotals(monthOperations);
+  }, [monthOperations]);
+
+  const previousMonthBalances = useMemo(() => {
+    const firstDayOfSelectedMonth = `${selectedMonth}-01`;
+    const previousOperations = data.operations.filter(
+      (operation) => operation.date < firstDayOfSelectedMonth,
+    );
+    return calculatePaymentBalances(previousOperations);
+  }, [data.operations, selectedMonth]);
+
+  const previousMonthReport = useMemo(() => {
+    const total = PAYMENT_METHODS.reduce(
+      (sum, method) => sum + (previousMonthBalances[method] || 0),
+      0,
+    );
+    return Math.max(total, 0);
+  }, [previousMonthBalances]);
+
   const paymentBalances = useMemo(() => {
     const operationsUpToCutoff = data.operations.filter(
       (operation) => operation.date <= balanceCutoff,
@@ -448,7 +473,7 @@ export default function App() {
     return data.categories.map((category) => ({
       ...category,
       total: effectiveMonthOperations
-        .filter((operation) => operation.category === category.id && operation.type !== 'income')
+        .filter((operation) => operation.category === category.id && operation.type !== 'income' && !isBelfiusAdjustment(operation))
         .reduce((sum, operation) => sum + Number(operation.amount), 0),
     }));
   }, [data.categories, effectiveMonthOperations]);
@@ -549,7 +574,7 @@ export default function App() {
     const categories = data.categories.map((category) => ({
       ...category,
       total: annualOperations
-        .filter((operation) => operation.category === category.id && operation.type !== 'income')
+        .filter((operation) => operation.category === category.id && operation.type !== 'income' && !isBelfiusAdjustment(operation))
         .reduce((sum, operation) => sum + Number(operation.amount), 0),
     }));
 
@@ -1411,10 +1436,12 @@ export default function App() {
             </div>
 
             <div className="stats-grid">
-              <StatCard icon={Banknote} label="Revenus" value={formatCurrency(totals.income)} />
-              <StatCard icon={WalletCards} label="Dépenses du mois" value={formatCurrency(totals.fixed + totals.variable)} />
-              <StatCard icon={Landmark} label="Frais fixes" value={formatCurrency(totals.fixed)} />
-              <StatCard icon={WalletCards} label="Variables" value={formatCurrency(totals.variable)} />
+              <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
+              <StatCard icon={Banknote} label="Revenus encaissés" value={formatCurrency(totals.income)} />
+              <StatCard icon={TrendingUp} label="Revenus prévus du mois" value={formatCurrency(fullMonthTotals.income)} />
+              <StatCard icon={WalletCards} label="Dépenses exécutées" value={formatCurrency(totals.fixed + totals.variable)} />
+              <StatCard icon={Landmark} label="Frais fixes exécutés" value={formatCurrency(totals.fixed)} />
+              <StatCard icon={WalletCards} label="Variables exécutées" value={formatCurrency(totals.variable)} />
             </div>
 
             <section className="panel scheduled-panel">
