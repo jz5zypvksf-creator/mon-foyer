@@ -61,9 +61,9 @@ const replacement = `  const editRecurringFixedExpense = (expense) => {
     if (identicalRecurring) {
       const category = data.categories.find((item) => item.id === identicalRecurring.category);
       setRecurringStatus(
-        `Attention : cette récurrence existe déjà — ${identicalRecurring.label}, `
-        + `${formatCurrency(identicalRecurring.amount)}, jour ${identicalRecurring.day}, `
-        + `${category?.label || 'Frais fixe'}, ${identicalRecurring.person}.`,
+        'Attention : cette récurrence existe déjà — ' + identicalRecurring.label + ', '
+        + formatCurrency(identicalRecurring.amount) + ', jour ' + identicalRecurring.day + ', '
+        + (category?.label || 'Frais fixe') + ', ' + identicalRecurring.person + '.',
       );
       return;
     }
@@ -160,4 +160,4 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v[^']+';/, "const CACHE_NAME = 'm
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.2 appliquée : modification des frais récurrents activée.');
-// trigger 2026-08-01
+// trigger 2
