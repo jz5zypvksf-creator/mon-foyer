@@ -529,6 +529,17 @@ export default function App() {
     [scheduledExpenses],
   );
 
+  const scheduledFoodTotal = useMemo(
+    () => scheduledExpenses
+      .filter((operation) => operation.category === 'nourriture' && operation.person !== 'Nonna')
+      .reduce((sum, operation) => sum + Number(operation.amount || 0), 0),
+    [scheduledExpenses],
+  );
+
+  const remainingFoodBudget = Math.max(FOOD_BUDGET - totals.food - scheduledFoodTotal, 0);
+  const totalRemainingToCover = scheduledExpenseTotal + remainingFoodBudget;
+  const availableAfterPlannedExpenses = availableForPayments - totalRemainingToCover;
+
   const editingOperation = useMemo(() => {
     return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
   }, [data.operations, editingId]);
@@ -1487,6 +1498,8 @@ export default function App() {
       Number(expense.day),
       expense.person,
       expense.category,
+      expense.frequency || 'monthly',
+      expense.start_date || expense.startDate || currentDate(),
     ].join('|');
 
     const existingRecurringExpenses = new Set(
@@ -1501,6 +1514,8 @@ export default function App() {
         day: Math.min(Math.max(Number(expense.day) || 1, 1), 31),
         person: expense.person,
         category: expense.category,
+        frequency: expense.frequency || 'monthly',
+        start_date: expense.start_date || expense.startDate || currentDate(),
       }));
 
     if (missingOperations.length > 0) {
@@ -1699,9 +1714,21 @@ export default function App() {
                 <strong>{formatCurrency(scheduledExpenseTotal)}</strong>
               </div>
               <div className="scheduled-summary">
-                <span>Disponible après dépenses programmées</span>
-                <strong className={availableForPayments - scheduledExpenseTotal >= 0 ? 'positive' : 'negative'}>
-                  {formatCurrency(availableForPayments - scheduledExpenseTotal)}
+                <span>Dépenses programmées restantes</span>
+                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>
+              </div>
+              <div className="scheduled-summary">
+                <span>Budget nourriture restant à prévoir</span>
+                <strong>{formatCurrency(remainingFoodBudget)}</strong>
+              </div>
+              <div className="scheduled-summary">
+                <span>Total restant à couvrir</span>
+                <strong>{formatCurrency(totalRemainingToCover)}</strong>
+              </div>
+              <div className="scheduled-summary">
+                <span>Disponible prévisionnel après toutes les dépenses</span>
+                <strong className={availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}>
+                  {formatCurrency(availableAfterPlannedExpenses)}
                 </strong>
               </div>
               <div className="scheduled-list">
