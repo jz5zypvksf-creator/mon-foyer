@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mon-foyer-v26';
+const CACHE_NAME = 'mon-foyer-v27';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {

@@ -444,12 +444,42 @@ export default function App() {
     [paymentBalances],
   );
 
-  const scheduledExpenses = useMemo(
-    () => monthOperations
-      .filter((operation) => operation.type !== 'income' && operation.date > balanceCutoff)
-      .sort((left, right) => left.date.localeCompare(right.date)),
-    [balanceCutoff, monthOperations],
-  );
+  const scheduledExpenses = useMemo(() => {
+    const explicitScheduledExpenses = monthOperations
+      .filter((operation) => operation.type !== 'income' && operation.date > balanceCutoff);
+
+    const existingFixedSignatures = new Set(
+      monthOperations
+        .filter((operation) => operation.type === 'fixed')
+        .map(fixedExpenseSignature),
+    );
+
+    const recurringScheduledExpenses = (data.recurringFixedExpenses || [])
+      .map((expense) => ({
+        id: `recurring-${expense.id}-${selectedMonth}`,
+        date: dateInMonth(selectedMonth, expense.day),
+        person: expense.person,
+        type: 'fixed',
+        category: expense.category,
+        store: '',
+        paymentMethod: 'Compte Belfius',
+        label: expense.label,
+        amount: Number(expense.amount) || 0,
+        projectedRecurring: true,
+      }))
+      .filter((operation) => (
+        operation.date > balanceCutoff
+        && !existingFixedSignatures.has(fixedExpenseSignature(operation))
+      ));
+
+    return [...explicitScheduledExpenses, ...recurringScheduledExpenses]
+      .sort((left, right) => left.date.localeCompare(right.date));
+  }, [
+    balanceCutoff,
+    data.recurringFixedExpenses,
+    monthOperations,
+    selectedMonth,
+  ]);
 
   const scheduledExpenseTotal = useMemo(
     () => scheduledExpenses.reduce((sum, operation) => sum + Number(operation.amount || 0), 0),
@@ -1463,7 +1493,10 @@ export default function App() {
                   <article className="scheduled-row" key={operation.id}>
                     <div>
                       <strong>{operation.label}</strong>
-                      <span>{operation.date} · {operation.paymentMethod || 'Compte Belfius'}</span>
+                      <span>
+                        {operation.date} · {operation.paymentMethod || 'Compte Belfius'}
+                        {operation.projectedRecurring ? ' · Récurrente' : ''}
+                      </span>
                     </div>
                     <strong>{formatCurrency(operation.amount)}</strong>
                   </article>
