@@ -1155,7 +1155,11 @@ export default function App() {
       category: expense.category || 'habitation',
     });
     setRecurringStatus('Modification du frais récurrent en cours.');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.setTimeout(() => {
+      const form = document.querySelector('.recurring-form');
+      form?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      form?.querySelector('input')?.focus({ preventScroll: true });
+    }, 80);
   };
 
   const addRecurringFixedExpense = async (event) => {
