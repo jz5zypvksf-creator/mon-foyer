@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'scripts/apply-v30.mjs'
+      - '.github/workflows/apply-v30.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,17 +18,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: node scripts/apply-v30.mjs
-      - run: npm install
-      - run: npm run build
-      - name: Commit generated changes
+      - name: Apply patch
+        id: patch
+        continue-on-error: true
+        run: node scripts/apply-v30.mjs > v30-diagnostic.log 2>&1
+      - name: Install and build
+        if: steps.patch.outcome == 'success'
+        run: |
+          npm install
+          npm run build
+      - name: Commit generated changes or diagnostic
+        if: always()
         run: |
           git config user.name "ChatGPT Codex Connector"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/App.jsx src/styles.css public/sw.js
-          if git diff --cached --quiet; then
-            echo "No generated changes"
+          if [ "${{ steps.patch.outcome }}" = "success" ]; then
+            git add src/App.jsx src/styles.css public/sw.js
+            MESSAGE="V30 - Prévisions et actions récurrentes améliorées"
           else
-            git commit -m "V30 - Prévisions et actions récurrentes améliorées"
+            git add v30-diagnostic.log
+            MESSAGE="V30 - Diagnostic du correctif"
+          fi
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "$MESSAGE"
             git push
           fi
+      - name: Fail if patch failed
+        if: steps.patch.outcome != 'success'
+        run: exit 1
