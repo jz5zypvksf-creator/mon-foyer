@@ -289,6 +289,16 @@ function fixedExpenseSignature(operation) {
   ].join('|');
 }
 
+function recurringExpenseSignature(expense) {
+  return [
+    expense.label.trim().toLowerCase(),
+    Number(expense.amount).toFixed(2),
+    Number(expense.day),
+    expense.person,
+    expense.category,
+  ].join('|');
+}
+
 function isBelfiusAdjustment(operation) {
   return operation.label?.startsWith('Ajustement Belfius');
 }
@@ -469,6 +479,7 @@ export default function App() {
         label: expense.label,
         amount: Number(expense.amount) || 0,
         projectedRecurring: true,
+        recurringExpenseId: expense.id,
       }))
       .filter((operation) => (
         operation.date > balanceCutoff
@@ -829,6 +840,32 @@ export default function App() {
 
     setOperationStatus('');
 
+    if (draft.recurringEnabled && draft.type !== 'income' && !draft.recurringId) {
+      const recurringCandidate = {
+        label: draft.label.trim(),
+        amount,
+        day: Math.min(Math.max(Number(draft.recurringDay) || 1, 1), 31),
+        person: draft.person,
+        category: draft.category,
+      };
+      const identicalRecurring = (data.recurringFixedExpenses || []).find(
+        (expense) => recurringExpenseSignature(expense) === recurringExpenseSignature(recurringCandidate),
+      );
+
+      if (identicalRecurring) {
+        const category = data.categories.find((item) => item.id === identicalRecurring.category);
+        setOperationStatus(
+          'Attention : cette dépense récurrente existe déjà — '
+          + identicalRecurring.label + ', '
+          + formatCurrency(identicalRecurring.amount) + ', jour '
+          + identicalRecurring.day + ', '
+          + (category?.label || 'Frais fixe') + ', '
+          + identicalRecurring.person + '.',
+        );
+        return;
+      }
+    }
+
     const operation = {
       ...draft,
       amount,
@@ -1090,6 +1127,23 @@ export default function App() {
       person: recurringDraft.person,
       category: recurringDraft.category,
     };
+
+    const identicalRecurring = (data.recurringFixedExpenses || []).find(
+      (expense) => recurringExpenseSignature(expense) === recurringExpenseSignature(fixedExpense),
+    );
+
+    if (identicalRecurring) {
+      const category = data.categories.find((item) => item.id === identicalRecurring.category);
+      setRecurringStatus(
+        'Attention : cette récurrence existe déjà — '
+        + identicalRecurring.label + ', '
+        + formatCurrency(identicalRecurring.amount) + ', jour '
+        + identicalRecurring.day + ', '
+        + (category?.label || 'Frais fixe') + ', '
+        + identicalRecurring.person + '.',
+      );
+      return;
+    }
 
     if (USE_REMOTE_BUDGET) {
       const { data: insertedExpense, error } = await supabase
@@ -1576,18 +1630,31 @@ export default function App() {
                 {scheduledExpenses.length === 0 && (
                   <p className="empty-state">Aucune dépense programmée pour ce mois.</p>
                 )}
-                {scheduledExpenses.map((operation) => (
-                  <article className="scheduled-row" key={operation.id}>
-                    <div>
-                      <strong>{operation.label}</strong>
-                      <span>
-                        {operation.date} · {operation.paymentMethod || 'Compte Belfius'}
-                        {operation.projectedRecurring ? ' · Récurrente' : ''}
-                      </span>
-                    </div>
-                    <strong>{formatCurrency(operation.amount)}</strong>
-                  </article>
-                ))}
+                {scheduledExpenses.map((operation) => {
+                  const category = data.categories.find((item) => item.id === operation.category);
+                  return (
+                    <article className="scheduled-row" key={operation.id}>
+                      <div>
+                        <strong>{operation.label}</strong>
+                        <span>
+                          {operation.date} · {category?.label || 'Frais fixe'} · {operation.paymentMethod || 'Compte Belfius'}
+                          {operation.projectedRecurring ? ' · Récurrente' : ' · Prévue'}
+                        </span>
+                      </div>
+                      <strong>{formatCurrency(operation.amount)}</strong>
+                      {operation.projectedRecurring && operation.recurringExpenseId && (
+                        <button
+                          type="button"
+                          onClick={() => deleteRecurringFixedExpense(operation.recurringExpenseId)}
+                          aria-label={'Supprimer la récurrence ' + operation.label}
+                          title="Supprimer cette récurrence"
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             </section>
 
