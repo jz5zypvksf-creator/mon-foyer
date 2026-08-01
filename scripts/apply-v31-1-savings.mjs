@@ -21,3 +21,4 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v\d+(?:-\d+)?';/, "const CACHE_NA
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.1 appliquée : pourcentage réel affiché, barre plafonnée à 100 %.');
+// Déclenchement du workflow V31.1
