@@ -1212,3 +1212,26 @@ h2 {
     grid-template-columns: 86px 1fr 46px;
   }
 }
+
+
+.recurring-inline-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d8e3de;
+  border-radius: 16px;
+  background: #f4f8f6;
+}
+
+.recurring-toggle {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 10px !important;
+}
+
+.recurring-toggle input {
+  width: 20px !important;
+  height: 20px;
+  margin: 0;
+}

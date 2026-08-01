@@ -256,6 +256,9 @@ function makeEmptyOperation() {
     paymentMethod: 'Compte Belfius',
     label: '',
     amount: '',
+    recurringEnabled: false,
+    recurringDay: new Date().getDate(),
+    recurringId: '',
   };
 }
 
@@ -767,6 +770,58 @@ export default function App() {
     };
   }, [session]);
 
+  const findMatchingRecurringExpense = (operation) => {
+    return (data.recurringFixedExpenses || []).find((expense) => (
+      expense.label.trim().toLowerCase() === operation.label.trim().toLowerCase()
+      && expense.person === operation.person
+      && expense.category === operation.category
+    ));
+  };
+
+  const saveRecurringExpenseFromOperation = async (operation) => {
+    if (!operation.recurringEnabled || operation.type === 'income') return null;
+
+    const day = Math.min(Math.max(Number(operation.recurringDay) || 1, 1), 31);
+    const existing = operation.recurringId
+      ? (data.recurringFixedExpenses || []).find((expense) => expense.id === operation.recurringId)
+      : findMatchingRecurringExpense(operation);
+
+    const recurringExpense = {
+      id: existing?.id || crypto.randomUUID(),
+      label: operation.label.trim(),
+      amount: Number(operation.amount),
+      day,
+      person: operation.person,
+      category: operation.category,
+    };
+
+    if (USE_REMOTE_BUDGET) {
+      const payload = {
+        household_id: householdId,
+        label: recurringExpense.label,
+        amount: recurringExpense.amount,
+        day: recurringExpense.day,
+        person: recurringExpense.person,
+        category: recurringExpense.category,
+      };
+
+      const query = existing
+        ? supabase.from('recurring_fixed_expenses').update(payload).eq('id', existing.id).eq('household_id', householdId)
+        : supabase.from('recurring_fixed_expenses').insert(payload);
+
+      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category');
+      if (error) throw new Error(formatSupabaseRecurringError(error));
+      const saved = savedRows?.[0];
+      if (saved) {
+        recurringExpense.id = saved.id;
+        recurringExpense.amount = Number(saved.amount);
+        recurringExpense.day = Number(saved.day);
+      }
+    }
+
+    return recurringExpense;
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     const amount = parseDecimal(draft.amount);
@@ -782,6 +837,9 @@ export default function App() {
       paymentMethod: draft.paymentMethod || 'Compte Belfius',
       id: editingId || crypto.randomUUID(),
     };
+    delete operation.recurringEnabled;
+    delete operation.recurringDay;
+    delete operation.recurringId;
 
     if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
       const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
@@ -837,14 +895,43 @@ export default function App() {
       ? data.operations.map((item) => (item.id === editingId ? operation : item))
       : [operation, ...data.operations];
 
-    saveData({ ...data, operations });
+    let recurringFixedExpenses = data.recurringFixedExpenses || [];
+    if (draft.recurringEnabled && operation.type !== 'income') {
+      try {
+        const savedRecurring = await saveRecurringExpenseFromOperation({
+          ...operation,
+          recurringEnabled: true,
+          recurringDay: draft.recurringDay,
+          recurringId: draft.recurringId,
+        });
+        if (savedRecurring) {
+          const exists = recurringFixedExpenses.some((expense) => expense.id === savedRecurring.id);
+          recurringFixedExpenses = exists
+            ? recurringFixedExpenses.map((expense) => (expense.id === savedRecurring.id ? savedRecurring : expense))
+            : [...recurringFixedExpenses, savedRecurring];
+          setOperationStatus(editingId ? 'Opération et récurrence mises à jour.' : 'Opération et récurrence enregistrées.');
+        }
+      } catch (error) {
+        setOperationStatus(error.message || 'La récurrence n’a pas pu être enregistrée.');
+        return;
+      }
+    }
+
+    saveData({ ...data, operations, recurringFixedExpenses });
     setDraft(makeEmptyOperation());
     setEditingId(null);
     if (!USE_REMOTE_BUDGET) setActiveView('history');
   };
 
   const editOperation = (operation) => {
-    setDraft({ ...operation, amount: String(operation.amount) });
+    const recurringExpense = findMatchingRecurringExpense(operation);
+    setDraft({
+      ...operation,
+      amount: String(operation.amount),
+      recurringEnabled: Boolean(recurringExpense),
+      recurringDay: recurringExpense?.day || Number(operation.date.slice(8, 10)),
+      recurringId: recurringExpense?.id || '',
+    });
     setEditingId(operation.id);
     setActiveView('add');
   };
@@ -1676,6 +1763,35 @@ export default function App() {
                   </label>
                 )}
               </div>
+
+              {draft.type !== 'income' && (
+                <section className="recurring-inline-panel">
+                  <label className="recurring-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.recurringEnabled)}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        recurringEnabled: event.target.checked,
+                        recurringDay: draft.recurringDay || Number(draft.date.slice(8, 10)),
+                      })}
+                    />
+                    <span>Dépense récurrente</span>
+                  </label>
+                  {draft.recurringEnabled && (
+                    <label>
+                      Jour habituel du prélèvement
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={draft.recurringDay}
+                        onChange={(event) => setDraft({ ...draft, recurringDay: event.target.value })}
+                      />
+                    </label>
+                  )}
+                </section>
+              )}
 
               {draft.type === 'variable' && (
                 <label>
