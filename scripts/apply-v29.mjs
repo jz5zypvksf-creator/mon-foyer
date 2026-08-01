@@ -6,7 +6,7 @@ let app = fs.readFileSync(appPath, 'utf8');
 
 function replaceOnce(search, replacement, label) {
   if (app.includes(replacement)) return;
-  if (!app.includes(search)) throw new Error(`V29: bloc introuvable — ${label}`);
+  if (!app.includes(search)) throw new Error('V29: bloc introuvable — ' + label);
   app = app.replace(search, replacement);
 }
 
@@ -75,9 +75,12 @@ replaceOnce(
       if (identicalRecurring) {
         const category = data.categories.find((item) => item.id === identicalRecurring.category);
         setOperationStatus(
-          `Attention : cette dépense récurrente existe déjà — ${identicalRecurring.label}, `
-          + `${formatCurrency(identicalRecurring.amount)}, jour ${identicalRecurring.day}, `
-          + `${category?.label || 'Frais fixe'}, ${identicalRecurring.person}.`,
+          'Attention : cette dépense récurrente existe déjà — '
+          + identicalRecurring.label + ', '
+          + formatCurrency(identicalRecurring.amount) + ', jour '
+          + identicalRecurring.day + ', '
+          + (category?.label || 'Frais fixe') + ', '
+          + identicalRecurring.person + '.',
         );
         return;
       }
@@ -116,9 +119,12 @@ replaceOnce(
     if (identicalRecurring) {
       const category = data.categories.find((item) => item.id === identicalRecurring.category);
       setRecurringStatus(
-        `Attention : cette récurrence existe déjà — ${identicalRecurring.label}, `
-        + `${formatCurrency(identicalRecurring.amount)}, jour ${identicalRecurring.day}, `
-        + `${category?.label || 'Frais fixe'}, ${identicalRecurring.person}.`,
+        'Attention : cette récurrence existe déjà — '
+        + identicalRecurring.label + ', '
+        + formatCurrency(identicalRecurring.amount) + ', jour '
+        + identicalRecurring.day + ', '
+        + (category?.label || 'Frais fixe') + ', '
+        + identicalRecurring.person + '.',
       );
       return;
     }
@@ -158,7 +164,7 @@ replaceOnce(
                         <button
                           type="button"
                           onClick={() => deleteRecurringFixedExpense(operation.recurringExpenseId)}
-                          aria-label={`Supprimer la récurrence ${operation.label}`}
+                          aria-label={'Supprimer la récurrence ' + operation.label}
                           title="Supprimer cette récurrence"
                         >
                           <Trash2 size={17} />
