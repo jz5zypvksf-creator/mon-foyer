@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'scripts/apply-v31-5-readability.mjs'
+      - '.github/workflows/apply-v31-5.yml'
   workflow_dispatch:
 
 permissions:
