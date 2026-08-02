@@ -1713,24 +1713,52 @@ export default function App() {
                 <h2>Dépenses programmées</h2>
                 <strong>{formatCurrency(scheduledExpenseTotal)}</strong>
               </div>
-              <div className="scheduled-summary">
-                <span>Dépenses programmées restantes</span>
-                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>
+              <p className="scheduled-caption">Montants restant à prévoir jusqu’à la fin du mois</p>
+
+              <div className="forecast-card food-forecast-card">
+                <div className="forecast-icon"><ShoppingBasket size={22} /></div>
+                <div className="forecast-copy">
+                  <strong>Budget nourriture restant à prévoir</strong>
+                  <span>Budget mensuel : {formatCurrency(FOOD_BUDGET)}</span>
+                  <span>Déjà utilisé ou programmé : {formatCurrency(Math.min(totals.food + scheduledFoodTotal, FOOD_BUDGET))}</span>
+                </div>
+                <strong className="forecast-amount">{formatCurrency(remainingFoodBudget)}</strong>
               </div>
-              <div className="scheduled-summary">
-                <span>Budget nourriture restant à prévoir</span>
-                <strong>{formatCurrency(remainingFoodBudget)}</strong>
+
+              <div className="forecast-card total-forecast-card">
+                <div className="forecast-icon"><ListChecks size={22} /></div>
+                <div className="forecast-copy">
+                  <strong>Total restant à couvrir</strong>
+                  <span>Dépenses programmées : {formatCurrency(scheduledExpenseTotal)}</span>
+                  <span>Budget nourriture restant : {formatCurrency(remainingFoodBudget)}</span>
+                </div>
+                <strong className="forecast-amount">{formatCurrency(totalRemainingToCover)}</strong>
               </div>
-              <div className="scheduled-summary">
-                <span>Total restant à couvrir</span>
-                <strong>{formatCurrency(totalRemainingToCover)}</strong>
-              </div>
-              <div className="scheduled-summary">
-                <span>Disponible prévisionnel après toutes les dépenses</span>
-                <strong className={availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}>
+
+              <div className={`forecast-card balance-forecast-card ${availableAfterPlannedExpenses >= 0 ? 'is-positive' : 'is-negative'}`}>
+                <div className="forecast-icon"><WalletCards size={22} /></div>
+                <div className="forecast-copy">
+                  <strong>Solde prévisionnel fin de mois</strong>
+                  <span>Disponible actuel : {formatCurrency(availableForPayments)}</span>
+                  <span>{availableAfterPlannedExpenses >= 0 ? 'Excédent estimé' : 'Déficit estimé'}</span>
+                </div>
+                <strong className={`forecast-amount ${availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}`}>
                   {formatCurrency(availableAfterPlannedExpenses)}
                 </strong>
               </div>
+
+              <details className="forecast-details">
+                <summary>Détail du calcul</summary>
+                <div><span>Disponible actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>
+                <div><span>− Dépenses programmées</span><strong>− {formatCurrency(scheduledExpenseTotal)}</strong></div>
+                <div><span>− Budget nourriture restant</span><strong>− {formatCurrency(remainingFoodBudget)}</strong></div>
+                <div className="forecast-details-total">
+                  <span>= Solde prévisionnel fin de mois</span>
+                  <strong className={availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}>{formatCurrency(availableAfterPlannedExpenses)}</strong>
+                </div>
+              </details>
+
+              <p className="forecast-help">Les calculs tiennent uniquement compte des dépenses et budgets restant à prévoir jusqu’à la fin du mois.</p>
               <div className="scheduled-list">
                 {scheduledExpenses.length === 0 && (
                   <p className="empty-state">Aucune dépense programmée pour ce mois.</p>
