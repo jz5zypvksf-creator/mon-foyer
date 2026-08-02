@@ -539,6 +539,13 @@ export default function App() {
   const remainingFoodBudget = Math.max(FOOD_BUDGET - totals.food - scheduledFoodTotal, 0);
   const totalRemainingToCover = scheduledExpenseTotal + remainingFoodBudget;
   const availableAfterPlannedExpenses = availableForPayments - totalRemainingToCover;
+  const forecastStatus = availableAfterPlannedExpenses < 0
+    ? { key: 'danger', label: 'Déficit prévisionnel' }
+    : availableAfterPlannedExpenses < 50
+      ? { key: 'warning', label: 'Marge de sécurité faible' }
+      : availableAfterPlannedExpenses >= 500
+        ? { key: 'excellent', label: 'Excédent confortable' }
+        : { key: 'comfortable', label: 'Situation confortable' };
 
   const editingOperation = useMemo(() => {
     return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
@@ -1735,14 +1742,14 @@ export default function App() {
                 <strong className="forecast-amount">{formatCurrency(totalRemainingToCover)}</strong>
               </div>
 
-              <div className={`forecast-card balance-forecast-card ${availableAfterPlannedExpenses >= 0 ? 'is-positive' : 'is-negative'}`}>
+              <div className={`forecast-card balance-forecast-card status-${forecastStatus.key}`}>
                 <div className="forecast-icon"><WalletCards size={22} /></div>
                 <div className="forecast-copy">
                   <strong>Solde prévisionnel fin de mois</strong>
                   <span>Disponible actuel : {formatCurrency(availableForPayments)}</span>
-                  <span>{availableAfterPlannedExpenses >= 0 ? 'Excédent estimé' : 'Déficit estimé'}</span>
+                  <span className="forecast-status-label">{forecastStatus.label}</span>
                 </div>
-                <strong className={`forecast-amount ${availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}`}>
+                <strong className={`forecast-amount status-text-${forecastStatus.key}`}>
                   {formatCurrency(availableAfterPlannedExpenses)}
                 </strong>
               </div>

@@ -1369,3 +1369,31 @@ h2 {
     font-size: 0.86rem;
   }
 }
+
+
+/* V31.6 — seuils de santé budgétaire */
+.balance-forecast-card.status-danger {
+  border-color: #efc1c1;
+  background: #fff5f5;
+}
+.balance-forecast-card.status-warning {
+  border-color: #f1d3a2;
+  background: #fff9ef;
+}
+.balance-forecast-card.status-comfortable {
+  border-color: #cde4d4;
+  background: #f7fcf8;
+}
+.balance-forecast-card.status-excellent {
+  border-color: #c9dbee;
+  background: #f5f9fe;
+}
+.status-text-danger { color: #b42318; }
+.status-text-warning { color: #b26000; }
+.status-text-comfortable { color: #2f7d57; }
+.status-text-excellent { color: #24618a; }
+.forecast-status-label { font-weight: 800; }
+.status-danger .forecast-status-label { color: #b42318; }
+.status-warning .forecast-status-label { color: #b26000; }
+.status-comfortable .forecast-status-label { color: #2f7d57; }
+.status-excellent .forecast-status-label { color: #24618a; }
