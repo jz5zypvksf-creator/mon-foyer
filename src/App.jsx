@@ -1512,7 +1512,14 @@ export default function App() {
     const existingRecurringExpenses = new Set(
       (recurringResult.error ? [] : recurringResult.data || []).map(recurringSignature),
     );
-    const missingRecurringExpenses = (data.recurringFixedExpenses || [])
+
+    const uniqueLocalRecurringExpenses = Array.from(
+      new Map(
+        (data.recurringFixedExpenses || []).map((expense) => [recurringSignature(expense), expense]),
+      ).values(),
+    );
+
+    const missingRecurringExpenses = uniqueLocalRecurringExpenses
       .filter((expense) => !existingRecurringExpenses.has(recurringSignature(expense)))
       .map((expense) => ({
         household_id: householdId,
