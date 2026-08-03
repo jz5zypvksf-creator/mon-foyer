@@ -21,6 +21,7 @@ import {
   PiggyBank,
   Plus,
   ReceiptText,
+  Repeat2,
   Send,
   Settings,
   ShieldCheck,
@@ -1779,16 +1780,32 @@ export default function App() {
                 )}
                 {scheduledExpenses.map((operation) => {
                   const category = data.categories.find((item) => item.id === operation.category);
+                  const isSavings = operation.category?.startsWith('epargne')
+                    || operation.label?.trim().toLowerCase().startsWith('épargne');
+                  const operationKind = isSavings
+                    ? { key: 'savings', label: 'Épargne', Icon: PiggyBank }
+                    : operation.projectedRecurring
+                      ? { key: 'recurring', label: 'Frais fixe récurrent', Icon: Repeat2 }
+                      : { key: 'planned', label: 'Dépense ponctuelle', Icon: CalendarDays };
+                  const KindIcon = operationKind.Icon;
+
                   return (
-                    <article className="scheduled-row" key={operation.id}>
-                      <div>
-                        <strong>{operation.label}</strong>
+                    <article className={`scheduled-row scheduled-row-${operationKind.key}`} key={operation.id}>
+                      <div className={`scheduled-kind-icon kind-${operationKind.key}`} aria-hidden="true">
+                        <KindIcon size={19} />
+                      </div>
+                      <div className="scheduled-row-copy">
+                        <div className="scheduled-row-heading">
+                          <strong>{operation.label}</strong>
+                          <span className={`scheduled-kind-badge badge-${operationKind.key}`}>
+                            {operationKind.label}
+                          </span>
+                        </div>
                         <span>
-                          {operation.date} · {category?.label || 'Frais fixe'} · {operation.paymentMethod || 'Compte Belfius'}
-                          {operation.projectedRecurring ? ` · ${recurrenceLabel(operation.frequency)}` : ' · Prévue'}
+                          {operation.date} · {category?.label || 'Frais fixe'} · {operation.paymentMethod || 'Compte Belfius'} · Prévue
                         </span>
                       </div>
-                      <strong>{formatCurrency(operation.amount)}</strong>
+                      <strong className="scheduled-row-amount">{formatCurrency(operation.amount)}</strong>
                       {operation.projectedRecurring && operation.recurringExpenseId && (
                         <button
                           type="button"

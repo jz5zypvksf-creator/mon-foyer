@@ -1397,3 +1397,80 @@ h2 {
 .status-warning .forecast-status-label { color: #b26000; }
 .status-comfortable .forecast-status-label { color: #2f7d57; }
 .status-excellent .forecast-status-label { color: #24618a; }
+
+
+/* V31.8 — repères visuels des opérations programmées */
+.scheduled-row {
+  grid-template-columns: 42px minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 0.75rem;
+}
+
+.scheduled-kind-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.kind-savings { background: #e6f5e9; color: #2f7d57; }
+.kind-recurring { background: #f0e8fa; color: #6b35a5; }
+.kind-planned { background: #e8f1fb; color: #24618a; }
+
+.scheduled-row-copy {
+  min-width: 0;
+}
+
+.scheduled-row-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.65rem;
+}
+
+.scheduled-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badge-savings { background: #e6f5e9; color: #2f7d57; }
+.badge-recurring { background: #f0e8fa; color: #6b35a5; }
+.badge-planned { background: #e8f1fb; color: #24618a; }
+
+.scheduled-row-amount {
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .scheduled-row {
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    column-gap: 0.65rem;
+  }
+
+  .scheduled-kind-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .scheduled-row > button {
+    grid-column: 3;
+  }
+
+  .scheduled-row-amount {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .scheduled-kind-badge {
+    font-size: 0.67rem;
+  }
+}
