@@ -55,3 +55,4 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v[^']+';/, "const CACHE_NAME = 'm
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.7 appliquée : déduplication locale avant synchronisation.');
+// Déclenchement du workflow V31.7.
