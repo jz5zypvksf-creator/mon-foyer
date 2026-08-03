@@ -97,3 +97,5 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v[^']+';/, "const CACHE_NAME = 'm
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.8 appliquée : types d’opérations programmées identifiables par icône et libellé.');
+
+// Déclenchement du workflow V31.8
