@@ -1,0 +1,39 @@
+name: Apply V31.9.1
+
+on:
+  push:
+    paths:
+      - 'scripts/apply-v31-9-1-stabilization.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stabilize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/apply-v31-9-1-stabilization.mjs
+      - run: npm install
+      - run: npm run build
+      - name: Static quality checks
+        run: |
+          test -f src/BelfiusAudit.jsx
+          grep -q "Audit bancaire Belfius" src/BelfiusAudit.jsx
+          grep -q "mon-foyer-v31-9-1" public/sw.js
+          ! grep -q "Rapprocher Belfius" src/App.jsx
+      - name: Commit stabilized version
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx src/BelfiusAudit.jsx src/styles.css public/sw.js
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+          else
+            git commit -m "V31.9.1 - Stabilise l'application et l'audit Belfius"
+            git push
+          fi
