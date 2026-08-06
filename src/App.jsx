@@ -423,6 +423,21 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const activeViewRef = useRef(activeView);
 
+  useEffect(() => {
+    const removeObsoleteBelfiusShortcut = () => {
+      document.querySelectorAll('button, a').forEach((element) => {
+        if (element.textContent?.trim() === 'Rapprocher Belfius') {
+          element.remove();
+        }
+      });
+    };
+
+    removeObsoleteBelfiusShortcut();
+    const observer = new MutationObserver(removeObsoleteBelfiusShortcut);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   const saveData = (nextData) => {
     setData(nextData);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
