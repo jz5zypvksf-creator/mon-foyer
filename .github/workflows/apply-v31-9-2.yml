@@ -30,3 +30,5 @@ jobs:
           git add src/App.jsx public/sw.js
           git diff --cached --quiet || git commit -m "V31.9.2 - Supprime définitivement le bouton flottant Belfius"
           git push
+
+# Correctif relancé après vérification sur ordinateur.
