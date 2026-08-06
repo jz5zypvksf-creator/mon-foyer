@@ -37,6 +37,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
+import BelfiusAudit from './BelfiusAudit.jsx';
 
 const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -2186,6 +2187,11 @@ export default function App() {
 
         {activeView === 'settings' && (
           <section className="view">
+            <BelfiusAudit
+              operations={data.operations}
+              appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
+            />
+
             <section className="panel">
               <div className="section-title">
                 <h2>Points de vente</h2>

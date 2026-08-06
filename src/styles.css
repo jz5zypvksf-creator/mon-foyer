@@ -1474,3 +1474,134 @@ h2 {
     font-size: 0.67rem;
   }
 }
+
+
+/* V31.9 — audit bancaire Belfius */
+.belfius-audit .section-title h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.belfius-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed #7f9db9;
+  border-radius: 14px;
+  color: #163a5f;
+  background: #f5f9fd;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.belfius-upload input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.audit-results {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.audit-verdict {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+}
+
+.audit-verdict.ok {
+  color: #246c4b;
+  background: #edf8f0;
+  border: 1px solid #cde4d4;
+}
+
+.audit-verdict.warning {
+  color: #9b4f00;
+  background: #fff8eb;
+  border: 1px solid #f0d4a8;
+}
+
+.audit-verdict div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.audit-verdict span {
+  font-size: 0.84rem;
+  opacity: 0.82;
+}
+
+.audit-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.65rem;
+}
+
+.audit-summary-grid > div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.85rem;
+  border: 1px solid #dbe4e7;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.audit-summary-grid span {
+  color: #687784;
+  font-size: 0.82rem;
+}
+
+.audit-summary-grid strong {
+  color: #163a5f;
+  font-size: 1.05rem;
+}
+
+.audit-details {
+  border: 1px solid #d8e3ee;
+  border-radius: 14px;
+  background: #f9fbfd;
+  overflow: hidden;
+}
+
+.audit-details summary {
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  color: #163a5f;
+  font-weight: 800;
+}
+
+.audit-details article {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #e1e8ee;
+}
+
+.audit-details article span {
+  color: #687784;
+  text-align: right;
+}
+
+@media (max-width: 560px) {
+  .belfius-upload {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .audit-details article {
+    display: grid;
+  }
+
+  .audit-details article span {
+    text-align: left;
+  }
+}
