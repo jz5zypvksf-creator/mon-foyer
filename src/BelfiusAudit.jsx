@@ -5,6 +5,8 @@ const money = (value) => new Intl.NumberFormat('fr-BE', {
   style: 'currency', currency: 'EUR',
 }).format(Number(value) || 0);
 
+const amountTolerance = 0.05;
+
 function parseAmount(value) {
   return Number(String(value || '')
     .replace(/\s/g, '')
@@ -84,7 +86,10 @@ function parseBelfius(text) {
 }
 
 function possibleSplit(bankRow, appRows) {
-  const candidates = appRows.filter((row) => row.date === bankRow.date && row.type !== 'income').slice(0, 12);
+  const candidates = appRows
+    .filter((row) => row.type !== 'income')
+    .filter((row) => Math.abs(new Date(row.date) - new Date(bankRow.date)) <= 2 * 86400000)
+    .slice(0, 14);
   const target = Math.abs(bankRow.amount);
   for (let mask = 1; mask < (1 << candidates.length); mask += 1) {
     const selected = [];
@@ -95,38 +100,42 @@ function possibleSplit(bankRow, appRows) {
         total += Math.abs(Number(candidates[index].amount) || 0);
       }
     }
-    if (selected.length > 1 && Math.abs(total - target) < 0.01) return selected;
+    if (selected.length > 1 && Math.abs(total - target) <= amountTolerance) return selected;
   }
   return null;
 }
 
-function reconcile(bankRows, operations) {
-  const bankDates = bankRows.map((row) => row.date).filter(Boolean).sort();
-  const firstBankDate = bankDates[0] || '';
-  const lastBankDate = bankDates[bankDates.length - 1] || '';
+function labelsLikelyMatch(bankRow, appRow) {
+  const bankLabel = normalize(`${bankRow.label} ${bankRow.details}`);
+  const appLabel = normalize(`${appRow.label} ${appRow.store || ''}`);
+  if (!appLabel || !bankLabel) return false;
+  return bankLabel.includes(appLabel)
+    || appLabel.includes(bankLabel)
+    || appLabel.split(' ').some((token) => token.length >= 5 && bankLabel.includes(token));
+}
+
+function reconcile(bankRows, operations, selectedMonth) {
+  const monthBankRows = bankRows.filter((row) => row.date.startsWith(selectedMonth));
   const appRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
-    .filter((row) => (!firstBankDate || row.date >= firstBankDate) && (!lastBankDate || row.date <= lastBankDate))
+    .filter((row) => row.date.startsWith(selectedMonth))
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
+
   const used = new Set();
   const matched = [];
   const missing = [];
   const splits = [];
 
-  bankRows.forEach((bankRow) => {
+  monthBankRows.forEach((bankRow) => {
     const candidates = appRows
       .map((row, index) => ({ row, index }))
       .filter(({ row, index }) => !used.has(index)
-        && row.date === bankRow.date
-        && Math.abs(Math.abs(row.amount) - Math.abs(bankRow.amount)) < 0.01
+        && Math.abs(new Date(row.date) - new Date(bankRow.date)) <= 2 * 86400000
+        && Math.abs(Math.abs(row.amount) - Math.abs(bankRow.amount)) <= amountTolerance
         && ((bankRow.amount > 0) === (row.type === 'income')));
 
-    let selected = candidates.find(({ row }) => {
-      const bankLabel = normalize(`${bankRow.label} ${bankRow.details}`);
-      const appLabel = normalize(`${row.label} ${row.store || ''}`);
-      return appLabel && bankLabel.includes(appLabel);
-    }) || candidates[0];
+    const selected = candidates.find(({ row }) => labelsLikelyMatch(bankRow, row)) || candidates[0];
 
     if (selected) {
       used.add(selected.index);
@@ -146,13 +155,16 @@ function reconcile(bankRows, operations) {
   });
 
   const extra = appRows.filter((_, index) => !used.has(index));
-  return { matched, splits, missing, extra };
+  return { matched, splits, missing, extra, bankRows: monthBankRows, appRows };
 }
 
-export default function BelfiusAudit({ operations, appBelfiusBalance }) {
+export default function BelfiusAudit({ operations, appBelfiusBalance, selectedMonth }) {
   const [audit, setAudit] = useState(null);
   const [error, setError] = useState('');
-  const result = useMemo(() => audit ? reconcile(audit.rows, operations) : null, [audit, operations]);
+  const result = useMemo(
+    () => audit ? reconcile(audit.rows, operations, selectedMonth) : null,
+    [audit, operations, selectedMonth],
+  );
 
   const handleFile = async (event) => {
     const file = event.target.files?.[0];
@@ -175,9 +187,9 @@ export default function BelfiusAudit({ operations, appBelfiusBalance }) {
     <section className="panel belfius-audit">
       <div className="section-title">
         <h2><FileSearch size={22} /> Audit bancaire Belfius</h2>
-        {audit && <span>{audit.rows.length} opérations · ${audit.rows.map((row) => row.date).sort()[0] || '—'} au ${audit.rows.map((row) => row.date).sort().at(-1) || '—'}</span>}
+        {audit && <span>{result?.bankRows.length || 0} opérations · {selectedMonth}</span>}
       </div>
-      <p className="hint">Le fichier est analysé dans votre appareil. Il n'est pas conservé.</p>
+      <p className="hint">Le fichier complet est lu, mais l'audit porte uniquement sur le mois sélectionné.</p>
       <label className="belfius-upload">
         <Upload size={20} />
         <span>Choisir un fichier CSV Belfius</span>
@@ -199,15 +211,16 @@ export default function BelfiusAudit({ operations, appBelfiusBalance }) {
             <div><span>Solde Belfius réel</span><strong>{money(audit.balance)}</strong></div>
             <div><span>Solde Mon Foyer</span><strong>{money(appBelfiusBalance)}</strong></div>
             <div><span>Écart</span><strong className={Math.abs(difference) < 0.01 ? 'positive' : 'negative'}>{money(difference)}</strong></div>
-            <div><span>Correspondances exactes</span><strong>{result.matched.length}</strong></div>
-            <div><span>Ventilations possibles</span><strong>{result.splits.length}</strong></div>
+            <div><span>Opérations du mois</span><strong>{result.bankRows.length}</strong></div>
+            <div><span>Correspondances</span><strong>{result.matched.length}</strong></div>
+            <div><span>Ventilations reconnues</span><strong>{result.splits.length}</strong></div>
             <div><span>Absentes de Mon Foyer</span><strong>{result.missing.length}</strong></div>
             <div><span>En trop dans Mon Foyer</span><strong>{result.extra.length}</strong></div>
           </div>
 
           {result.splits.length > 0 && (
             <details className="audit-details" open>
-              <summary>Ventilations détectées ({result.splits.length})</summary>
+              <summary>Ventilations reconnues ({result.splits.length})</summary>
               {result.splits.map(({ bank, app }) => (
                 <article key={bank.id}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
