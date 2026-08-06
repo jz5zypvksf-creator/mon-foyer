@@ -101,8 +101,13 @@ function possibleSplit(bankRow, appRows) {
 }
 
 function reconcile(bankRows, operations) {
+  const bankDates = bankRows.map((row) => row.date).filter(Boolean).sort();
+  const firstBankDate = bankDates[0] || '';
+  const lastBankDate = bankDates[bankDates.length - 1] || '';
   const appRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
+    .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
+    .filter((row) => (!firstBankDate || row.date >= firstBankDate) && (!lastBankDate || row.date <= lastBankDate))
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
   const used = new Set();
   const matched = [];
@@ -170,7 +175,7 @@ export default function BelfiusAudit({ operations, appBelfiusBalance }) {
     <section className="panel belfius-audit">
       <div className="section-title">
         <h2><FileSearch size={22} /> Audit bancaire Belfius</h2>
-        {audit && <span>{audit.rows.length} opérations bancaires</span>}
+        {audit && <span>{audit.rows.length} opérations · ${audit.rows.map((row) => row.date).sort()[0] || '—'} au ${audit.rows.map((row) => row.date).sort().at(-1) || '—'}</span>}
       </div>
       <p className="hint">Le fichier est analysé dans votre appareil. Il n'est pas conservé.</p>
       <label className="belfius-upload">
