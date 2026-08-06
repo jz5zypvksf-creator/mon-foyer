@@ -9,6 +9,7 @@ let app = fs.readFileSync(appPath, 'utf8');
 let audit = fs.readFileSync(auditPath, 'utf8');
 let css = fs.readFileSync(cssPath, 'utf8');
 
+// V31.9.1 : stabilisation fonctionnelle, visuelle et responsive.
 // Supprime tout ancien raccourci flottant devenu redondant.
 app = app.replace(/\s*<button[^>]*>[\s\S]*?Rapprocher Belfius[\s\S]*?<\/button>/g, '');
 app = app.replace(/\s*<[^>]+className=["'][^"']*(?:belfius[^"']*(?:floating|fab)|(?:floating|fab)[^"']*belfius)[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi, '');
