@@ -34,3 +34,4 @@ sw = sw.replace(/const CACHE_NAME = 'mon-foyer-v[^']+';/, "const CACHE_NAME = 'm
 fs.writeFileSync(swPath, sw);
 
 console.log('V31.9 appliquée : audit CSV Belfius intégré aux réglages.');
+// deployment trigger
