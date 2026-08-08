@@ -31,3 +31,5 @@ jobs:
           git add src/App.jsx public/sw.js
           git diff --cached --quiet || git commit -m "V32.0 RC1 - Finalise la phase 1"
           git push origin HEAD:v32-sprint-1
+
+# RC1 retry after script syntax correction
