@@ -1383,6 +1383,52 @@ export default function App() {
     setRecurringStatus(`${savedOperations.length} frais fixe(s) ajoute(s) pour ${selectedMonth}.`);
   };
 
+  const synchronizeBelfiusBalance = async ({ balance, balanceDate, month }) => {
+    const currentBalance = calculatePaymentBalances(data.operations)['Compte Belfius'] || 0;
+    const delta = Number(balance) - Number(currentBalance);
+    if (Math.abs(delta) < 0.01) return;
+
+    const dateMatch = String(balanceDate || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    const adjustmentDate = dateMatch ? dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1] : currentDate();
+    const adjustment = {
+      id: crypto.randomUUID(),
+      date: adjustmentDate,
+      person: 'Foyer',
+      type: delta >= 0 ? 'income' : 'fixed',
+      category: delta >= 0 ? 'revenus' : 'divers',
+      store: '',
+      paymentMethod: 'Compte Belfius',
+      label: 'Ajustement Belfius ' + month + ' — solde certifié',
+      amount: Math.abs(delta),
+    };
+
+    if (USE_REMOTE_BUDGET) {
+      const payload = {
+        household_id: householdId,
+        date: adjustment.date,
+        person: adjustment.person,
+        type: adjustment.type,
+        category: adjustment.category,
+        store: null,
+        label: adjustment.label,
+        amount: adjustment.amount,
+        payment_method: adjustment.paymentMethod,
+      };
+      const { data: savedRow, error } = await supabase
+        .from('operations')
+        .insert(payload)
+        .select(OPERATION_COLUMNS)
+        .single();
+      if (error) {
+        setSyncStatus('Synchronisation Belfius impossible : ' + error.message);
+        return;
+      }
+      adjustment.id = savedRow.id;
+    }
+
+    saveData({ ...data, operations: [adjustment, ...data.operations] });
+    setSyncStatus('Solde Belfius synchronisé : ' + formatCurrency(balance));
+  };
   const refreshFromSupabase = async () => {
     if (!USE_REMOTE_BUDGET) {
       setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
@@ -2205,6 +2251,9 @@ export default function App() {
             <BelfiusAudit
               operations={data.operations}
               appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
+              selectedMonth={selectedMonth}
+              recurringExpenses={data.recurringFixedExpenses || []}
+              onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
             />
 
             <section className="panel">
@@ -2229,7 +2278,17 @@ export default function App() {
             <section className="panel">
               <div className="section-title">
                 <h2>Frais fixes récurrents</h2>
-                <span>{(data.recurringFixedExpenses || []).length}</span>
+                {(() => {
+                  const recurringExpenses = data.recurringFixedExpenses || [];
+                  const uniqueCount = new Set(recurringExpenses.map(recurringExpenseSignature)).size;
+                  const duplicateCount = recurringExpenses.length - uniqueCount;
+                  return (
+                    <span>
+                      {recurringExpenses.length} enregistrés · {uniqueCount} uniques
+                      {duplicateCount > 0 ? ' · ' + duplicateCount + ' doublon(s) potentiel(s)' : ' · base propre'}
+                    </span>
+                  );
+                })()}
               </div>
 
               <form className="recurring-form" onSubmit={addRecurringFixedExpense}>
