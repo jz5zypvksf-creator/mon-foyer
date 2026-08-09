@@ -146,78 +146,149 @@ function matchScore(bankRow, appRow, recurringExpenses) {
   return { confidence, reason, recurring };
 }
 
+function findSubsetByAmount(candidates, target, amountSelector, maxCandidates = 14) {
+  const safeCandidates = candidates.slice(0, maxCandidates);
+  for (let mask = 1; mask < (1 << safeCandidates.length); mask += 1) {
+    const selected = [];
+    let total = 0;
+    for (let index = 0; index < safeCandidates.length; index += 1) {
+      if (mask & (1 << index)) {
+        selected.push(safeCandidates[index]);
+        total += Math.abs(Number(amountSelector(safeCandidates[index])) || 0);
+      }
+    }
+    if (selected.length > 1 && Math.abs(total - target) <= AMOUNT_TOLERANCE) return selected;
+  }
+  return null;
+}
+
 function possibleSplit(bankRow, indexedAppRows) {
   if (bankRow.amount >= 0) return null;
   const candidates = indexedAppRows
     .filter(({ row }) => row.type !== 'income')
-    .filter(({ row }) => dateDistance(row.date, bankRow.date) <= DATE_TOLERANCE_DAYS)
-    .slice(0, 14);
-  const target = Math.abs(bankRow.amount);
+    .filter(({ row }) => dateDistance(row.date, bankRow.date) <= DATE_TOLERANCE_DAYS);
+  return findSubsetByAmount(candidates, Math.abs(bankRow.amount), ({ row }) => row.amount);
+}
 
-  for (let mask = 1; mask < (1 << candidates.length); mask += 1) {
-    const selected = [];
-    let total = 0;
-    for (let index = 0; index < candidates.length; index += 1) {
-      if (mask & (1 << index)) {
-        selected.push(candidates[index]);
-        total += Math.abs(Number(candidates[index].row.amount) || 0);
-      }
-    }
-    if (selected.length > 1 && Math.abs(total - target) <= AMOUNT_TOLERANCE) {
-      return selected;
-    }
+function bankBeneficiaryKey(row) {
+  return normalize(row.label);
+}
+
+function possibleBankGroup(appRow, indexedBankRows) {
+  const directionIsIncome = appRow.type === 'income';
+  const target = Math.abs(Number(appRow.amount) || 0);
+  const compatible = indexedBankRows
+    .filter(({ row }) => ((row.amount > 0) === directionIsIncome))
+    .filter(({ row }) => dateDistance(row.date, appRow.date) <= DATE_TOLERANCE_DAYS);
+
+  const byBeneficiary = new Map();
+  compatible.forEach((candidate) => {
+    const key = bankBeneficiaryKey(candidate.row);
+    if (!key) return;
+    const bucket = byBeneficiary.get(key) || [];
+    bucket.push(candidate);
+    byBeneficiary.set(key, bucket);
+  });
+
+  for (const candidates of byBeneficiary.values()) {
+    if (candidates.length < 2) continue;
+    const subset = findSubsetByAmount(candidates, target, ({ row }) => row.amount, 12);
+    if (subset) return subset;
   }
   return null;
 }
 
 function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
-  const monthBankRows = bankRows.filter((row) => row.date.startsWith(auditMonth));
+
+  // Source unique du mois : toutes les listes et tous les compteurs dérivent de ces deux tableaux.
+  const monthBankRows = bankRows
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .map((row) => ({ ...row }));
   const appRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
-    .filter((row) => String(row.date || '').startsWith(auditMonth))
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
 
-  const used = new Set();
+  const usedBank = new Set();
+  const usedApp = new Set();
   const matched = [];
-  const missing = [];
   const splits = [];
+  const groups = [];
 
-  monthBankRows.forEach((bankRow) => {
+  // 1) Correspondances 1 ↔ 1.
+  monthBankRows.forEach((bankRow, bankIndex) => {
     const candidates = appRows
-      .map((row, index) => ({ row, index, match: used.has(index) ? null : matchScore(bankRow, row, recurringExpenses) }))
+      .map((row, index) => ({ row, index, match: usedApp.has(index) ? null : matchScore(bankRow, row, recurringExpenses) }))
       .filter(({ match }) => match)
       .sort((left, right) => right.match.confidence - left.match.confidence
         || dateDistance(left.row.date, bankRow.date) - dateDistance(right.row.date, bankRow.date));
 
     const selected = candidates[0];
-    if (selected) {
-      used.add(selected.index);
-      matched.push({ bank: bankRow, app: selected.row, ...selected.match });
-      return;
-    }
-
-    const available = appRows
-      .map((row, index) => ({ row, index }))
-      .filter(({ index }) => !used.has(index));
-    const split = possibleSplit(bankRow, available);
-    if (split) {
-      split.forEach(({ index }) => used.add(index));
-      splits.push({
-        bank: bankRow,
-        app: split.map(({ row }) => row),
-        confidence: 97,
-        reason: 'Montant bancaire retrouvé par ventilation',
-      });
-      return;
-    }
-
-    missing.push(bankRow);
+    if (!selected) return;
+    usedBank.add(bankIndex);
+    usedApp.add(selected.index);
+    matched.push({ bank: bankRow, app: selected.row, ...selected.match });
   });
 
-  const extra = appRows.filter((_, index) => !used.has(index));
-  return { matched, splits, missing, extra, bankRows: monthBankRows, appRows, auditMonth };
+  // 2) Regroupements n opérations Belfius → 1 opération Mon Foyer.
+  // Exemple : 10 + 10 + 10 + 10 + 30 + 30 DONATE.JW.ORG → JW Donate 100 €.
+  appRows.forEach((appRow, appIndex) => {
+    if (usedApp.has(appIndex)) return;
+    const availableBank = monthBankRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ index }) => !usedBank.has(index));
+    const group = possibleBankGroup(appRow, availableBank);
+    if (!group) return;
+
+    group.forEach(({ index }) => usedBank.add(index));
+    usedApp.add(appIndex);
+    groups.push({
+      bank: group.map(({ row }) => row),
+      app: appRow,
+      confidence: 97,
+      reason: 'Plusieurs opérations Belfius regroupées vers une opération Mon Foyer',
+    });
+  });
+
+  // 3) Ventilations 1 opération Belfius → n opérations Mon Foyer.
+  monthBankRows.forEach((bankRow, bankIndex) => {
+    if (usedBank.has(bankIndex)) return;
+    const availableApp = appRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ index }) => !usedApp.has(index));
+    const split = possibleSplit(bankRow, availableApp);
+    if (!split) return;
+
+    usedBank.add(bankIndex);
+    split.forEach(({ index }) => usedApp.add(index));
+    splits.push({
+      bank: bankRow,
+      app: split.map(({ row }) => row),
+      confidence: 97,
+      reason: 'Montant bancaire retrouvé par ventilation',
+    });
+  });
+
+  // Filtrage défensif final : aucune donnée hors du mois ne peut atteindre l'UI.
+  const missing = monthBankRows
+    .filter((row, index) => !usedBank.has(index))
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth);
+  const extra = appRows
+    .filter((row, index) => !usedApp.has(index))
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth);
+
+  return {
+    matched,
+    splits,
+    groups,
+    missing,
+    extra,
+    bankRows: monthBankRows,
+    appRows,
+    auditMonth,
+  };
 }
 
 export default function BelfiusAudit({
@@ -250,8 +321,11 @@ export default function BelfiusAudit({
     }
   };
 
+  const safeMonth = result?.auditMonth || selectedMonth || '';
+  const monthMissing = (result?.missing || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
+  const monthExtra = (result?.extra || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const difference = audit ? Number(appBelfiusBalance || 0) - audit.balance : 0;
-  const auditIsClean = Boolean(audit && result && result.missing.length === 0 && result.extra.length === 0);
+  const auditIsClean = Boolean(audit && result && monthMissing.length === 0 && monthExtra.length === 0);
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
   const canSynchronize = auditIsClean
     && Math.abs(difference) >= 0.01
@@ -302,8 +376,9 @@ export default function BelfiusAudit({
             <div><span>Opérations du mois</span><strong>{result.bankRows.length}</strong></div>
             <div><span>Correspondances</span><strong>{result.matched.length}</strong></div>
             <div><span>Ventilations reconnues</span><strong>{result.splits.length}</strong></div>
-            <div><span>Absentes de Mon Foyer</span><strong>{result.missing.length}</strong></div>
-            <div><span>En trop dans Mon Foyer</span><strong>{result.extra.length}</strong></div>
+            <div><span>Regroupements reconnus</span><strong>{result.groups.length}</strong></div>
+            <div><span>Absentes de Mon Foyer</span><strong>{monthMissing.length}</strong></div>
+            <div><span>En trop dans Mon Foyer</span><strong>{monthExtra.length}</strong></div>
           </div>
 
           {canSynchronize && (
@@ -322,6 +397,18 @@ export default function BelfiusAudit({
             </details>
           )}
 
+          {result.groups.length > 0 && (
+            <details className="audit-details" open>
+              <summary>Regroupements reconnus ({result.groups.length})</summary>
+              {result.groups.map(({ bank, app, confidence }) => (
+                <article key={`${app.id}-${bank.map((row) => row.id).join('-')}`}>
+                  <strong>{bank[0]?.date} · {bank[0]?.label} · {bank.map((row) => money(row.amount)).join(' + ')}</strong>
+                  <span>→ {app.label} ({money(app.amount)}) · confiance {confidence}%</span>
+                </article>
+              ))}
+            </details>
+          )}
+
           {result.splits.length > 0 && (
             <details className="audit-details" open>
               <summary>Ventilations reconnues ({result.splits.length})</summary>
@@ -334,19 +421,19 @@ export default function BelfiusAudit({
             </details>
           )}
 
-          {result.missing.length > 0 && (
+          {monthMissing.length > 0 && (
             <details className="audit-details" open>
-              <summary>Opérations Belfius absentes ({result.missing.length})</summary>
-              {result.missing.map((row) => (
+              <summary>Opérations Belfius absentes ({monthMissing.length})</summary>
+              {monthMissing.map((row) => (
                 <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.amount)}</span></article>
               ))}
             </details>
           )}
 
-          {result.extra.length > 0 && (
+          {monthExtra.length > 0 && (
             <details className="audit-details" open>
-              <summary>Opérations Mon Foyer sans correspondance ({result.extra.length})</summary>
-              {result.extra.map((row) => (
+              <summary>Opérations Mon Foyer sans correspondance ({monthExtra.length})</summary>
+              {monthExtra.map((row) => (
                 <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.type === 'income' ? row.amount : -row.amount)}</span></article>
               ))}
             </details>
