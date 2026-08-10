@@ -31,3 +31,4 @@ jobs:
           git add src/App.jsx src/BelfiusAudit.jsx src/styles.css
           git diff --cached --quiet || git commit -m "V32 RC2.4 - Synchronise epargne et transferts Belfius"
           git push origin HEAD:v32-rc2-4
+# relance RC2.4 corrigée
