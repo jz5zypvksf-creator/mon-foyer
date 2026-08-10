@@ -116,6 +116,7 @@ const defaultState = {
   ],
   savingsGoals: [
     { id: 'voiture', label: 'Voiture', target: 6000, saved: 1200 },
+    { id: 'pension', label: 'Pension A&E', target: 0, saved: 0 },
     { id: 'vacances', label: 'Vacances', target: 2500, saved: 650 },
     { id: 'maison', label: 'Maison', target: 20000, saved: 4200 },
     { id: 'urgence', label: "Fonds d'urgence", target: 5000, saved: 1800 },
@@ -396,6 +397,7 @@ async function selectOperations(order = true) {
 export default function App() {
   const [data, setData] = useState(loadState);
   const [activeView, setActiveView] = useState('home');
+  const [bankSavings, setBankSavings] = useState({});
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [draft, setDraft] = useState(makeEmptyOperation);
   const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
@@ -1985,7 +1987,7 @@ export default function App() {
               </div>
               <div className="goals-grid">
                 {data.savingsGoals.map((goal) => (
-                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} />
+                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[goal.id] || 0} />
                 ))}
               </div>
             </section>
@@ -2280,6 +2282,7 @@ export default function App() {
               selectedMonth={selectedMonth}
               recurringExpenses={data.recurringFixedExpenses || []}
               onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
+              onSavingsDetected={setBankSavings}
               onAddBankOperation={addBankOperationFromAudit}
             />
 
@@ -2494,7 +2497,7 @@ function CategoryRow({ category }) {
   );
 }
 
-function GoalCard({ goal, onUpdate }) {
+function GoalCard({ goal, onUpdate, bankDetected = 0 }) {
   const [draft, setDraft] = useState({
     saved: String(goal.saved ?? 0),
     target: String(goal.target ?? 0),
@@ -2529,6 +2532,12 @@ function GoalCard({ goal, onUpdate }) {
       <div className="progress-track slim">
         <div className="progress-fill green" style={{ width: `${progressRatio}%` }} />
       </div>
+      {bankDetected > 0 && (
+        <div className="goal-bank-sync">
+          <span>🏦 Versements Belfius identifiés dans le CSV</span>
+          <strong>{formatCurrency(bankDetected)}</strong>
+        </div>
+      )}
       <div className="goal-inputs">
         <label>
           Mis de côté (épargne)

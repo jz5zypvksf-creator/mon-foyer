@@ -140,6 +140,25 @@ function parseBelfius(text) {
   };
 }
 
+function detectSavingsTransfers(rows) {
+  const totals = {};
+  const add = (key, amount) => { totals[key] = (totals[key] || 0) + Math.abs(Number(amount) || 0); };
+
+  (rows || []).forEach((row) => {
+    if (row.amount >= 0) return;
+    const text = normalize(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`);
+    const amount = Math.abs(Number(row.amount) || 0);
+
+    if (text.includes('pour voiture') || text.includes('epargne voiture')) { add('voiture', amount); return; }
+    if (text.includes('vacances') || text.includes('epargne vacances')) { add('vacances', amount); return; }
+    if (text.includes('fonds urgence') || text.includes('fonds d urgence') || text.includes('epargne urgence')) { add('urgence', amount); return; }
+    if (text.includes('epargne maison') || text.includes('reserve maison')) { add('maison', amount); return; }
+    if (text.includes('pension') || (text.includes('ethias') && Math.abs(amount - 110) <= AMOUNT_TOLERANCE)) { add('pension', amount); return; }
+  });
+
+  return totals;
+}
+
 function labelText(bankRow) {
   return normalize(`${bankRow.label} ${bankRow.details}`);
 }
@@ -461,6 +480,7 @@ export default function BelfiusAudit({
   recurringExpenses = [],
   onSynchronizeBelfiusBalance,
   onAddBankOperation,
+  onSavingsDetected,
 }) {
   const [audit, setAudit] = useState(null);
   const [error, setError] = useState('');
@@ -478,7 +498,11 @@ export default function BelfiusAudit({
     try {
       const buffer = await file.arrayBuffer();
       const text = new TextDecoder('windows-1252').decode(buffer);
-      setAudit(parseBelfius(text));
+      const parsedAudit = parseBelfius(text);
+      setAudit(parsedAudit);
+      if (typeof onSavingsDetected === 'function') {
+        onSavingsDetected(detectSavingsTransfers(parsedAudit.rows));
+      }
     } catch (exception) {
       setAudit(null);
       setError(exception.message || "Le fichier n'a pas pu être analysé.");
