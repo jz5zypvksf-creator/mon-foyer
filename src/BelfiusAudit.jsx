@@ -9,6 +9,27 @@ const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
 const DAY_MS = 86400000;
 
+// RC2.1 — référentiel explicite des principaux libellés bancaires.
+// Les termes d'application sont volontairement larges uniquement lorsque le bénéficiaire
+// permet d'identifier une famille fiable. Un alias ne valide jamais le montant à lui seul.
+const BELFIUS_ALIASES = [
+  { bank: ['donate jw org', 'donate jw'], app: ['jw donate', 'donate jw'] },
+  { bank: ['setca'], app: ['syndicat'] },
+  { bank: ['ag insurance'], app: ['ag assurance', 'remboursement maison esther'] },
+  { bank: ['sd worx'], app: ['salaire alain'] },
+  { bank: ['rexel belgium'], app: ['salaire esther'] },
+  { bank: ['stellantis financial', 'psa finance'], app: ['psa finance'] },
+  { bank: ['mega power online', 'mega'], app: ['mega'] },
+  { bank: ['proximus'], app: ['proximus', 'tv internet', 'gsm'] },
+  { bank: ['test achats', 'test aankoop'], app: ['test achats'] },
+  { bank: ['dats24', 'q8 easy', 'total'], app: ['carburant', 'essence', 'diesel'] },
+  {
+    bank: ['delhaize', 'lidl', 'carrefour', 'colruyt'],
+    app: ['courses', 'nourriture', 'alimentaire', 'produits menagers', 'sanitaire', 'hygiene'],
+  },
+  { bank: ['pluxee'], app: ['cheques repassage', 'cheques repas', 'pluxee'] },
+];
+
 function parseAmount(value) {
   return Number(String(value || '')
     .replace(/\s/g, '')
@@ -97,14 +118,47 @@ function parseBelfius(text) {
   };
 }
 
+function labelText(bankRow) {
+  return normalize(`${bankRow.label} ${bankRow.details}`);
+}
+
+function appText(appRow) {
+  return normalize(`${appRow.label} ${appRow.store || ''}`);
+}
+
 function labelsLikelyMatch(bankRow, appRow) {
-  const bankLabel = normalize(`${bankRow.label} ${bankRow.details}`);
-  const appLabel = normalize(`${appRow.label} ${appRow.store || ''}`);
+  const bankLabel = labelText(bankRow);
+  const appLabel = appText(appRow);
   if (!appLabel || !bankLabel) return false;
   const tokens = appLabel.split(' ').filter((token) => token.length >= 5);
   return bankLabel.includes(appLabel)
     || appLabel.includes(bankLabel)
     || tokens.some((token) => bankLabel.includes(token));
+}
+
+function aliasMatch(bankRow, appRow) {
+  const bankLabel = labelText(bankRow);
+  const applicationLabel = appText(appRow);
+  return BELFIUS_ALIASES.some((alias) => (
+    alias.bank.some((needle) => bankLabel.includes(needle))
+    && alias.app.some((needle) => applicationLabel.includes(needle))
+  ));
+}
+
+function bankHasKnownAlias(bankRow) {
+  const bankLabel = labelText(bankRow);
+  return BELFIUS_ALIASES.some((alias) => alias.bank.some((needle) => bankLabel.includes(needle)));
+}
+
+function recurringBelongsToAppRow(expense, appRow) {
+  if (!expense || !appRow) return false;
+  const expenseLabel = normalize(expense.label);
+  const operationLabel = normalize(appRow.label);
+  const labelCompatible = expenseLabel && operationLabel
+    && (expenseLabel.includes(operationLabel) || operationLabel.includes(expenseLabel));
+  const categoryCompatible = expense.category && appRow.category && expense.category === appRow.category;
+  const personCompatible = expense.person && appRow.person && expense.person === appRow.person;
+  return labelCompatible || (categoryCompatible && personCompatible);
 }
 
 function findRecurringMatch(bankRow, appRow, recurringExpenses) {
@@ -114,36 +168,56 @@ function findRecurringMatch(bankRow, appRow, recurringExpenses) {
   return (recurringExpenses || []).find((expense) => {
     const recurringAmount = Math.abs(Number(expense.amount) || 0);
     const recurringDay = Number(expense.day) || 1;
-    return Math.abs(recurringAmount - operationAmount) <= AMOUNT_TOLERANCE
+    return recurringBelongsToAppRow(expense, appRow)
+      && Math.abs(recurringAmount - operationAmount) <= AMOUNT_TOLERANCE
       && Math.abs(recurringDay - day) <= DATE_TOLERANCE_DAYS;
   }) || null;
 }
 
-function matchScore(bankRow, appRow, recurringExpenses) {
+function matchEvidence(bankRow, appRow, recurringExpenses) {
   const amountDelta = Math.abs(Math.abs(Number(appRow.amount) || 0) - Math.abs(bankRow.amount));
   const dayDelta = dateDistance(bankRow.date, appRow.date);
   const directionMatches = (bankRow.amount > 0) === (appRow.type === 'income');
   if (!directionMatches || amountDelta > AMOUNT_TOLERANCE || dayDelta > DATE_TOLERANCE_DAYS) return null;
 
+  const directLabel = labelsLikelyMatch(bankRow, appRow);
+  const alias = aliasMatch(bankRow, appRow);
   const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);
-  const labelMatch = labelsLikelyMatch(bankRow, appRow);
-  let confidence = 94;
-  let reason = 'Même montant et date compatible';
 
-  if (dayDelta === 0) {
-    confidence = 98;
-    reason = 'Même montant et même date';
+  if (recurring && (directLabel || alias || !bankHasKnownAlias(bankRow))) {
+    return {
+      auto: true,
+      confidence: directLabel || alias ? 100 : 96,
+      reason: `Frais récurrent réellement lié : ${recurring.label}`,
+      recurring,
+    };
   }
-  if (labelMatch) {
-    confidence = Math.max(confidence, 99);
-    reason = 'Montant, date et libellé concordants';
+  if (alias) {
+    return {
+      auto: true,
+      confidence: dayDelta === 0 ? 99 : 97,
+      reason: 'Montant, date et alias Belfius concordants',
+      recurring: null,
+    };
   }
-  if (recurring) {
-    confidence = 100;
-    reason = `Frais récurrent reconnu : ${recurring.label}`;
+  if (directLabel) {
+    return {
+      auto: true,
+      confidence: dayDelta === 0 ? 99 : 97,
+      reason: 'Montant, date et libellé concordants',
+      recurring: null,
+    };
   }
 
-  return { confidence, reason, recurring };
+  // Montant/date seuls ne sont plus une preuve suffisante : ils deviennent une proposition.
+  return {
+    auto: false,
+    confidence: dayDelta === 0 ? 82 : 74,
+    reason: dayDelta === 0
+      ? 'Même montant et même date, mais bénéficiaire non confirmé'
+      : 'Même montant et date proche, mais bénéficiaire non confirmé',
+    recurring: null,
+  };
 }
 
 function findSubsetByAmount(candidates, target, amountSelector, maxCandidates = 14) {
@@ -162,11 +236,17 @@ function findSubsetByAmount(candidates, target, amountSelector, maxCandidates = 
   return null;
 }
 
-function possibleSplit(bankRow, indexedAppRows) {
+function possibleSplit(bankRow, indexedAppRows, recurringExpenses) {
   if (bankRow.amount >= 0) return null;
   const candidates = indexedAppRows
     .filter(({ row }) => row.type !== 'income')
-    .filter(({ row }) => dateDistance(row.date, bankRow.date) <= DATE_TOLERANCE_DAYS);
+    .filter(({ row }) => dateDistance(row.date, bankRow.date) <= DATE_TOLERANCE_DAYS)
+    .filter(({ row }) => {
+      // Un bénéficiaire connu ne peut être ventilé que vers une famille compatible.
+      if (bankHasKnownAlias(bankRow)) return aliasMatch(bankRow, row) || labelsLikelyMatch(bankRow, row);
+      const recurring = findRecurringMatch(bankRow, row, recurringExpenses);
+      return labelsLikelyMatch(bankRow, row) || Boolean(recurring);
+    });
   return findSubsetByAmount(candidates, Math.abs(bankRow.amount), ({ row }) => row.amount);
 }
 
@@ -179,7 +259,8 @@ function possibleBankGroup(appRow, indexedBankRows) {
   const target = Math.abs(Number(appRow.amount) || 0);
   const compatible = indexedBankRows
     .filter(({ row }) => ((row.amount > 0) === directionIsIncome))
-    .filter(({ row }) => dateDistance(row.date, appRow.date) <= DATE_TOLERANCE_DAYS);
+    .filter(({ row }) => dateDistance(row.date, appRow.date) <= DATE_TOLERANCE_DAYS)
+    .filter(({ row }) => aliasMatch(row, appRow) || labelsLikelyMatch(row, appRow));
 
   const byBeneficiary = new Map();
   compatible.forEach((candidate) => {
@@ -200,8 +281,6 @@ function possibleBankGroup(appRow, indexedBankRows) {
 
 function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
-
-  // Source unique du mois : toutes les listes et tous les compteurs dérivent de ces deux tableaux.
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .map((row) => ({ ...row }));
@@ -214,26 +293,56 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
   const usedBank = new Set();
   const usedApp = new Set();
   const matched = [];
+  const review = [];
   const splits = [];
   const groups = [];
 
-  // 1) Correspondances 1 ↔ 1.
+  // 1) Correspondances 1 ↔ 1 : seules les preuves sémantiques fortes sont auto-validées.
   monthBankRows.forEach((bankRow, bankIndex) => {
     const candidates = appRows
-      .map((row, index) => ({ row, index, match: usedApp.has(index) ? null : matchScore(bankRow, row, recurringExpenses) }))
-      .filter(({ match }) => match)
-      .sort((left, right) => right.match.confidence - left.match.confidence
+      .map((row, index) => ({
+        row,
+        index,
+        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, recurringExpenses),
+      }))
+      .filter(({ evidence }) => evidence)
+      .sort((left, right) => right.evidence.confidence - left.evidence.confidence
         || dateDistance(left.row.date, bankRow.date) - dateDistance(right.row.date, bankRow.date));
 
-    const selected = candidates[0];
-    if (!selected) return;
-    usedBank.add(bankIndex);
-    usedApp.add(selected.index);
-    matched.push({ bank: bankRow, app: selected.row, ...selected.match });
+    const automatic = candidates.filter(({ evidence }) => evidence.auto);
+    if (automatic.length === 1) {
+      const selected = automatic[0];
+      usedBank.add(bankIndex);
+      usedApp.add(selected.index);
+      matched.push({ bank: bankRow, app: selected.row, ...selected.evidence });
+      return;
+    }
+
+    if (automatic.length > 1) {
+      // Plusieurs candidats forts : ne pas choisir arbitrairement.
+      review.push({
+        bank: bankRow,
+        candidates: automatic.map(({ row, evidence }) => ({ app: row, ...evidence })),
+        reason: 'Plusieurs correspondances fiables possibles',
+      });
+      return;
+    }
+
+    // Montant/date seuls : proposition visible, jamais validation automatique.
+    const proposals = candidates.filter(({ evidence }) => !evidence.auto);
+    if (proposals.length > 0) {
+      review.push({
+        bank: bankRow,
+        candidates: proposals.slice(0, 3).map(({ row, evidence }) => ({ app: row, ...evidence })),
+        reason: proposals.length === 1
+          ? 'Correspondance probable à confirmer'
+          : 'Montant/date ambigus : confirmation nécessaire',
+      });
+    }
   });
 
   // 2) Regroupements n opérations Belfius → 1 opération Mon Foyer.
-  // Exemple : 10 + 10 + 10 + 10 + 30 + 30 DONATE.JW.ORG → JW Donate 100 €.
+  // Ils exigent désormais une cohérence de bénéficiaire/alias.
   appRows.forEach((appRow, appIndex) => {
     if (usedApp.has(appIndex)) return;
     const availableBank = monthBankRows
@@ -247,18 +356,19 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
     groups.push({
       bank: group.map(({ row }) => row),
       app: appRow,
-      confidence: 97,
-      reason: 'Plusieurs opérations Belfius regroupées vers une opération Mon Foyer',
+      confidence: 99,
+      reason: 'Regroupement validé par bénéficiaire/alias et total exact',
     });
   });
 
   // 3) Ventilations 1 opération Belfius → n opérations Mon Foyer.
+  // Le total seul ne suffit plus : chaque ligne doit être cohérente avec le bénéficiaire.
   monthBankRows.forEach((bankRow, bankIndex) => {
     if (usedBank.has(bankIndex)) return;
     const availableApp = appRows
       .map((row, index) => ({ row, index }))
       .filter(({ index }) => !usedApp.has(index));
-    const split = possibleSplit(bankRow, availableApp);
+    const split = possibleSplit(bankRow, availableApp, recurringExpenses);
     if (!split) return;
 
     usedBank.add(bankIndex);
@@ -266,12 +376,11 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
     splits.push({
       bank: bankRow,
       app: split.map(({ row }) => row),
-      confidence: 97,
-      reason: 'Montant bancaire retrouvé par ventilation',
+      confidence: 98,
+      reason: 'Ventilation validée par cohérence et total exact',
     });
   });
 
-  // Filtrage défensif final : aucune donnée hors du mois ne peut atteindre l'UI.
   const missing = monthBankRows
     .filter((row, index) => !usedBank.has(index))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth);
@@ -281,6 +390,7 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
 
   return {
     matched,
+    review,
     splits,
     groups,
     missing,
@@ -325,7 +435,13 @@ export default function BelfiusAudit({
   const monthMissing = (result?.missing || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const monthExtra = (result?.extra || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const difference = audit ? Number(appBelfiusBalance || 0) - audit.balance : 0;
-  const auditIsClean = Boolean(audit && result && monthMissing.length === 0 && monthExtra.length === 0);
+  const auditIsClean = Boolean(
+    audit
+    && result
+    && monthMissing.length === 0
+    && monthExtra.length === 0
+    && result.review.length === 0,
+  );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
   const canSynchronize = auditIsClean
     && Math.abs(difference) >= 0.01
@@ -374,7 +490,8 @@ export default function BelfiusAudit({
             <div><span>Solde Mon Foyer</span><strong>{money(appBelfiusBalance)}</strong></div>
             <div><span>Écart</span><strong className={Math.abs(difference) < 0.01 ? 'positive' : 'negative'}>{money(difference)}</strong></div>
             <div><span>Opérations du mois</span><strong>{result.bankRows.length}</strong></div>
-            <div><span>Correspondances</span><strong>{result.matched.length}</strong></div>
+            <div><span>Correspondances sûres</span><strong>{result.matched.length}</strong></div>
+            <div><span>À confirmer</span><strong>{result.review.length}</strong></div>
             <div><span>Ventilations reconnues</span><strong>{result.splits.length}</strong></div>
             <div><span>Regroupements reconnus</span><strong>{result.groups.length}</strong></div>
             <div><span>Absentes de Mon Foyer</span><strong>{monthMissing.length}</strong></div>
@@ -387,7 +504,7 @@ export default function BelfiusAudit({
 
           {result.matched.length > 0 && (
             <details className="audit-details">
-              <summary>Correspondances validées ({result.matched.length})</summary>
+              <summary>Correspondances sûres ({result.matched.length})</summary>
               {result.matched.map(({ bank, app, confidence, reason }) => (
                 <article key={bank.id}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
@@ -397,13 +514,27 @@ export default function BelfiusAudit({
             </details>
           )}
 
+          {result.review.length > 0 && (
+            <details className="audit-details" open>
+              <summary>Correspondances à confirmer ({result.review.length})</summary>
+              {result.review.map(({ bank, candidates, reason }) => (
+                <article key={`review-${bank.id}`}>
+                  <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
+                  <span>
+                    {reason} → {candidates.map(({ app, confidence }) => `${app.label} (${confidence}%)`).join(' / ')}
+                  </span>
+                </article>
+              ))}
+            </details>
+          )}
+
           {result.groups.length > 0 && (
             <details className="audit-details" open>
               <summary>Regroupements reconnus ({result.groups.length})</summary>
-              {result.groups.map(({ bank, app, confidence }) => (
+              {result.groups.map(({ bank, app, confidence, reason }) => (
                 <article key={`${app.id}-${bank.map((row) => row.id).join('-')}`}>
                   <strong>{bank[0]?.date} · {bank[0]?.label} · {bank.map((row) => money(row.amount)).join(' + ')}</strong>
-                  <span>→ {app.label} ({money(app.amount)}) · confiance {confidence}%</span>
+                  <span>→ {app.label} ({money(app.amount)}) · confiance {confidence}% · {reason}</span>
                 </article>
               ))}
             </details>
@@ -412,10 +543,10 @@ export default function BelfiusAudit({
           {result.splits.length > 0 && (
             <details className="audit-details" open>
               <summary>Ventilations reconnues ({result.splits.length})</summary>
-              {result.splits.map(({ bank, app, confidence }) => (
+              {result.splits.map(({ bank, app, confidence, reason }) => (
                 <article key={bank.id}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
-                  <span>{app.map((row) => `${row.label} (${money(row.amount)})`).join(' + ')} · confiance {confidence}%</span>
+                  <span>{app.map((row) => `${row.label} (${money(row.amount)})`).join(' + ')} · confiance {confidence}% · {reason}</span>
                 </article>
               ))}
             </details>
