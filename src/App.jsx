@@ -102,6 +102,7 @@ const defaultState = {
     { id: 'carburant', label: 'Carburant', icon: 'carburant', type: 'variable' },
     { id: 'transports_publics', label: 'Transports publics', icon: 'transports_publics', type: 'variable' },
     { id: 'sante', label: 'Santé', icon: 'sante', type: 'variable' },
+    { id: 'coiffeur', label: 'Coiffeur', icon: 'divers', type: 'variable' },
     { id: 'habitation', label: 'Habitation', icon: 'habitation', type: 'fixed' },
     { id: 'assurances', label: 'Assurances', icon: 'assurances', type: 'fixed' },
     { id: 'emprunt_maison', label: 'Emprunt maison', icon: 'emprunt_maison', type: 'fixed' },
@@ -280,6 +281,7 @@ function makeEmptyRecurringFixedExpense() {
     startDate: currentDate(),
     person: 'Foyer',
     category: 'habitation',
+    structuredCommunication: '',
   };
 }
 
@@ -1039,6 +1041,30 @@ export default function App() {
       recurringId: recurringExpense?.id || '',
     });
     setEditingId(operation.id);
+    setActiveView('add');
+  };
+
+
+  const addBankOperationFromAudit = (bankRow) => {
+    const label = String(bankRow?.label || 'Opération Belfius');
+    const normalized = label.toLowerCase();
+    let category = 'divers';
+    if (normalized.includes('lanza michel')) category = 'coiffeur';
+    else if (normalized.includes('dats24') || normalized.includes('q8') || normalized.includes('total')) category = 'carburant';
+    else if (normalized.includes('delhaize') || normalized.includes('lidl') || normalized.includes('carrefour') || normalized.includes('colruyt')) category = 'nourriture';
+    else if (normalized.includes('ethias') && Math.abs(Number(bankRow?.amount || 0)) > 500) category = 'emprunt_maison';
+
+    setDraft({
+      ...makeEmptyOperation(),
+      date: bankRow?.date || currentDate(),
+      type: Number(bankRow?.amount || 0) > 0 ? 'income' : 'variable',
+      category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : category,
+      store: label,
+      paymentMethod: 'Compte Belfius',
+      label: normalized.includes('lanza michel') ? 'Coiffeur' : label,
+      amount: Math.abs(Number(bankRow?.amount || 0)),
+    });
+    setEditingId(null);
     setActiveView('add');
   };
 
@@ -2254,6 +2280,7 @@ export default function App() {
               selectedMonth={selectedMonth}
               recurringExpenses={data.recurringFixedExpenses || []}
               onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
+              onAddBankOperation={addBankOperationFromAudit}
             />
 
             <section className="panel">
@@ -2298,6 +2325,14 @@ export default function App() {
                     value={recurringDraft.label}
                     onChange={(event) => setRecurringDraft({ ...recurringDraft, label: event.target.value })}
                     placeholder="Ex. Emprunt maison"
+                  />
+                </label>
+                <label>
+                  Communication structurée (facultative)
+                  <input
+                    value={recurringDraft.structuredCommunication || ''}
+                    onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
+                    placeholder="+++123/4567/89012+++"
                   />
                 </label>
                 <div className="recurring-grid">

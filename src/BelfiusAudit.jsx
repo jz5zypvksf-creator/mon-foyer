@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileSearch, RefreshCw, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';
 
 const money = (value) => new Intl.NumberFormat('fr-BE', {
   style: 'currency', currency: 'EUR',
@@ -28,6 +28,8 @@ const BELFIUS_ALIASES = [
     app: ['courses', 'nourriture', 'alimentaire', 'produits menagers', 'sanitaire', 'hygiene'],
   },
   { bank: ['pluxee'], app: ['cheques repassage', 'cheques repas', 'pluxee'] },
+  { bank: ['ethias'], app: ['ethias maison', 'emprunt maison'] },
+  { bank: ['lanza michel'], app: ['coiffeur', 'soins personnels'] },
 ];
 
 function parseAmount(value) {
@@ -65,6 +67,19 @@ function normalize(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+
+function extractStructuredCommunication(value) {
+  const raw = String(value || '');
+  const formatted = raw.match(/\+{3}\s*\d{3}\/\d{4}\/\d{5}\s*\+{3}/);
+  if (formatted) return formatted[0].replace(/\s/g, '');
+  const digits = raw.replace(/\D/g, '');
+  return digits.length === 12 ? digits : '';
+}
+
+function normalizedCommunication(value) {
+  return String(value || '').replace(/\D/g, '');
 }
 
 function parseCsvLine(line) {
@@ -113,6 +128,8 @@ function parseBelfius(text) {
       amount: parseAmount(cells[amountIndex]),
       label: cells[nameIndex] || cells[transactionIndex] || cells[communicationIndex] || 'Opération Belfius',
       details: cells[communicationIndex] || cells[transactionIndex] || '',
+      communication: cells[communicationIndex] || '',
+      structuredCommunication: extractStructuredCommunication(cells[communicationIndex] || ''),
     }))
     .filter((row) => row.date && row.amount !== 0);
 
@@ -155,6 +172,17 @@ function bankHasKnownAlias(bankRow) {
   return BELFIUS_ALIASES.some((alias) => alias.bank.some((needle) => bankLabel.includes(needle)));
 }
 
+
+function recurringCommunication(expense) {
+  return normalizedCommunication(
+    expense?.structuredCommunication
+    || expense?.structured_communication
+    || expense?.communication
+    || expense?.ocr
+    || '',
+  );
+}
+
 function recurringBelongsToAppRow(expense, appRow) {
   if (!expense || !appRow) return false;
   const expenseLabel = normalize(expense.label);
@@ -170,13 +198,19 @@ function findRecurringMatch(bankRow, appRow, recurringExpenses) {
   if (bankRow.amount >= 0 || appRow.type === 'income') return null;
   const operationAmount = Math.abs(Number(appRow.amount) || 0);
   const day = Number(appRow.date?.slice(8, 10));
-  return (recurringExpenses || []).find((expense) => {
+  const bankCommunication = normalizedCommunication(bankRow.structuredCommunication || bankRow.communication);
+  const candidates = (recurringExpenses || []).filter((expense) => {
     const recurringAmount = Math.abs(Number(expense.amount) || 0);
     const recurringDay = Number(expense.day) || 1;
     return recurringBelongsToAppRow(expense, appRow)
       && Math.abs(recurringAmount - operationAmount) <= AMOUNT_TOLERANCE
       && Math.abs(recurringDay - day) <= DATE_TOLERANCE_DAYS;
-  }) || null;
+  });
+  if (bankCommunication) {
+    const exactCommunication = candidates.find((expense) => recurringCommunication(expense) === bankCommunication);
+    if (exactCommunication) return { ...exactCommunication, __communicationMatch: true };
+  }
+  return candidates[0] || null;
 }
 
 function matchEvidence(bankRow, appRow, recurringExpenses) {
@@ -189,6 +223,14 @@ function matchEvidence(bankRow, appRow, recurringExpenses) {
   const alias = aliasMatch(bankRow, appRow);
   const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);
 
+  if (recurring && recurring.__communicationMatch) {
+    return {
+      auto: true,
+      confidence: 100,
+      reason: `Communication structurée + frais récurrent : ${recurring.label}`,
+      recurring,
+    };
+  }
   if (recurring && (directLabel || alias || !bankHasKnownAlias(bankRow))) {
     return {
       auto: true,
@@ -418,6 +460,7 @@ export default function BelfiusAudit({
   selectedMonth,
   recurringExpenses = [],
   onSynchronizeBelfiusBalance,
+  onAddBankOperation,
 }) {
   const [audit, setAudit] = useState(null);
   const [error, setError] = useState('');
@@ -571,7 +614,17 @@ export default function BelfiusAudit({
             <details className="audit-details status-danger" open>
               <summary><span className="audit-dot" />Opérations Belfius absentes ({monthMissing.length})</summary>
               {monthMissing.map((row) => (
-                <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.amount)}</span></article>
+                <article key={row.id} className="audit-missing-row">
+                  <strong>{row.date} · {row.label}</strong>
+                  <span className="audit-missing-actions">
+                    <b>{money(row.amount)}</b>
+                    {typeof onAddBankOperation === 'function' && (
+                      <button type="button" className="audit-pencil" title="Enregistrer dans Mon Foyer" aria-label={`Enregistrer ${row.label} dans Mon Foyer`} onClick={() => onAddBankOperation(row)}>
+                        <Pencil size={17} />
+                      </button>
+                    )}
+                  </span>
+                </article>
               ))}
             </details>
           )}
