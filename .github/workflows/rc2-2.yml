@@ -21,6 +21,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Corrige le script RC2.2 avant exécution
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-rc2-2.mjs')
+          lines = p.read_text(encoding='utf-8').splitlines()
+          for i, line in enumerate(lines):
+              if line.startswith('const parseCutoffHelper = '):
+                  lines[i] = "const parseCutoffHelper = \\"\\nfunction parseBalanceDate(value) {\\n  const match = String(value || '').match(/(\\\\d{2})\\\\/(\\\\d{2})\\\\/(\\\\d{4})/);\\n  return match ? match[3] + '-' + match[2] + '-' + match[1] : '';\\n}\\n\\";"
+                  break
+          p.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
       - run: node scripts/apply-rc2-2.mjs
       - run: npm install
       - run: npm run build
