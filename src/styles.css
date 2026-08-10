@@ -1692,3 +1692,11 @@ input, select, textarea {
     margin-inline: auto;
   }
 }
+
+
+/* V32 RC2.2 — Audit bancaire */
+.audit-kpi span{display:flex;align-items:center;gap:7px}.audit-dot{display:inline-block;width:10px;height:10px;flex:0 0 10px;border-radius:999px;background:#83919b;box-shadow:0 0 0 3px rgba(131,145,155,.12)}
+.audit-kpi.safe .audit-dot,.status-safe .audit-dot{background:#2f9d62}.audit-kpi.review .audit-dot,.status-review .audit-dot{background:#e0a11b}.audit-kpi.future .audit-dot,.status-future .audit-dot{background:#3984c6}.audit-kpi.group .audit-dot,.status-group .audit-dot{background:#7655b7}.audit-kpi.split .audit-dot,.status-split .audit-dot{background:#d98128}.audit-kpi.danger .audit-dot,.status-danger .audit-dot{background:#c64b4b}
+.audit-details{border-radius:16px;overflow:hidden;border:1px solid #dbe4e0;background:#fff}.audit-details summary{display:flex;align-items:center;gap:9px;padding:13px 14px;font-weight:850;cursor:pointer}.audit-details.status-safe{background:#f2faf5;border-color:#cfe7d8}.audit-details.status-review{background:#fff9ea;border-color:#ead9a7}.audit-details.status-future{background:#f2f7fc;border-color:#cbddeb}.audit-details.status-group{background:#f7f3fc;border-color:#dcd0ed}.audit-details.status-split{background:#fff7ef;border-color:#ecd2b7}.audit-details.status-danger{background:#fff4f4;border-color:#eccaca}
+.audit-section-note{margin:0;padding:0 14px 11px;color:var(--muted);font-size:.82rem;line-height:1.35}.audit-badge{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:999px;font-size:.76rem;font-weight:850;white-space:nowrap}.audit-badge.future{background:#deecf8;color:#1d6097}
+@media(max-width:600px){.audit-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.audit-details article{grid-template-columns:1fr;gap:4px}.audit-details article span{text-align:left}.audit-badge{white-space:normal}}

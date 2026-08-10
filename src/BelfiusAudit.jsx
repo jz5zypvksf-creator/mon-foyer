@@ -43,6 +43,11 @@ function parseDate(value) {
   return match ? `${match[3]}-${match[2]}-${match[1]}` : '';
 }
 
+function parseBalanceDate(value) {
+  const match = String(value || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return match ? match[3] + '-' + match[2] + '-' + match[1] : '';
+}
+
 function parseBalanceMonth(value) {
   const match = String(value || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
   return match ? `${match[3]}-${match[2]}` : '';
@@ -292,6 +297,8 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
 
   const usedBank = new Set();
   const usedApp = new Set();
+  const pendingBank = new Set();
+  const pendingApp = new Set();
   const matched = [];
   const review = [];
   const splits = [];
@@ -320,6 +327,8 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
 
     if (automatic.length > 1) {
       // Plusieurs candidats forts : ne pas choisir arbitrairement.
+      pendingBank.add(bankIndex);
+      automatic.forEach(({ index }) => pendingApp.add(index));
       review.push({
         bank: bankRow,
         candidates: automatic.map(({ row, evidence }) => ({ app: row, ...evidence })),
@@ -331,6 +340,8 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
     // Montant/date seuls : proposition visible, jamais validation automatique.
     const proposals = candidates.filter(({ evidence }) => !evidence.auto);
     if (proposals.length > 0) {
+      pendingBank.add(bankIndex);
+      proposals.slice(0, 3).forEach(({ index }) => pendingApp.add(index));
       review.push({
         bank: bankRow,
         candidates: proposals.slice(0, 3).map(({ row, evidence }) => ({ app: row, ...evidence })),
@@ -382,10 +393,10 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
   });
 
   const missing = monthBankRows
-    .filter((row, index) => !usedBank.has(index))
+    .filter((row, index) => !usedBank.has(index) && !pendingBank.has(index))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth);
   const extra = appRows
-    .filter((row, index) => !usedApp.has(index))
+    .filter((row, index) => !usedApp.has(index) && !pendingApp.has(index))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth);
 
   return {
@@ -434,12 +445,15 @@ export default function BelfiusAudit({
   const safeMonth = result?.auditMonth || selectedMonth || '';
   const monthMissing = (result?.missing || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const monthExtra = (result?.extra || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
+  const cutoffDate = parseBalanceDate(audit?.balanceDate);
+  const futureExtra = monthExtra.filter((row) => cutoffDate && String(row.date || '') > cutoffDate);
+  const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') <= cutoffDate);
   const difference = audit ? Number(appBelfiusBalance || 0) - audit.balance : 0;
   const auditIsClean = Boolean(
     audit
     && result
     && monthMissing.length === 0
-    && monthExtra.length === 0
+    && actionableExtra.length === 0
     && result.review.length === 0,
   );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
@@ -490,12 +504,13 @@ export default function BelfiusAudit({
             <div><span>Solde Mon Foyer</span><strong>{money(appBelfiusBalance)}</strong></div>
             <div><span>Écart</span><strong className={Math.abs(difference) < 0.01 ? 'positive' : 'negative'}>{money(difference)}</strong></div>
             <div><span>Opérations du mois</span><strong>{result.bankRows.length}</strong></div>
-            <div><span>Correspondances sûres</span><strong>{result.matched.length}</strong></div>
-            <div><span>À confirmer</span><strong>{result.review.length}</strong></div>
-            <div><span>Ventilations reconnues</span><strong>{result.splits.length}</strong></div>
-            <div><span>Regroupements reconnus</span><strong>{result.groups.length}</strong></div>
-            <div><span>Absentes de Mon Foyer</span><strong>{monthMissing.length}</strong></div>
-            <div><span>En trop dans Mon Foyer</span><strong>{monthExtra.length}</strong></div>
+            <div className="audit-kpi safe"><span><i className="audit-dot" />Correspondances sûres</span><strong>{result.matched.length}</strong></div>
+            <div className="audit-kpi review"><span><i className="audit-dot" />À confirmer</span><strong>{result.review.length}</strong></div>
+            <div className="audit-kpi split"><span><i className="audit-dot" />Ventilations</span><strong>{result.splits.length}</strong></div>
+            <div className="audit-kpi group"><span><i className="audit-dot" />Regroupements</span><strong>{result.groups.length}</strong></div>
+            <div className="audit-kpi future"><span><i className="audit-dot" />À venir</span><strong>{futureExtra.length}</strong></div>
+            <div className="audit-kpi danger"><span><i className="audit-dot" />Anomalies Belfius</span><strong>{monthMissing.length}</strong></div>
+            <div className="audit-kpi danger"><span><i className="audit-dot" />À vérifier Mon Foyer</span><strong>{actionableExtra.length}</strong></div>
           </div>
 
           {canSynchronize && (
@@ -503,8 +518,8 @@ export default function BelfiusAudit({
           )}
 
           {result.matched.length > 0 && (
-            <details className="audit-details">
-              <summary>Correspondances sûres ({result.matched.length})</summary>
+            <details className="audit-details status-safe">
+              <summary><span className="audit-dot" />Correspondances sûres ({result.matched.length})</summary>
               {result.matched.map(({ bank, app, confidence, reason }) => (
                 <article key={bank.id}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
@@ -515,8 +530,8 @@ export default function BelfiusAudit({
           )}
 
           {result.review.length > 0 && (
-            <details className="audit-details" open>
-              <summary>Correspondances à confirmer ({result.review.length})</summary>
+            <details className="audit-details status-review" open>
+              <summary><span className="audit-dot" />Correspondances à confirmer ({result.review.length})</summary>
               {result.review.map(({ bank, candidates, reason }) => (
                 <article key={`review-${bank.id}`}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
@@ -529,8 +544,8 @@ export default function BelfiusAudit({
           )}
 
           {result.groups.length > 0 && (
-            <details className="audit-details" open>
-              <summary>Regroupements reconnus ({result.groups.length})</summary>
+            <details className="audit-details status-group" open>
+              <summary><span className="audit-dot" />Regroupements reconnus ({result.groups.length})</summary>
               {result.groups.map(({ bank, app, confidence, reason }) => (
                 <article key={`${app.id}-${bank.map((row) => row.id).join('-')}`}>
                   <strong>{bank[0]?.date} · {bank[0]?.label} · {bank.map((row) => money(row.amount)).join(' + ')}</strong>
@@ -541,8 +556,8 @@ export default function BelfiusAudit({
           )}
 
           {result.splits.length > 0 && (
-            <details className="audit-details" open>
-              <summary>Ventilations reconnues ({result.splits.length})</summary>
+            <details className="audit-details status-split" open>
+              <summary><span className="audit-dot" />Ventilations reconnues ({result.splits.length})</summary>
               {result.splits.map(({ bank, app, confidence, reason }) => (
                 <article key={bank.id}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
@@ -553,18 +568,28 @@ export default function BelfiusAudit({
           )}
 
           {monthMissing.length > 0 && (
-            <details className="audit-details" open>
-              <summary>Opérations Belfius absentes ({monthMissing.length})</summary>
+            <details className="audit-details status-danger" open>
+              <summary><span className="audit-dot" />Opérations Belfius absentes ({monthMissing.length})</summary>
               {monthMissing.map((row) => (
                 <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.amount)}</span></article>
               ))}
             </details>
           )}
 
-          {monthExtra.length > 0 && (
-            <details className="audit-details" open>
-              <summary>Opérations Mon Foyer sans correspondance ({monthExtra.length})</summary>
-              {monthExtra.map((row) => (
+          {futureExtra.length > 0 && (
+            <details className="audit-details status-future" open>
+              <summary><span className="audit-dot" />Opérations programmées — en attente du prochain relevé ({futureExtra.length})</summary>
+              <p className="audit-section-note">Déjà enregistrées dans Mon Foyer, mais postérieures au dernier solde Belfius importé.</p>
+              {futureExtra.map((row) => (
+                <article key={row.id}><strong>{row.date} · {row.label}</strong><span className="audit-badge future">À venir · {money(row.type === 'income' ? row.amount : -row.amount)}</span></article>
+              ))}
+            </details>
+          )}
+
+          {actionableExtra.length > 0 && (
+            <details className="audit-details status-danger" open>
+              <summary><span className="audit-dot" />Opérations Mon Foyer à vérifier ({actionableExtra.length})</summary>
+              {actionableExtra.map((row) => (
                 <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.type === 'income' ? row.amount : -row.amount)}</span></article>
               ))}
             </details>
