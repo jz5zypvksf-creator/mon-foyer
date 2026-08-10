@@ -1,0 +1,33 @@
+name: RC2.3 audit intelligent
+
+on:
+  push:
+    paths:
+      - '.github/workflows/rc2-3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v32-rc2-3
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-rc2-3.mjs
+      - run: npm install
+      - run: npm run build
+      - name: Commit RC2.3
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx src/BelfiusAudit.jsx
+          git diff --cached --quiet || git commit -m "V32 RC2.3 - OCR, Ethias et ajout direct depuis audit"
+          git push origin HEAD:v32-rc2-3
