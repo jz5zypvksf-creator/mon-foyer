@@ -270,6 +270,9 @@ function makeEmptyOperation() {
     recurrence: 'once',
     recurringDay: new Date().getDate(),
     recurringId: '',
+    structuredCommunication: '',
+    freeCommunication: '',
+    freeCommunicationMode: 'contains',
   };
 }
 
@@ -882,9 +885,9 @@ export default function App() {
       category: operation.category,
       frequency: operation.recurrence || 'monthly',
       startDate: operation.date,
-      structuredCommunication: existing?.structuredCommunication || existing?.structured_communication || '',
-      freeCommunication: existing?.freeCommunication || existing?.free_communication || '',
-      freeCommunicationMode: existing?.freeCommunicationMode || existing?.free_communication_mode || 'contains',
+      structuredCommunication: operation.structuredCommunication ?? existing?.structuredCommunication ?? existing?.structured_communication ?? '',
+      freeCommunication: operation.freeCommunication ?? existing?.freeCommunication ?? existing?.free_communication ?? '',
+      freeCommunicationMode: operation.freeCommunicationMode || existing?.freeCommunicationMode || existing?.free_communication_mode || 'contains',
     };
 
     if (USE_REMOTE_BUDGET) {
@@ -1027,6 +1030,9 @@ export default function App() {
           recurrence: draft.recurrence,
           recurringDay: draft.recurringDay,
           recurringId: draft.recurringId,
+          structuredCommunication: draft.structuredCommunication || '',
+          freeCommunication: draft.freeCommunication || '',
+          freeCommunicationMode: draft.freeCommunicationMode || 'contains',
         });
         if (savedRecurring) {
           const exists = recurringFixedExpenses.some((expense) => expense.id === savedRecurring.id);
@@ -1055,6 +1061,9 @@ export default function App() {
       recurrence: recurringExpense?.frequency || 'once',
       recurringDay: recurringExpense?.day || Number(operation.date.slice(8, 10)),
       recurringId: recurringExpense?.id || '',
+      structuredCommunication: recurringExpense?.structuredCommunication || recurringExpense?.structured_communication || '',
+      freeCommunication: recurringExpense?.freeCommunication || recurringExpense?.free_communication || '',
+      freeCommunicationMode: recurringExpense?.freeCommunicationMode || recurringExpense?.free_communication_mode || 'contains',
     });
     setEditingId(operation.id);
     setActiveView('add');
@@ -2139,6 +2148,40 @@ export default function App() {
                         onChange={(event) => setDraft({ ...draft, recurringDay: event.target.value })}
                       />
                     </label>
+                  )}
+                  {draft.recurrence !== 'once' && (
+                    <div className="belfius-identification-inline">
+                      <div className="belfius-identification-title">Identification Belfius <span>(facultatif)</span></div>
+                      <label>
+                        Communication structurée
+                        <input
+                          value={draft.structuredCommunication || ''}
+                          onChange={(event) => setDraft({ ...draft, structuredCommunication: event.target.value })}
+                          placeholder="Ex. 827-6921515-21 ou +++123/4567/89012+++"
+                        />
+                      </label>
+                      <div className="form-row">
+                        <label>
+                          Communication libre / motif Belfius
+                          <input
+                            value={draft.freeCommunication || ''}
+                            onChange={(event) => setDraft({ ...draft, freeCommunication: event.target.value })}
+                            placeholder="Ex. Pension, Pour voiture…"
+                          />
+                        </label>
+                        <label>
+                          Règle de reconnaissance
+                          <select
+                            value={draft.freeCommunicationMode || 'contains'}
+                            onChange={(event) => setDraft({ ...draft, freeCommunicationMode: event.target.value })}
+                          >
+                            <option value="contains">Contient</option>
+                            <option value="exact">Correspond exactement</option>
+                          </select>
+                        </label>
+                      </div>
+                      <p className="hint">Ces informations sont enregistrées sur le paiement récurrent associé et servent au rapprochement bancaire.</p>
+                    </div>
                   )}
                 </section>
               )}
