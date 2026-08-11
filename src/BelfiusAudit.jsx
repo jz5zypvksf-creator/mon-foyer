@@ -202,6 +202,15 @@ function recurringCommunication(expense) {
   );
 }
 
+function recurringFreeCommunicationMatch(bankRow, expense) {
+  const expected = normalize(expense?.freeCommunication || expense?.free_communication || '');
+  if (!expected) return false;
+  const actual = normalize(bankRow?.communication || bankRow?.details || '');
+  if (!actual) return false;
+  const mode = expense?.freeCommunicationMode || expense?.free_communication_mode || 'contains';
+  return mode === 'exact' ? actual === expected : actual.includes(expected);
+}
+
 function recurringBelongsToAppRow(expense, appRow) {
   if (!expense || !appRow) return false;
   const expenseLabel = normalize(expense.label);
@@ -229,6 +238,8 @@ function findRecurringMatch(bankRow, appRow, recurringExpenses) {
     const exactCommunication = candidates.find((expense) => recurringCommunication(expense) === bankCommunication);
     if (exactCommunication) return { ...exactCommunication, __communicationMatch: true };
   }
+  const freeCommunication = candidates.find((expense) => recurringFreeCommunicationMatch(bankRow, expense));
+  if (freeCommunication) return { ...freeCommunication, __freeCommunicationMatch: true };
   return candidates[0] || null;
 }
 
@@ -242,11 +253,19 @@ function matchEvidence(bankRow, appRow, recurringExpenses) {
   const alias = aliasMatch(bankRow, appRow);
   const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);
 
+  if (recurring && recurring.__freeCommunicationMatch) {
+    return {
+      auto: true,
+      confidence: 100,
+      reason: `Communication libre Belfius reconnue + frais récurrent : ${recurring.label}`,
+      recurring,
+    };
+  }
   if (recurring && recurring.__communicationMatch) {
     return {
       auto: true,
       confidence: 100,
-      reason: `Communication structurée + frais récurrent : ${recurring.label}`,
+      reason: `Communication structurée Belfius + frais récurrent : ${recurring.label}`,
       recurring,
     };
   }

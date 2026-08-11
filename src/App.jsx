@@ -283,6 +283,8 @@ function makeEmptyRecurringFixedExpense() {
     person: 'Foyer',
     category: 'habitation',
     structuredCommunication: '',
+    freeCommunication: '',
+    freeCommunicationMode: 'contains',
   };
 }
 
@@ -370,6 +372,9 @@ function normalizeRemoteState(remote) {
       category: expense.category,
       frequency: expense.frequency || 'monthly',
       startDate: expense.start_date || currentDate(),
+      structuredCommunication: expense.structured_communication || '',
+      freeCommunication: expense.free_communication || '',
+      freeCommunicationMode: expense.free_communication_mode || 'contains',
     })),
   };
 }
@@ -744,7 +749,7 @@ export default function App() {
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
-        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
       ]);
 
       if (ignore) return;
@@ -828,7 +833,7 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_fixed_expenses' }, async () => {
         const { data: rows } = await supabase
           .from('recurring_fixed_expenses')
-          .select('id, label, amount, day, person, category, frequency, start_date')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
           .eq('household_id', householdId)
           .order('created_at', { ascending: true });
         if (rows) {
@@ -837,6 +842,9 @@ export default function App() {
               ...expense,
               amount: Number(expense.amount),
               day: Number(expense.day),
+              structuredCommunication: expense.structured_communication || '',
+              freeCommunication: expense.free_communication || '',
+              freeCommunicationMode: expense.free_communication_mode || 'contains',
             })),
           });
         }
@@ -874,6 +882,9 @@ export default function App() {
       category: operation.category,
       frequency: operation.recurrence || 'monthly',
       startDate: operation.date,
+      structuredCommunication: existing?.structuredCommunication || existing?.structured_communication || '',
+      freeCommunication: existing?.freeCommunication || existing?.free_communication || '',
+      freeCommunicationMode: existing?.freeCommunicationMode || existing?.free_communication_mode || 'contains',
     };
 
     if (USE_REMOTE_BUDGET) {
@@ -886,13 +897,16 @@ export default function App() {
         category: recurringExpense.category,
         frequency: recurringExpense.frequency,
         start_date: recurringExpense.startDate,
+        structured_communication: recurringExpense.structuredCommunication || null,
+        free_communication: recurringExpense.freeCommunication || null,
+        free_communication_mode: recurringExpense.freeCommunicationMode || 'contains',
       };
 
       const query = existing
         ? supabase.from('recurring_fixed_expenses').update(payload).eq('id', existing.id).eq('household_id', householdId)
         : supabase.from('recurring_fixed_expenses').insert(payload);
 
-      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date');
+      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode');
       if (error) throw new Error(formatSupabaseRecurringError(error));
       const saved = savedRows?.[0];
       if (saved) {
@@ -1216,6 +1230,9 @@ export default function App() {
       startDate: expense.startDate || expense.start_date || currentDate(),
       person: expense.person || 'Foyer',
       category: expense.category || 'habitation',
+      structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',
+      freeCommunication: expense.freeCommunication || expense.free_communication || '',
+      freeCommunicationMode: expense.freeCommunicationMode || expense.free_communication_mode || 'contains',
     });
     setRecurringStatus('Modification du frais récurrent en cours.');
     window.setTimeout(() => {
@@ -1244,6 +1261,9 @@ export default function App() {
       category: recurringDraft.category,
       frequency: recurringDraft.frequency || 'monthly',
       startDate: recurringDraft.startDate || currentDate(),
+      structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),
+      freeCommunication: String(recurringDraft.freeCommunication || '').trim(),
+      freeCommunicationMode: recurringDraft.freeCommunicationMode || 'contains',
     };
 
     const identicalRecurring = (data.recurringFixedExpenses || []).find(
@@ -1271,6 +1291,9 @@ export default function App() {
         category: fixedExpense.category,
         frequency: fixedExpense.frequency,
         start_date: fixedExpense.startDate,
+        structured_communication: fixedExpense.structuredCommunication || null,
+        free_communication: fixedExpense.freeCommunication || null,
+        free_communication_mode: fixedExpense.freeCommunicationMode || 'contains',
       };
 
       const query = recurringEditingId
@@ -1279,12 +1302,12 @@ export default function App() {
           .update(payload)
           .eq('id', recurringEditingId)
           .eq('household_id', householdId)
-          .select('id, label, amount, day, person, category, frequency, start_date')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
           .single()
         : supabase
           .from('recurring_fixed_expenses')
           .insert(payload)
-          .select('id, label, amount, day, person, category, frequency, start_date')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
           .single();
 
       const { data: savedExpense, error } = await query;
@@ -1303,6 +1326,9 @@ export default function App() {
         category: savedExpense.category,
         frequency: savedExpense.frequency || 'monthly',
         startDate: savedExpense.start_date || currentDate(),
+        structuredCommunication: savedExpense.structured_communication || '',
+        freeCommunication: savedExpense.free_communication || '',
+        freeCommunicationMode: savedExpense.free_communication_mode || 'contains',
       };
     }
 
@@ -1484,7 +1510,7 @@ export default function App() {
         .order('label', { ascending: true }),
       supabase
         .from('recurring_fixed_expenses')
-        .select('id, label, amount, day, person, category, frequency, start_date')
+        .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
     ]);
@@ -2330,14 +2356,35 @@ export default function App() {
                     placeholder="Ex. Emprunt maison"
                   />
                 </label>
-                <label>
-                  Communication structurée (facultative)
-                  <input
-                    value={recurringDraft.structuredCommunication || ''}
-                    onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
-                    placeholder="+++123/4567/89012+++"
-                  />
-                </label>
+                <fieldset className="recurring-bank-identification">
+                  <legend>Identification Belfius (facultatif)</legend>
+                  <label>
+                    Communication structurée
+                    <input
+                      value={recurringDraft.structuredCommunication || ''}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
+                      placeholder="+++123/4567/89012+++"
+                    />
+                  </label>
+                  <label>
+                    Communication libre / motif Belfius
+                    <input
+                      value={recurringDraft.freeCommunication || ''}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, freeCommunication: event.target.value })}
+                      placeholder="Ex. Pension, Pour voiture, POL. DROIT COM..."
+                    />
+                  </label>
+                  <label>
+                    Règle de reconnaissance
+                    <select
+                      value={recurringDraft.freeCommunicationMode || 'contains'}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, freeCommunicationMode: event.target.value })}
+                    >
+                      <option value="contains">La communication Belfius contient ce texte</option>
+                      <option value="exact">La communication Belfius correspond exactement</option>
+                    </select>
+                  </label>
+                </fieldset>
                 <div className="recurring-grid">
                   <label>
                     Montant
