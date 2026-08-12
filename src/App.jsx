@@ -638,7 +638,9 @@ export default function App() {
 
   const filteredMonthOperations = useMemo(() => {
     const search = historySearch.trim().toLowerCase();
-    return monthOperations.filter((operation) => {
+    // RC2.4.4 : l'Historique porte uniquement sur les opérations réellement passées.
+    // Les opérations futures restent dans la rubrique À venir / Programmées.
+    return effectiveMonthOperations.filter((operation) => {
       const category = data.categories.find((item) => item.id === operation.category);
       const haystack = [
         operation.label,
@@ -657,7 +659,7 @@ export default function App() {
       if (search && !haystack.includes(search)) return false;
       return true;
     });
-  }, [data.categories, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
+  }, [data.categories, effectiveMonthOperations, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => {
     const filteredTotals = calculateTotals(filteredMonthOperations);
@@ -959,7 +961,8 @@ export default function App() {
     const operation = {
       ...draft,
       amount,
-      store: draft.type === 'income' || draft.type === 'fixed' ? '' : draft.store,
+      // Le bénéficiaire / point de vente est utile pour tous les débits, y compris les frais fixes.
+      store: draft.type === 'income' ? '' : draft.store,
       category: draft.type === 'income' ? 'revenus' : draft.category,
       paymentMethod: draft.paymentMethod || 'Compte Belfius',
       id: editingId || crypto.randomUUID(),
@@ -1073,22 +1076,54 @@ export default function App() {
   const addBankOperationFromAudit = (bankRow) => {
     const label = String(bankRow?.label || 'Opération Belfius');
     const normalized = label.toLowerCase();
-    let category = 'divers';
-    if (normalized.includes('lanza michel')) category = 'coiffeur';
-    else if (normalized.includes('dats24') || normalized.includes('q8') || normalized.includes('total')) category = 'carburant';
-    else if (normalized.includes('delhaize') || normalized.includes('lidl') || normalized.includes('carrefour') || normalized.includes('colruyt')) category = 'nourriture';
-    else if (normalized.includes('ethias') && Math.abs(Number(bankRow?.amount || 0)) > 500) category = 'emprunt_maison';
+    const amount = Math.abs(Number(bankRow?.amount || 0));
+    const bankCommunication = String(bankRow?.communication || bankRow?.details || '');
+    const normalizedBankCommunication = bankCommunication.toLowerCase();
+    const bankDigits = bankCommunication.replace(/\D/g, '');
+
+    // RC2.4.4 : si Belfius correspond déjà à un frais récurrent connu, le crayon
+    // ouvre directement ce frais au lieu de proposer artificiellement une dépense variable.
+    const recurringCandidate = Number(bankRow?.amount || 0) < 0
+      ? (data.recurringFixedExpenses || []).find((expense) => {
+        if (Math.abs(Math.abs(Number(expense.amount) || 0) - amount) > 0.05) return false;
+        const structured = String(expense.structuredCommunication || expense.structured_communication || '').replace(/\D/g, '');
+        const free = String(expense.freeCommunication || expense.free_communication || '').trim().toLowerCase();
+        const mode = expense.freeCommunicationMode || expense.free_communication_mode || 'contains';
+        const structuredMatches = structured && bankDigits.includes(structured);
+        const freeMatches = free && (mode === 'exact'
+          ? normalizedBankCommunication.trim() === free
+          : normalizedBankCommunication.includes(free));
+        return structuredMatches || freeMatches;
+      })
+      : null;
+
+    let category = recurringCandidate?.category || 'divers';
+    if (!recurringCandidate) {
+      if (normalized.includes('lanza michel')) category = 'coiffeur';
+      else if (normalized.includes('dats24') || normalized.includes('q8') || normalized.includes('total')) category = 'carburant';
+      else if (normalized.includes('delhaize') || normalized.includes('lidl') || normalized.includes('carrefour') || normalized.includes('colruyt')) category = 'nourriture';
+      else if (normalized.includes('ethias') && amount > 500) category = 'emprunt_maison';
+    }
 
     setDraft({
       ...makeEmptyOperation(),
       date: bankRow?.date || currentDate(),
-      type: Number(bankRow?.amount || 0) > 0 ? 'income' : 'variable',
+      type: Number(bankRow?.amount || 0) > 0 ? 'income' : recurringCandidate ? 'fixed' : 'variable',
       category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : category,
       store: label,
       paymentMethod: 'Compte Belfius',
-      label: normalized.includes('lanza michel') ? 'Coiffeur' : label,
-      amount: Math.abs(Number(bankRow?.amount || 0)),
+      label: recurringCandidate?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
+      amount,
+      recurrence: recurringCandidate?.frequency || 'once',
+      recurringDay: recurringCandidate?.day || Number(String(bankRow?.date || currentDate()).slice(8, 10)),
+      recurringId: recurringCandidate?.id || '',
+      structuredCommunication: recurringCandidate?.structuredCommunication || recurringCandidate?.structured_communication || '',
+      freeCommunication: recurringCandidate?.freeCommunication || recurringCandidate?.free_communication || '',
+      freeCommunicationMode: recurringCandidate?.freeCommunicationMode || recurringCandidate?.free_communication_mode || 'contains',
     });
+    setOperationStatus(recurringCandidate
+      ? 'Frais récurrent Belfius reconnu : vérifie les données puis enregistre cette opération.'
+      : 'Opération Belfius préremplie : complète ou corrige les informations avant enregistrement.');
     setEditingId(null);
     setActiveView('add');
   };
@@ -2186,9 +2221,9 @@ export default function App() {
                 </section>
               )}
 
-              {draft.type === 'variable' && (
+              {draft.type !== 'income' && (
                 <label>
-                  Point de vente
+                  Bénéficiaire / Point de vente
                   <select value={draft.store} onChange={(event) => setDraft({ ...draft, store: event.target.value })}>
                     {data.stores.map((store) => (
                       <option key={store}>{store}</option>
@@ -2211,7 +2246,7 @@ export default function App() {
             <div className="panel">
               <div className="section-title">
                 <h2>Historique</h2>
-                <span>{filteredMonthOperations.length} / {monthOperations.length} lignes</span>
+                <span>{filteredMonthOperations.length} / {effectiveMonthOperations.length} lignes</span>
               </div>
               <div className="history-tools">
                 <input

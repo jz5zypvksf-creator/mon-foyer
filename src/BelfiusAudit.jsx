@@ -8,6 +8,27 @@ const money = (value) => new Intl.NumberFormat('fr-BE', {
 const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
 const DAY_MS = 86400000;
+const AUDIT_STORAGE_KEY = 'mon-foyer-belfius-audit-v1';
+
+function loadPersistedAudit() {
+  try {
+    const stored = localStorage.getItem(AUDIT_STORAGE_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    return parsed?.rows && Array.isArray(parsed.rows) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistAudit(audit) {
+  try {
+    if (!audit) localStorage.removeItem(AUDIT_STORAGE_KEY);
+    else localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(audit));
+  } catch {
+    // Un échec de stockage local ne doit jamais bloquer l'audit courant.
+  }
+}
 
 // RC2.1 — référentiel explicite des principaux libellés bancaires.
 // Les termes d'application sont volontairement larges uniquement lorsque le bénéficiaire
@@ -556,7 +577,8 @@ export default function BelfiusAudit({
   onAddBankOperation,
   onSavingsDetected,
 }) {
-  const [audit, setAudit] = useState(null);
+  // RC2.4.4 : le dernier relevé reste disponible entre les ouvertures de l'application.
+  const [audit, setAudit] = useState(loadPersistedAudit);
   const [error, setError] = useState('');
   const synchronizationKey = useRef('');
   const result = useMemo(
@@ -572,8 +594,13 @@ export default function BelfiusAudit({
     try {
       const buffer = await file.arrayBuffer();
       const text = new TextDecoder('windows-1252').decode(buffer);
-      const parsedAudit = parseBelfius(text);
+      const parsedAudit = {
+        ...parseBelfius(text),
+        importedAt: new Date().toISOString(),
+        fileName: file.name || 'Export Belfius.csv',
+      };
       setAudit(parsedAudit);
+      persistAudit(parsedAudit);
       if (typeof onSavingsDetected === 'function') {
         onSavingsDetected(detectSavingsTransfers(parsedAudit.rows));
       }
@@ -603,6 +630,7 @@ export default function BelfiusAudit({
     && balanceMonth === result?.auditMonth
     && typeof onSynchronizeBelfiusBalance === 'function';
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
+  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
 
   useEffect(() => {
     if (!canSynchronize || !audit) return;
@@ -623,6 +651,12 @@ export default function BelfiusAudit({
         {audit && <span>{result?.bankRows.length || 0} opérations · {result?.auditMonth}</span>}
       </div>
       <p className="hint">Le fichier complet est lu, mais l'audit porte uniquement sur le mois sélectionné.</p>
+      {audit && (
+        <p className="hint">
+          Relevé Belfius mémorisé · {audit.fileName || 'CSV Belfius'} · {remainingToTreat} opération(s) restant à traiter.
+          Tu peux quitter l'application et reprendre l'audit sans recharger le fichier.
+        </p>
+      )}
       <label className="belfius-upload">
         <Upload size={20} />
         <span>Choisir un fichier CSV Belfius</span>
