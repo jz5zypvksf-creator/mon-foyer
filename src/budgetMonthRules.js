@@ -34,3 +34,19 @@ export function budgetIncomeTotalForMonth(operations = [], monthKey = '') {
   return budgetIncomeOperationsForMonth(operations, monthKey)
     .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
 }
+
+// Deux repères de trésorerie : la projection issue des écritures Mon Foyer et
+// la même projection recalée sur le dernier solde Belfius certifié par le CSV.
+export function forecastBalances({ appAvailable = 0, appBelfiusBalance = 0, realBelfiusBalance = null, remainingToCover = 0 } = {}) {
+  const appForecast = Number(appAvailable || 0) - Number(remainingToCover || 0);
+  if (realBelfiusBalance == null || !Number.isFinite(Number(realBelfiusBalance))) {
+    return { appForecast, belfiusForecast: null };
+  }
+  const bankAdjustedAvailable = Number(appAvailable || 0)
+    - Number(appBelfiusBalance || 0)
+    + Number(realBelfiusBalance || 0);
+  return {
+    appForecast,
+    belfiusForecast: bankAdjustedAvailable - Number(remainingToCover || 0),
+  };
+}
