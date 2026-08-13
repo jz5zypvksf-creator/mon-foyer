@@ -56,11 +56,14 @@ export function strongCommunicationMatch(bankRow, recurringExpense) {
   return matches ? { kind: 'free', confidence: 100 } : null;
 }
 
+export function hasStrongCommunicationFingerprint(bankRow, recurringExpenses = []) {
+  return recurringExpenses.some((expense) => strongCommunicationMatch(bankRow, expense));
+}
+
 export function shouldOfferAmountDateFallback(bankRow, recurringExpenses = []) {
   // Une transaction disposant déjà d'une empreinte forte ne doit jamais recevoir
   // des propositions concurrentes uniquement parce que leur montant/date coïncident.
-  const hasStrongFingerprint = recurringExpenses.some((expense) => strongCommunicationMatch(bankRow, expense));
-  return !hasStrongFingerprint && !isBeobankTransfer(bankRow);
+  return !hasStrongCommunicationFingerprint(bankRow, recurringExpenses) && !isBeobankTransfer(bankRow);
 }
 
 export function isTrueOrphanAppOperation(appRow, context = {}) {
@@ -81,11 +84,26 @@ export function isTrueOrphanAppOperation(appRow, context = {}) {
   return true;
 }
 
+export function classifyBankBusinessRule(row) {
+  if (isBeobankTransfer(row)) {
+    return {
+      key: 'beobank',
+      destination: 'Vacances/Loisirs',
+      bucket: 'vacances',
+      kind: 'internal-savings-transfer',
+      auto: true,
+      excludeFromExpenseMatching: true,
+    };
+  }
+  return null;
+}
+
 export const BELFIUS_BUSINESS_RULES = Object.freeze({
   beobank: {
     destination: 'Vacances/Loisirs',
     bucket: 'vacances',
     kind: 'internal-savings-transfer',
     auto: true,
+    excludeFromExpenseMatching: true,
   },
 });
