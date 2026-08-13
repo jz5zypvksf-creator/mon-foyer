@@ -22,6 +22,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Prépare le patch RC2.4.6
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-rc2-4-6.mjs')
+          s = p.read_text()
+          s = s.replace("${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}", "\\${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}")
+          p.write_text(s)
+          PY
       - run: node scripts/apply-rc2-4-6.mjs
       - run: npm install
       - run: npm run build
