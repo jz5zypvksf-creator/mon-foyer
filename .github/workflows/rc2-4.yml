@@ -1,0 +1,34 @@
+name: RC2.4 epargne Belfius
+
+on:
+  push:
+    paths:
+      - '.github/workflows/rc2-4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v32-rc2-4
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/apply-rc2-4.mjs
+      - run: npm install
+      - run: npm run build
+      - name: Commit RC2.4
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx src/BelfiusAudit.jsx src/styles.css
+          git diff --cached --quiet || git commit -m "V32 RC2.4 - Synchronise epargne et transferts Belfius"
+          git push origin HEAD:v32-rc2-4
+# relance RC2.4 corrigée

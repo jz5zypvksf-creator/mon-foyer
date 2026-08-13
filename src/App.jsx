@@ -44,7 +44,7 @@ const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
-const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna'];
+const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna', 'Papa'];
 const RECURRENCE_OPTIONS = [
   { value: 'once', label: 'Une seule fois', months: 0 },
   { value: 'monthly', label: 'Mensuelle', months: 1 },
@@ -55,6 +55,20 @@ const RECURRENCE_OPTIONS = [
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
+const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
+
+function savingsBucketForGoal(goal) {
+  const text = String(goal?.label || goal?.id || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (text.includes('vacance') || text.includes('loisir')) return 'vacances';
+  if (text.includes('voiture') || text.includes('auto')) return 'voiture';
+  if (text.includes('pension')) return 'pension';
+  if (text.includes('urgence')) return 'urgence';
+  if (text.includes('maison')) return 'maison';
+  return String(goal?.id || 'autre');
+}
 
 const iconMap = {
   nourriture: ShoppingBasket,
@@ -102,6 +116,7 @@ const defaultState = {
     { id: 'carburant', label: 'Carburant', icon: 'carburant', type: 'variable' },
     { id: 'transports_publics', label: 'Transports publics', icon: 'transports_publics', type: 'variable' },
     { id: 'sante', label: 'Santé', icon: 'sante', type: 'variable' },
+    { id: 'coiffeur', label: 'Coiffeur', icon: 'divers', type: 'variable' },
     { id: 'habitation', label: 'Habitation', icon: 'habitation', type: 'fixed' },
     { id: 'assurances', label: 'Assurances', icon: 'assurances', type: 'fixed' },
     { id: 'emprunt_maison', label: 'Emprunt maison', icon: 'emprunt_maison', type: 'fixed' },
@@ -115,6 +130,7 @@ const defaultState = {
   ],
   savingsGoals: [
     { id: 'voiture', label: 'Voiture', target: 6000, saved: 1200 },
+    { id: 'pension', label: 'Pension A&E', target: 0, saved: 0 },
     { id: 'vacances', label: 'Vacances', target: 2500, saved: 650 },
     { id: 'maison', label: 'Maison', target: 20000, saved: 4200 },
     { id: 'urgence', label: "Fonds d'urgence", target: 5000, saved: 1800 },
@@ -268,6 +284,9 @@ function makeEmptyOperation() {
     recurrence: 'once',
     recurringDay: new Date().getDate(),
     recurringId: '',
+    structuredCommunication: '',
+    freeCommunication: '',
+    freeCommunicationMode: 'contains',
   };
 }
 
@@ -280,6 +299,9 @@ function makeEmptyRecurringFixedExpense() {
     startDate: currentDate(),
     person: 'Foyer',
     category: 'habitation',
+    structuredCommunication: '',
+    freeCommunication: '',
+    freeCommunicationMode: 'contains',
   };
 }
 
@@ -367,6 +389,9 @@ function normalizeRemoteState(remote) {
       category: expense.category,
       frequency: expense.frequency || 'monthly',
       startDate: expense.start_date || currentDate(),
+      structuredCommunication: expense.structured_communication || '',
+      freeCommunication: expense.free_communication || '',
+      freeCommunicationMode: expense.free_communication_mode || 'contains',
     })),
   };
 }
@@ -394,6 +419,8 @@ async function selectOperations(order = true) {
 export default function App() {
   const [data, setData] = useState(loadState);
   const [activeView, setActiveView] = useState('home');
+  const [bankSavings, setBankSavings] = useState({});
+  const [belfiusSnapshot, setBelfiusSnapshot] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [draft, setDraft] = useState(makeEmptyOperation);
   const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
@@ -626,7 +653,9 @@ export default function App() {
 
   const filteredMonthOperations = useMemo(() => {
     const search = historySearch.trim().toLowerCase();
-    return monthOperations.filter((operation) => {
+    // RC2.4.4 : l'Historique porte uniquement sur les opérations réellement passées.
+    // Les opérations futures restent dans la rubrique À venir / Programmées.
+    return effectiveMonthOperations.filter((operation) => {
       const category = data.categories.find((item) => item.id === operation.category);
       const haystack = [
         operation.label,
@@ -645,7 +674,7 @@ export default function App() {
       if (search && !haystack.includes(search)) return false;
       return true;
     });
-  }, [data.categories, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
+  }, [data.categories, effectiveMonthOperations, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => {
     const filteredTotals = calculateTotals(filteredMonthOperations);
@@ -740,7 +769,7 @@ export default function App() {
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
-        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
       ]);
 
       if (ignore) return;
@@ -824,7 +853,7 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_fixed_expenses' }, async () => {
         const { data: rows } = await supabase
           .from('recurring_fixed_expenses')
-          .select('id, label, amount, day, person, category, frequency, start_date')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
           .eq('household_id', householdId)
           .order('created_at', { ascending: true });
         if (rows) {
@@ -833,6 +862,9 @@ export default function App() {
               ...expense,
               amount: Number(expense.amount),
               day: Number(expense.day),
+              structuredCommunication: expense.structured_communication || '',
+              freeCommunication: expense.free_communication || '',
+              freeCommunicationMode: expense.free_communication_mode || 'contains',
             })),
           });
         }
@@ -870,6 +902,9 @@ export default function App() {
       category: operation.category,
       frequency: operation.recurrence || 'monthly',
       startDate: operation.date,
+      structuredCommunication: operation.structuredCommunication ?? existing?.structuredCommunication ?? existing?.structured_communication ?? '',
+      freeCommunication: operation.freeCommunication ?? existing?.freeCommunication ?? existing?.free_communication ?? '',
+      freeCommunicationMode: operation.freeCommunicationMode || existing?.freeCommunicationMode || existing?.free_communication_mode || 'contains',
     };
 
     if (USE_REMOTE_BUDGET) {
@@ -882,13 +917,16 @@ export default function App() {
         category: recurringExpense.category,
         frequency: recurringExpense.frequency,
         start_date: recurringExpense.startDate,
+        structured_communication: recurringExpense.structuredCommunication || null,
+        free_communication: recurringExpense.freeCommunication || null,
+        free_communication_mode: recurringExpense.freeCommunicationMode || 'contains',
       };
 
       const query = existing
         ? supabase.from('recurring_fixed_expenses').update(payload).eq('id', existing.id).eq('household_id', householdId)
         : supabase.from('recurring_fixed_expenses').insert(payload);
 
-      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date');
+      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode');
       if (error) throw new Error(formatSupabaseRecurringError(error));
       const saved = savedRows?.[0];
       if (saved) {
@@ -938,7 +976,8 @@ export default function App() {
     const operation = {
       ...draft,
       amount,
-      store: draft.type === 'income' || draft.type === 'fixed' ? '' : draft.store,
+      // Le bénéficiaire / point de vente est utile pour tous les débits, y compris les frais fixes.
+      store: draft.type === 'income' ? '' : draft.store,
       category: draft.type === 'income' ? 'revenus' : draft.category,
       paymentMethod: draft.paymentMethod || 'Compte Belfius',
       id: editingId || crypto.randomUUID(),
@@ -1009,6 +1048,9 @@ export default function App() {
           recurrence: draft.recurrence,
           recurringDay: draft.recurringDay,
           recurringId: draft.recurringId,
+          structuredCommunication: draft.structuredCommunication || '',
+          freeCommunication: draft.freeCommunication || '',
+          freeCommunicationMode: draft.freeCommunicationMode || 'contains',
         });
         if (savedRecurring) {
           const exists = recurringFixedExpenses.some((expense) => expense.id === savedRecurring.id);
@@ -1037,8 +1079,68 @@ export default function App() {
       recurrence: recurringExpense?.frequency || 'once',
       recurringDay: recurringExpense?.day || Number(operation.date.slice(8, 10)),
       recurringId: recurringExpense?.id || '',
+      structuredCommunication: recurringExpense?.structuredCommunication || recurringExpense?.structured_communication || '',
+      freeCommunication: recurringExpense?.freeCommunication || recurringExpense?.free_communication || '',
+      freeCommunicationMode: recurringExpense?.freeCommunicationMode || recurringExpense?.free_communication_mode || 'contains',
     });
     setEditingId(operation.id);
+    setActiveView('add');
+  };
+
+
+  const addBankOperationFromAudit = (bankRow) => {
+    const label = String(bankRow?.label || 'Opération Belfius');
+    const normalized = label.toLowerCase();
+    const amount = Math.abs(Number(bankRow?.amount || 0));
+    const bankCommunication = String(bankRow?.communication || bankRow?.details || '');
+    const normalizedBankCommunication = bankCommunication.toLowerCase();
+    const bankDigits = bankCommunication.replace(/\D/g, '');
+
+    // RC2.4.4 : si Belfius correspond déjà à un frais récurrent connu, le crayon
+    // ouvre directement ce frais au lieu de proposer artificiellement une dépense variable.
+    const recurringCandidate = Number(bankRow?.amount || 0) < 0
+      ? (data.recurringFixedExpenses || []).find((expense) => {
+        if (Math.abs(Math.abs(Number(expense.amount) || 0) - amount) > 0.05) return false;
+        const structured = String(expense.structuredCommunication || expense.structured_communication || '').replace(/\D/g, '');
+        const free = String(expense.freeCommunication || expense.free_communication || '').trim().toLowerCase();
+        const mode = expense.freeCommunicationMode || expense.free_communication_mode || 'contains';
+        const structuredMatches = structured && bankDigits.includes(structured);
+        const freeMatches = free && (mode === 'exact'
+          ? normalizedBankCommunication.trim() === free
+          : normalizedBankCommunication.includes(free));
+        return structuredMatches || freeMatches;
+      })
+      : null;
+
+    let category = recurringCandidate?.category || 'divers';
+    if (!recurringCandidate) {
+      if (normalized.includes('lanza michel')) category = 'coiffeur';
+      else if (normalized.includes('dats24') || normalized.includes('q8') || normalized.includes('total')) category = 'carburant';
+      else if (normalized.includes('delhaize') || normalized.includes('lidl') || normalized.includes('carrefour') || normalized.includes('colruyt')) category = 'nourriture';
+      else if (normalized.includes('ethias') && amount > 500) category = 'emprunt_maison';
+    }
+
+    setDraft({
+      ...makeEmptyOperation(),
+      date: bankRow?.date || currentDate(),
+      type: Number(bankRow?.amount || 0) > 0 ? 'income' : recurringCandidate ? 'fixed' : 'variable',
+      category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : (bankRow?.learnedSuggestion?.category || category),
+      store: bankRow?.learnedSuggestion?.store || label,
+      paymentMethod: 'Compte Belfius',
+      person: bankRow?.learnedSuggestion?.person || 'Foyer',
+      label: recurringCandidate?.label || bankRow?.learnedSuggestion?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
+      amount,
+      recurrence: recurringCandidate?.frequency || 'once',
+      recurringDay: recurringCandidate?.day || Number(String(bankRow?.date || currentDate()).slice(8, 10)),
+      recurringId: recurringCandidate?.id || '',
+      structuredCommunication: recurringCandidate?.structuredCommunication || recurringCandidate?.structured_communication || '',
+      freeCommunication: recurringCandidate?.freeCommunication || recurringCandidate?.free_communication || '',
+      freeCommunicationMode: recurringCandidate?.freeCommunicationMode || recurringCandidate?.free_communication_mode || 'contains',
+    });
+    setOperationStatus(recurringCandidate
+      ? 'Frais récurrent Belfius reconnu : vérifie les données puis enregistre cette opération.'
+      : 'Opération Belfius préremplie : complète ou corrige les informations avant enregistrement.');
+    setEditingId(null);
     setActiveView('add');
   };
 
@@ -1188,6 +1290,9 @@ export default function App() {
       startDate: expense.startDate || expense.start_date || currentDate(),
       person: expense.person || 'Foyer',
       category: expense.category || 'habitation',
+      structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',
+      freeCommunication: expense.freeCommunication || expense.free_communication || '',
+      freeCommunicationMode: expense.freeCommunicationMode || expense.free_communication_mode || 'contains',
     });
     setRecurringStatus('Modification du frais récurrent en cours.');
     window.setTimeout(() => {
@@ -1216,6 +1321,9 @@ export default function App() {
       category: recurringDraft.category,
       frequency: recurringDraft.frequency || 'monthly',
       startDate: recurringDraft.startDate || currentDate(),
+      structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),
+      freeCommunication: String(recurringDraft.freeCommunication || '').trim(),
+      freeCommunicationMode: recurringDraft.freeCommunicationMode || 'contains',
     };
 
     const identicalRecurring = (data.recurringFixedExpenses || []).find(
@@ -1243,6 +1351,9 @@ export default function App() {
         category: fixedExpense.category,
         frequency: fixedExpense.frequency,
         start_date: fixedExpense.startDate,
+        structured_communication: fixedExpense.structuredCommunication || null,
+        free_communication: fixedExpense.freeCommunication || null,
+        free_communication_mode: fixedExpense.freeCommunicationMode || 'contains',
       };
 
       const query = recurringEditingId
@@ -1251,12 +1362,12 @@ export default function App() {
           .update(payload)
           .eq('id', recurringEditingId)
           .eq('household_id', householdId)
-          .select('id, label, amount, day, person, category, frequency, start_date')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
           .single()
         : supabase
           .from('recurring_fixed_expenses')
           .insert(payload)
-          .select('id, label, amount, day, person, category, frequency, start_date')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
           .single();
 
       const { data: savedExpense, error } = await query;
@@ -1275,6 +1386,9 @@ export default function App() {
         category: savedExpense.category,
         frequency: savedExpense.frequency || 'monthly',
         startDate: savedExpense.start_date || currentDate(),
+        structuredCommunication: savedExpense.structured_communication || '',
+        freeCommunication: savedExpense.free_communication || '',
+        freeCommunicationMode: savedExpense.free_communication_mode || 'contains',
       };
     }
 
@@ -1383,6 +1497,122 @@ export default function App() {
     setRecurringStatus(`${savedOperations.length} frais fixe(s) ajoute(s) pour ${selectedMonth}.`);
   };
 
+  const handleBankSavingsDetected = (detection, auditMeta = {}) => {
+    const totals = detection?.totals || detection || {};
+    const transfers = detection?.transfers || [];
+    setBankSavings(totals);
+    if (!transfers.length) return;
+
+    let applied = {};
+    try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+
+    // RC2.4.6 : le CSV Belfius identifie les transferts, mais ne connait pas le solde reel
+    // du compte d'epargne externe (ex. Beobank). Au premier releve observe, on etablit
+    // uniquement une ligne de base : l'historique est memorise sans modifier le solde.
+    if (Object.keys(applied).length === 0) {
+      transfers.forEach((transfer) => {
+        applied[transfer.fingerprint] = {
+          bucket: transfer.bucket,
+          amount: transfer.amount,
+          appliedAt: new Date().toISOString(),
+          source: auditMeta.fileName || 'Belfius CSV',
+          baseline: true,
+        };
+      });
+      localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
+      return;
+    }
+
+    const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
+    if (!freshTransfers.length) return;
+
+    const increments = freshTransfers.reduce((map, transfer) => {
+      map[transfer.bucket] = (map[transfer.bucket] || 0) + Math.abs(Number(transfer.amount) || 0);
+      return map;
+    }, {});
+
+    setData((current) => {
+      const changedGoals = [];
+      const savingsGoals = current.savingsGoals.map((goal) => {
+        const bucket = savingsBucketForGoal(goal);
+        const increment = increments[bucket] || 0;
+        if (!increment) return goal;
+        const next = { ...goal, saved: Number(goal.saved || 0) + increment };
+        changedGoals.push(next);
+        return next;
+      });
+      const nextData = { ...current, savingsGoals };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+
+      if (USE_REMOTE_BUDGET && changedGoals.length) {
+        changedGoals.forEach((goal) => {
+          supabase.from('savings_goals')
+            .update({ saved: Number(goal.saved) })
+            .eq('id', goal.id)
+            .eq('household_id', householdId)
+            .then(() => {});
+        });
+      }
+      return nextData;
+    });
+
+    freshTransfers.forEach((transfer) => {
+      applied[transfer.fingerprint] = {
+        bucket: transfer.bucket,
+        amount: transfer.amount,
+        appliedAt: new Date().toISOString(),
+        source: auditMeta.fileName || 'Belfius CSV',
+      };
+    });
+    localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
+  };
+
+  const synchronizeBelfiusBalance = async ({ balance, balanceDate, month }) => {
+    const currentBalance = calculatePaymentBalances(data.operations)['Compte Belfius'] || 0;
+    const delta = Number(balance) - Number(currentBalance);
+    if (Math.abs(delta) < 0.01) return;
+
+    const dateMatch = String(balanceDate || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    const adjustmentDate = dateMatch ? dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1] : currentDate();
+    const adjustment = {
+      id: crypto.randomUUID(),
+      date: adjustmentDate,
+      person: 'Foyer',
+      type: delta >= 0 ? 'income' : 'fixed',
+      category: delta >= 0 ? 'revenus' : 'divers',
+      store: '',
+      paymentMethod: 'Compte Belfius',
+      label: 'Ajustement Belfius ' + month + ' — solde certifié',
+      amount: Math.abs(delta),
+    };
+
+    if (USE_REMOTE_BUDGET) {
+      const payload = {
+        household_id: householdId,
+        date: adjustment.date,
+        person: adjustment.person,
+        type: adjustment.type,
+        category: adjustment.category,
+        store: null,
+        label: adjustment.label,
+        amount: adjustment.amount,
+        payment_method: adjustment.paymentMethod,
+      };
+      const { data: savedRow, error } = await supabase
+        .from('operations')
+        .insert(payload)
+        .select(OPERATION_COLUMNS)
+        .single();
+      if (error) {
+        setSyncStatus('Synchronisation Belfius impossible : ' + error.message);
+        return;
+      }
+      adjustment.id = savedRow.id;
+    }
+
+    saveData({ ...data, operations: [adjustment, ...data.operations] });
+    setSyncStatus('Solde Belfius synchronisé : ' + formatCurrency(balance));
+  };
   const refreshFromSupabase = async () => {
     if (!USE_REMOTE_BUDGET) {
       setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
@@ -1410,7 +1640,7 @@ export default function App() {
         .order('label', { ascending: true }),
       supabase
         .from('recurring_fixed_expenses')
-        .select('id, label, amount, day, person, category, frequency, start_date')
+        .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
     ]);
@@ -1726,6 +1956,21 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {belfiusSnapshot && (
+                  <details className={`belfius-real-balance ${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}`}>
+                    <summary>
+                      <span>Solde Belfius réel</span>
+                      <strong>{formatCurrency(belfiusSnapshot.balance)}</strong>
+                    </summary>
+                    <div className="belfius-real-balance-details">
+                      <span>Relevé : {belfiusSnapshot.balanceDate || 'dernier CSV importé'}</span>
+                      <span>Solde Mon Foyer : {formatCurrency(paymentBalances['Compte Belfius'] || 0)}</span>
+                      <span>Écart : {formatCurrency((paymentBalances['Compte Belfius'] || 0) - Number(belfiusSnapshot.balance || 0))}</span>
+                      <span>{belfiusSnapshot.remaining || 0} opération(s) à traiter</span>
+                      <strong>{belfiusSnapshot.clean ? 'Conforme à Belfius' : 'Rapprochement en cours'}</strong>
+                    </div>
+                  </details>
+                )}
               </div>
               <PiggyBank size={42} />
             </div>
@@ -1913,7 +2158,7 @@ export default function App() {
               </div>
               <div className="goals-grid">
                 {data.savingsGoals.map((goal) => (
-                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} />
+                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />
                 ))}
               </div>
             </section>
@@ -2040,12 +2285,46 @@ export default function App() {
                       />
                     </label>
                   )}
+                  {draft.recurrence !== 'once' && (
+                    <div className="belfius-identification-inline">
+                      <div className="belfius-identification-title">Identification Belfius <span>(facultatif)</span></div>
+                      <label>
+                        Communication structurée
+                        <input
+                          value={draft.structuredCommunication || ''}
+                          onChange={(event) => setDraft({ ...draft, structuredCommunication: event.target.value })}
+                          placeholder="Ex. 827-6921515-21 ou +++123/4567/89012+++"
+                        />
+                      </label>
+                      <div className="form-row">
+                        <label>
+                          Communication libre / motif Belfius
+                          <input
+                            value={draft.freeCommunication || ''}
+                            onChange={(event) => setDraft({ ...draft, freeCommunication: event.target.value })}
+                            placeholder="Ex. Pension, Pour voiture…"
+                          />
+                        </label>
+                        <label>
+                          Règle de reconnaissance
+                          <select
+                            value={draft.freeCommunicationMode || 'contains'}
+                            onChange={(event) => setDraft({ ...draft, freeCommunicationMode: event.target.value })}
+                          >
+                            <option value="contains">Contient</option>
+                            <option value="exact">Correspond exactement</option>
+                          </select>
+                        </label>
+                      </div>
+                      <p className="hint">Ces informations sont enregistrées sur le paiement récurrent associé et servent au rapprochement bancaire.</p>
+                    </div>
+                  )}
                 </section>
               )}
 
-              {draft.type === 'variable' && (
+              {draft.type !== 'income' && (
                 <label>
-                  Point de vente
+                  Bénéficiaire / Point de vente
                   <select value={draft.store} onChange={(event) => setDraft({ ...draft, store: event.target.value })}>
                     {data.stores.map((store) => (
                       <option key={store}>{store}</option>
@@ -2068,7 +2347,7 @@ export default function App() {
             <div className="panel">
               <div className="section-title">
                 <h2>Historique</h2>
-                <span>{filteredMonthOperations.length} / {monthOperations.length} lignes</span>
+                <span>{filteredMonthOperations.length} / {effectiveMonthOperations.length} lignes</span>
               </div>
               <div className="history-tools">
                 <input
@@ -2205,6 +2484,13 @@ export default function App() {
             <BelfiusAudit
               operations={data.operations}
               appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
+              selectedMonth={selectedMonth}
+              recurringExpenses={data.recurringFixedExpenses || []}
+              onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
+              onSavingsDetected={handleBankSavingsDetected}
+              onAuditSnapshot={setBelfiusSnapshot}
+              onEditAppOperation={editOperation}
+              onAddBankOperation={addBankOperationFromAudit}
             />
 
             <section className="panel">
@@ -2229,7 +2515,17 @@ export default function App() {
             <section className="panel">
               <div className="section-title">
                 <h2>Frais fixes récurrents</h2>
-                <span>{(data.recurringFixedExpenses || []).length}</span>
+                {(() => {
+                  const recurringExpenses = data.recurringFixedExpenses || [];
+                  const uniqueCount = new Set(recurringExpenses.map(recurringExpenseSignature)).size;
+                  const duplicateCount = recurringExpenses.length - uniqueCount;
+                  return (
+                    <span>
+                      {recurringExpenses.length} enregistrés · {uniqueCount} uniques
+                      {duplicateCount > 0 ? ' · ' + duplicateCount + ' doublon(s) potentiel(s)' : ' · base propre'}
+                    </span>
+                  );
+                })()}
               </div>
 
               <form className="recurring-form" onSubmit={addRecurringFixedExpense}>
@@ -2241,6 +2537,35 @@ export default function App() {
                     placeholder="Ex. Emprunt maison"
                   />
                 </label>
+                <fieldset className="recurring-bank-identification">
+                  <legend>Identification Belfius (facultatif)</legend>
+                  <label>
+                    Communication structurée
+                    <input
+                      value={recurringDraft.structuredCommunication || ''}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
+                      placeholder="+++123/4567/89012+++"
+                    />
+                  </label>
+                  <label>
+                    Communication libre / motif Belfius
+                    <input
+                      value={recurringDraft.freeCommunication || ''}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, freeCommunication: event.target.value })}
+                      placeholder="Ex. Pension, Pour voiture, POL. DROIT COM..."
+                    />
+                  </label>
+                  <label>
+                    Règle de reconnaissance
+                    <select
+                      value={recurringDraft.freeCommunicationMode || 'contains'}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, freeCommunicationMode: event.target.value })}
+                    >
+                      <option value="contains">La communication Belfius contient ce texte</option>
+                      <option value="exact">La communication Belfius correspond exactement</option>
+                    </select>
+                  </label>
+                </fieldset>
                 <div className="recurring-grid">
                   <label>
                     Montant
@@ -2400,7 +2725,7 @@ function CategoryRow({ category }) {
   );
 }
 
-function GoalCard({ goal, onUpdate }) {
+function GoalCard({ goal, onUpdate, bankDetected = 0 }) {
   const [draft, setDraft] = useState({
     saved: String(goal.saved ?? 0),
     target: String(goal.target ?? 0),
@@ -2435,6 +2760,12 @@ function GoalCard({ goal, onUpdate }) {
       <div className="progress-track slim">
         <div className="progress-fill green" style={{ width: `${progressRatio}%` }} />
       </div>
+      {bankDetected > 0 && (
+        <div className="goal-bank-sync">
+          <span>🏦 Versements Belfius identifiés dans le CSV</span>
+          <strong>{formatCurrency(bankDetected)}</strong>
+        </div>
+      )}
       <div className="goal-inputs">
         <label>
           Mis de côté (épargne)
