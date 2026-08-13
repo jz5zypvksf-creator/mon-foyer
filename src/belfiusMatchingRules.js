@@ -84,6 +84,14 @@ export function isTrueOrphanAppOperation(appRow, context = {}) {
   return true;
 }
 
+export function explainOrphanAppOperation(appRow, cutoffDate = '') {
+  if (!appRow) return '';
+  if (cutoffDate && String(appRow.date || '') > cutoffDate) {
+    return 'Opération programmée : postérieure au dernier solde Belfius importé.';
+  }
+  return 'Écriture Mon Foyer sans correspondance bancaire après rapprochement complet.';
+}
+
 export function classifyBankBusinessRule(row) {
   if (isBeobankTransfer(row)) {
     return {
