@@ -2,9 +2,10 @@ name: RC2.4.6 savings baseline fix
 
 on:
   push:
-    branches: [v32-rc2-4-6]
+    branches:
+      - v32-rc2-4-6
     paths:
-      - '.github/workflows/rc246-savings-baseline-fix.yml'
+      - .github/workflows/rc246-savings-baseline-fix.yml
 
 permissions:
   contents: write
@@ -17,43 +18,51 @@ jobs:
         with:
           ref: v32-rc2-4-6
       - name: Patch savings import baseline logic
-        shell: python
         run: |
+          python3 <<'PY'
           from pathlib import Path
           p = Path('src/App.jsx')
           s = p.read_text()
           old = """    let applied = {};
-    try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
-    const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
-    if (!freshTransfers.length) return;
-"""
+              try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+              const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
+              if (!freshTransfers.length) return;
+          """
           new = """    let applied = {};
-    try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+              try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
 
-    // RC2.4.6 : le CSV Belfius identifie les transferts, mais ne connait pas le solde reel
-    // du compte d'epargne externe (ex. Beobank). Au premier relevé observé, on établit donc
-    // uniquement une ligne de base : les transferts historiques sont mémorisés sans modifier
-    // le montant 'Mis de côté'. Seuls les transferts réellement nouveaux seront ajoutés ensuite.
-    if (Object.keys(applied).length === 0) {
-      transfers.forEach((transfer) => {
-        applied[transfer.fingerprint] = {
-          bucket: transfer.bucket,
-          amount: transfer.amount,
-          appliedAt: new Date().toISOString(),
-          source: auditMeta.fileName || 'Belfius CSV',
-          baseline: true,
-        };
-      });
-      localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
-      return;
-    }
+              // RC2.4.6 : le CSV Belfius identifie les transferts, mais ne connait pas le solde reel
+              // du compte d'epargne externe (ex. Beobank). Au premier releve observe, on etablit
+              // uniquement une ligne de base : l'historique est memorise sans modifier le solde.
+              if (Object.keys(applied).length === 0) {
+                transfers.forEach((transfer) => {
+                  applied[transfer.fingerprint] = {
+                    bucket: transfer.bucket,
+                    amount: transfer.amount,
+                    appliedAt: new Date().toISOString(),
+                    source: auditMeta.fileName || 'Belfius CSV',
+                    baseline: true,
+                  };
+                });
+                localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
+                return;
+              }
 
-    const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
-    if (!freshTransfers.length) return;
-"""
+              const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
+              if (!freshTransfers.length) return;
+          """
+          # Ignore indentation differences by using the exact source block if needed.
+          if old not in s:
+              old = """    let applied = {};
+              try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+              const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
+              if (!freshTransfers.length) return;
+          """.replace('              ', '    ')
+              new = new.replace('              ', '    ')
           if old not in s:
               raise SystemExit('Target block not found; refusing unsafe patch')
           p.write_text(s.replace(old, new, 1))
+          PY
       - name: Commit correction
         run: |
           git config user.name "github-actions[bot]"
