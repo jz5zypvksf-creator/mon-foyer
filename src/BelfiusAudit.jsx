@@ -308,7 +308,22 @@ function learnedBankIdentityMatches(rule, bankRow) {
     const actual = normalizedCommunication(bankRow.structuredCommunication || bankRow.communication);
     return actual.includes(expectedStructured);
   }
+  const expectedFree = normalize(rule.freeCommunication || '');
+  if (expectedFree) {
+    const actualFree = normalize(bankRow.communication || bankRow.details || '');
+    return actualFree === expectedFree || actualFree.includes(expectedFree);
+  }
   return true;
+}
+
+function isBeobankSavingsTransfer(row) {
+  if (!row || Number(row.amount) >= 0) return false;
+  return normalize(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`).includes('beobank');
+}
+
+function isBeobankSavingsAppRow(row) {
+  const text = normalize(`${row?.label || ''} ${row?.store || ''}`);
+  return text.includes('beobank') || text.includes('epargne loisirs') || text.includes('epargne vacances');
 }
 
 function learnedTargetMatches(rule, appRow) {
@@ -519,12 +534,17 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
 
 function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
+  // Les transferts vers Beobank sont des transferts internes d'épargne Vacances/Loisirs.
+  // Ils sont pris en charge par detectSavingsTransfers et ne participent jamais au moteur
+  // de correspondances de dépenses/revenus (sinon un même montant peut proposer Mega, etc.).
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .filter((row) => !isBeobankSavingsTransfer(row))
     .map((row) => ({ ...row }));
   const appRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
+    .filter((row) => !isBeobankSavingsAppRow(row))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
 
@@ -662,6 +682,7 @@ export default function BelfiusAudit({
   const [audit, setAudit] = useState(loadPersistedAudit);
   const [error, setError] = useState('');
   const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
+  const [confirmationMessage, setConfirmationMessage] = useState('');
   const synchronizationKey = useRef('');
   const result = useMemo(
     () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules) : null,
@@ -707,13 +728,20 @@ export default function BelfiusAudit({
       },
       confirmedAt: new Date().toISOString(),
     };
-    const nextRules = [
-      ...learnedRules.filter((item) => !(normalize(item.bankLabel) === normalize(rule.bankLabel)
-        && normalize(item.target?.label) === normalize(rule.target.label))),
-      rule,
-    ];
+    const sameIdentity = (item) => {
+      if (normalize(item.bankLabel) !== normalize(rule.bankLabel)) return false;
+      const oldStructured = normalizedCommunication(item.structuredCommunication || '');
+      const newStructured = normalizedCommunication(rule.structuredCommunication || '');
+      if (oldStructured || newStructured) return oldStructured === newStructured;
+      const oldFree = normalize(item.freeCommunication || '');
+      const newFree = normalize(rule.freeCommunication || '');
+      if (oldFree || newFree) return oldFree === newFree;
+      return true;
+    };
+    const nextRules = [...learnedRules.filter((item) => !sameIdentity(item)), rule];
     persistLearnedRules(nextRules);
     setLearnedRules(nextRules);
+    setConfirmationMessage('Correspondance validée et mémorisée : ' + bankRow.label + ' → ' + appRow.label + '.');
   };
 
   const safeMonth = result?.auditMonth || selectedMonth || '';
@@ -767,6 +795,9 @@ export default function BelfiusAudit({
         {audit && <span>{result?.bankRows.length || 0} opérations · {result?.auditMonth}</span>}
       </div>
       <p className="hint">Le fichier complet est lu, mais l'audit porte uniquement sur le mois sélectionné.</p>
+      {confirmationMessage && (
+        <p className="hint audit-confirmation-message"><CheckCircle2 size={15} /> {confirmationMessage}</p>
+      )}
       {audit && (
         <p className="hint">
           Relevé Belfius mémorisé · {audit.fileName || 'CSV Belfius'} · {remainingToTreat} opération(s) restant à traiter.
