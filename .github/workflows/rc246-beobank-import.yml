@@ -1,0 +1,63 @@
+name: RC2.4.6 Beobank import
+
+on:
+  push:
+    branches: [v32-rc2-4-6]
+    paths:
+      - '.github/workflows/rc246-beobank-import.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v32-rc2-4-6
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Wire Beobank statement importer
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/App.jsx')
+          s = p.read_text()
+          s = s.replace("import BelfiusAudit from './BelfiusAudit.jsx';", "import BelfiusAudit from './BelfiusAudit.jsx';\nimport BeobankStatementImport from './BeobankStatementImport.jsx';")
+          old = """{data.savingsGoals.map((goal) => (\n                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />\n                ))}"""
+          new = """{data.savingsGoals.map((goal) => (\n                  <div key={goal.id}>\n                    <GoalCard goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />\n                    {savingsBucketForGoal(goal) === 'vacances' && (\n                      <BeobankStatementImport currentBalance={Number(goal.saved || 0)} onApply={(balance) => updateGoal(goal.id, 'saved', balance)} />\n                    )}\n                  </div>\n                ))}"""
+          if old not in s:
+              raise SystemExit('Savings goals block not found; refusing unsafe patch')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          css = Path('src/styles.css')
+          c = css.read_text()
+          c += r'''
+
+/* RC2.4.6 — import contrôlé du relevé Beobank */
+.beobank-import { margin: 10px 0 16px; padding: 12px; border: 1px solid #cfe0d8; border-radius: 14px; background: #f7fbf9; }
+.beobank-import-head { display: flex; gap: 9px; align-items: flex-start; color: #123f67; }
+.beobank-import-head div { display: grid; gap: 2px; }
+.beobank-import-head small, .beobank-last { color: #647787; font-size: 12px; }
+.beobank-upload-button { margin-top: 10px; display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 999px; background: #e2f3e8; color: #114d68; font-weight: 700; cursor: pointer; }
+.beobank-upload-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.beobank-result { margin-top: 10px; display: grid; gap: 6px; }
+.beobank-result > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid #dbe8e1; }
+.beobank-result span { color: #647787; }
+.beobank-apply { margin-top: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 999px; padding: 9px 12px; background: #dff2e6; color: #12613c; font-weight: 800; cursor: pointer; }
+.beobank-status { margin: 9px 0 0; display: flex; gap: 6px; align-items: flex-start; color: #6d5a24; font-size: 12px; }
+'''
+          css.write_text(c)
+      - run: npm install
+      - run: npm run build
+      - name: Commit Beobank integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.jsx src/styles.css package-lock.json
+          git commit -m "V32 RC2.4.6 - Import relevé Beobank et mise à jour contrôlée du solde"
+          git push origin HEAD:v32-rc2-4-6
