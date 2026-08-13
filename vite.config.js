@@ -64,11 +64,11 @@ function beobankImporterIntegration() {
 
       patched = patched.replace(
         `                      <label>\n                        Communication structurée`,
-        `                      <label>\n                        Référence de domiciliation / mandat\n                        <input\n                          value={draft.directDebitReference || ''}\n                          onChange={(event) => setDraft({ ...draft, directDebitReference: event.target.value })}\n                          placeholder="Ex. 400677427629"\n                        />\n                      </label>\n                      <label>\n                        Communication structurée`,
+        `                      <label>\n                        Référence de domiciliation / mandat\n                        <input\n                          value={draft.directDebitReference || ''}\n                          onChange={(event) => setDraft({ ...draft, directDebitReference: event.target.value })}\n                          placeholder="Ex. 400102107996"\n                        />\n                      </label>\n                      <label>\n                        Communication structurée`,
       );
       patched = patched.replace(
         `                  <label>\n                    Communication structurée`,
-        `                  <label>\n                    Référence de domiciliation / mandat\n                    <input\n                      value={recurringDraft.directDebitReference || ''}\n                      onChange={(event) => setRecurringDraft({ ...recurringDraft, directDebitReference: event.target.value })}\n                      placeholder="Ex. 400677427629"\n                    />\n                  </label>\n                  <label>\n                    Communication structurée`,
+        `                  <label>\n                    Référence de domiciliation / mandat\n                    <input\n                      value={recurringDraft.directDebitReference || ''}\n                      onChange={(event) => setRecurringDraft({ ...recurringDraft, directDebitReference: event.target.value })}\n                      placeholder="Ex. 400102107996"\n                    />\n                  </label>\n                  <label>\n                    Communication structurée`,
       );
 
       if (patched === code || !patched.includes('BeobankStatementImport') || !patched.includes('Référence de domiciliation / mandat')) {
@@ -177,6 +177,67 @@ function belfiusAuditRc246Integration() {
   };
 }
 
+function finalRc246Integration() {
+  return {
+    name: 'mon-foyer-rc246-final-integration',
+    enforce: 'pre',
+    transform(code, id) {
+      const isApp = id.endsWith('/src/App.jsx') || id.endsWith('\\src\\App.jsx');
+      const isAudit = id.endsWith('/src/BelfiusAudit.jsx') || id.endsWith('\\src\\BelfiusAudit.jsx');
+      if (!isApp && !isAudit) return null;
+      let patched = code;
+
+      if (isApp) {
+        patched = patched.replace(
+          "import BelfiusAudit from './BelfiusAudit.jsx';",
+          "import BelfiusAudit from './BelfiusAudit.jsx';\nimport { budgetIncomeTotalForMonth } from './budgetMonthRules.js';",
+        );
+
+        patched = patched.replace(
+          "  const totals = useMemo(() => {\n    return calculateTotals(effectiveMonthOperations);\n  }, [effectiveMonthOperations]);",
+          "  const budgetIncomeTotal = useMemo(() => budgetIncomeTotalForMonth(data.operations, selectedMonth), [data.operations, selectedMonth]);\n\n  const totals = useMemo(() => {\n    const actual = calculateTotals(effectiveMonthOperations);\n    return { ...actual, income: budgetIncomeTotal, balance: budgetIncomeTotal - actual.fixed - actual.variable };\n  }, [budgetIncomeTotal, effectiveMonthOperations]);",
+        );
+
+        patched = patched.replace(
+          "  const fullMonthTotals = useMemo(() => {\n    return calculateTotals(monthOperations);\n  }, [monthOperations]);",
+          "  const fullMonthTotals = useMemo(() => {\n    const actual = calculateTotals(monthOperations);\n    return { ...actual, income: budgetIncomeTotal, balance: budgetIncomeTotal - actual.fixed - actual.variable };\n  }, [budgetIncomeTotal, monthOperations]);",
+        );
+
+        patched = patched.replace(
+          "  const historyTotals = useMemo(() => {\n    const filteredTotals = calculateTotals(filteredMonthOperations);\n    return {\n      ...filteredTotals,\n      expenses: filteredTotals.fixed + filteredTotals.variable,\n    };\n  }, [filteredMonthOperations]);",
+          "  const historyTotals = useMemo(() => {\n    const filteredTotals = calculateTotals(filteredMonthOperations);\n    const defaultBudgetView = historyType === 'all' && historyPerson === 'all' && historyCategory === 'all'\n      && historyPaymentMethod === 'all' && !historySearch.trim() && !showReviewOnly;\n    const income = defaultBudgetView ? budgetIncomeTotal : filteredTotals.income;\n    return {\n      ...filteredTotals,\n      income,\n      balance: income - filteredTotals.fixed - filteredTotals.variable,\n      expenses: filteredTotals.fixed + filteredTotals.variable,\n    };\n  }, [budgetIncomeTotal, filteredMonthOperations, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, showReviewOnly]);",
+        );
+
+        patched = patched.replace('label="Revenus encaissés" value={formatCurrency(totals.income)}', 'label="Revenus budgétaires" value={formatCurrency(totals.income)}');
+        patched = patched.replace(
+          '<span>Revenus</span>\n                  <strong className="income">{formatCurrency(historyTotals.income)}</strong>',
+          '<span>Revenus budgétaires</span>\n                  <strong className="income">{formatCurrency(historyTotals.income)}</strong>',
+        );
+      }
+
+      if (isAudit) {
+        patched = patched.replace(
+          "      details: cells[communicationIndex] || cells[transactionIndex] || '',",
+          "      details: [cells[communicationIndex], cells[transactionIndex]].filter(Boolean).join(' '),",
+        );
+
+        patched = patched.replace(
+          "  const learned = learnedEvidence(bankRow, appRow, learnedRules);\n  if (learned && dayDelta <= 7) return learned;\n  if (dayDelta > DATE_TOLERANCE_DAYS) return null;\n\n  const directLabel = labelsLikelyMatch(bankRow, appRow);\n  const alias = aliasMatch(bankRow, appRow);\n  const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);",
+          "  const learned = learnedEvidence(bankRow, appRow, learnedRules);\n  const directLabel = labelsLikelyMatch(bankRow, appRow);\n  const alias = aliasMatch(bankRow, appRow);\n  const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);\n  if (learned && dayDelta <= 14) return learned;\n  const strongBusinessIdentity = directLabel || alias || Boolean(recurring);\n  if (dayDelta > DATE_TOLERANCE_DAYS && !(strongBusinessIdentity && dayDelta <= 14)) return null;",
+        );
+
+        patched = patched.replace(
+          "                <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.type === 'income' ? row.amount : -row.amount)}</span></article>",
+          "                <article key={row.id} className=\"audit-missing-row\"><strong>{row.date} · {row.label}</strong><span className=\"audit-missing-actions\"><b>{money(row.type === 'income' ? row.amount : -row.amount)}</b>{typeof onEditAppOperation === 'function' && (<button type=\"button\" className=\"audit-pencil\" title=\"Modifier cette écriture\" aria-label={`Modifier ${row.label}`} onClick={() => onEditAppOperation(row)}><Pencil size={17} /></button>)}</span></article>",
+        );
+      }
+
+      if (patched === code) throw new Error('RC2.4.6 final: integration target not found.');
+      return { code: patched, map: null };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), react()],
+  plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), react()],
 });
