@@ -1505,6 +1505,24 @@ export default function App() {
 
     let applied = {};
     try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+
+    // RC2.4.6 : le CSV Belfius identifie les transferts, mais ne connait pas le solde reel
+    // du compte d'epargne externe (ex. Beobank). Au premier releve observe, on etablit
+    // uniquement une ligne de base : l'historique est memorise sans modifier le solde.
+    if (Object.keys(applied).length === 0) {
+      transfers.forEach((transfer) => {
+        applied[transfer.fingerprint] = {
+          bucket: transfer.bucket,
+          amount: transfer.amount,
+          appliedAt: new Date().toISOString(),
+          source: auditMeta.fileName || 'Belfius CSV',
+          baseline: true,
+        };
+      });
+      localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
+      return;
+    }
+
     const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
     if (!freshTransfers.length) return;
 
