@@ -1,6 +1,6 @@
 // V32.0 RC2.4.6 — règles de rapprochement bancaire déterministes.
 // Ce module centralise les preuves fortes afin d'éviter qu'un simple couple
-// montant/date ne concurrence une communication Belfius connue.
+// montant/date ne concurrence une communication ou une domiciliation Belfius connue.
 
 export function normalizeBankText(value) {
   return String(value || '')
@@ -15,14 +15,35 @@ export function normalizeStructuredCommunication(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+export function normalizeDirectDebitReference(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 export function isBeobankTransfer(row) {
   if (!row || Number(row.amount) >= 0) return false;
-  const text = normalizeBankText(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`);
+  const text = normalizeBankText(`${row.label || ''} ${row.communication || ''} ${row.details || ''} ${row.rawDetails || ''}`);
   return text.includes('beobank');
 }
 
 export function strongCommunicationMatch(bankRow, recurringExpense) {
   if (!bankRow || !recurringExpense) return null;
+
+  // Une référence de domiciliation / mandat est l'empreinte la plus spécifique.
+  // Elle peut se trouver dans n'importe quelle colonne du CSV Belfius ; rawDetails
+  // conserve donc la ligne bancaire complète sous forme textuelle.
+  const expectedDirectDebit = normalizeDirectDebitReference(
+    recurringExpense.directDebitReference
+      || recurringExpense.direct_debit_reference
+      || recurringExpense.mandateReference
+      || recurringExpense.mandate_reference
+      || '',
+  );
+  const actualDirectDebitHaystack = normalizeDirectDebitReference(
+    `${bankRow.directDebitReference || ''} ${bankRow.communication || ''} ${bankRow.details || ''} ${bankRow.rawDetails || ''}`,
+  );
+  if (expectedDirectDebit && actualDirectDebitHaystack.includes(expectedDirectDebit)) {
+    return { kind: 'direct-debit', confidence: 100 };
+  }
 
   const expectedStructured = normalizeStructuredCommunication(
     recurringExpense.structuredCommunication
@@ -43,7 +64,7 @@ export function strongCommunicationMatch(bankRow, recurringExpense) {
   const expectedFree = normalizeBankText(
     recurringExpense.freeCommunication || recurringExpense.free_communication || '',
   );
-  const actualFree = normalizeBankText(bankRow.communication || bankRow.details || '');
+  const actualFree = normalizeBankText(`${bankRow.communication || ''} ${bankRow.details || ''} ${bankRow.rawDetails || ''}`);
   if (!expectedFree || !actualFree) return null;
 
   const mode = recurringExpense.freeCommunicationMode
