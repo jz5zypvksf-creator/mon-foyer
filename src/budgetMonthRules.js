@@ -35,8 +35,6 @@ export function budgetIncomeTotalForMonth(operations = [], monthKey = '') {
     .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
 }
 
-// Deux repères de trésorerie : la projection issue des écritures Mon Foyer et
-// la même projection recalée sur le dernier solde Belfius certifié par le CSV.
 export function forecastBalances({ appAvailable = 0, appBelfiusBalance = 0, realBelfiusBalance = null, remainingToCover = 0 } = {}) {
   const appForecast = Number(appAvailable || 0) - Number(remainingToCover || 0);
   if (realBelfiusBalance == null || !Number.isFinite(Number(realBelfiusBalance))) {
@@ -45,8 +43,20 @@ export function forecastBalances({ appAvailable = 0, appBelfiusBalance = 0, real
   const bankAdjustedAvailable = Number(appAvailable || 0)
     - Number(appBelfiusBalance || 0)
     + Number(realBelfiusBalance || 0);
-  return {
-    appForecast,
-    belfiusForecast: bankAdjustedAvailable - Number(remainingToCover || 0),
-  };
+  return { appForecast, belfiusForecast: bankAdjustedAvailable - Number(remainingToCover || 0) };
+}
+
+export function careBalanceForPerson(operations = [], person = '') {
+  const rows = operations.filter((operation) => operation.person === person);
+  const expenses = rows
+    .filter((operation) => operation.type === 'fixed' || operation.type === 'variable')
+    .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
+  const reimbursed = rows
+    .filter((operation) => operation.type === 'reimbursement')
+    .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
+  return { person, expenses, reimbursed, balance: expenses - reimbursed };
+}
+
+export function careBalances(operations = []) {
+  return ['Papa', 'Nonna'].map((person) => careBalanceForPerson(operations, person));
 }
