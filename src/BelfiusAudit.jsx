@@ -9,6 +9,20 @@ const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
 const DAY_MS = 86400000;
 const AUDIT_STORAGE_KEY = 'mon-foyer-belfius-audit-v1';
+const LEARNING_STORAGE_KEY = 'mon-foyer-belfius-learning-v1';
+
+function loadLearnedRules() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LEARNING_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistLearnedRules(rules) {
+  localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(rules));
+}
 
 function loadPersistedAudit() {
   try {
@@ -163,21 +177,35 @@ function parseBelfius(text) {
 
 function detectSavingsTransfers(rows) {
   const totals = {};
-  const add = (key, amount) => { totals[key] = (totals[key] || 0) + Math.abs(Number(amount) || 0); };
+  const transfers = [];
+  const add = (bucket, row) => {
+    const amount = Math.abs(Number(row.amount) || 0);
+    totals[bucket] = (totals[bucket] || 0) + amount;
+    transfers.push({
+      bucket,
+      amount,
+      date: row.date,
+      label: row.label,
+      communication: row.communication || '',
+      fingerprint: [row.date, Number(row.amount).toFixed(2), normalize(row.label), normalize(row.communication || row.details)].join('|'),
+    });
+  };
 
   (rows || []).forEach((row) => {
     if (row.amount >= 0) return;
     const text = normalize(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`);
     const amount = Math.abs(Number(row.amount) || 0);
 
-    if (text.includes('pour voiture') || text.includes('epargne voiture')) { add('voiture', amount); return; }
-    if (text.includes('vacances') || text.includes('epargne vacances')) { add('vacances', amount); return; }
-    if (text.includes('fonds urgence') || text.includes('fonds d urgence') || text.includes('epargne urgence')) { add('urgence', amount); return; }
-    if (text.includes('epargne maison') || text.includes('reserve maison')) { add('maison', amount); return; }
-    if (text.includes('pension') || (text.includes('ethias') && Math.abs(amount - 110) <= AMOUNT_TOLERANCE)) { add('pension', amount); return; }
+    // Règle métier RC2.4.6 : tous les transferts vers Beobank alimentent Vacances/Loisirs.
+    if (text.includes('beobank')) { add('vacances', row); return; }
+    if (text.includes('pour voiture') || text.includes('epargne voiture')) { add('voiture', row); return; }
+    if (text.includes('vacances') || text.includes('epargne vacances') || text.includes('loisirs')) { add('vacances', row); return; }
+    if (text.includes('fonds urgence') || text.includes('fonds d urgence') || text.includes('epargne urgence')) { add('urgence', row); return; }
+    if (text.includes('epargne maison') || text.includes('reserve maison')) { add('maison', row); return; }
+    if (text.includes('pension') || (text.includes('ethias') && Math.abs(amount - 110) <= AMOUNT_TOLERANCE)) { add('pension', row); return; }
   });
 
-  return totals;
+  return { totals, transfers };
 }
 
 function labelText(bankRow) {
@@ -248,27 +276,78 @@ function findRecurringMatch(bankRow, appRow, recurringExpenses) {
   const operationAmount = Math.abs(Number(appRow.amount) || 0);
   const day = Number(appRow.date?.slice(8, 10));
   const bankCommunication = normalizedCommunication(bankRow.structuredCommunication || bankRow.communication);
-  const candidates = (recurringExpenses || []).filter((expense) => {
+  const identityCandidates = (recurringExpenses || []).filter((expense) => {
     const recurringAmount = Math.abs(Number(expense.amount) || 0);
-    const recurringDay = Number(expense.day) || 1;
     return recurringBelongsToAppRow(expense, appRow)
-      && Math.abs(recurringAmount - operationAmount) <= AMOUNT_TOLERANCE
-      && Math.abs(recurringDay - day) <= DATE_TOLERANCE_DAYS;
+      && Math.abs(recurringAmount - operationAmount) <= AMOUNT_TOLERANCE;
   });
+
+  // L'empreinte bancaire est prioritaire sur le jour théorique du prélèvement.
   if (bankCommunication) {
-    const exactCommunication = candidates.find((expense) => recurringCommunication(expense) === bankCommunication);
+    const exactCommunication = identityCandidates.find((expense) => {
+      const expected = recurringCommunication(expense);
+      return expected && (bankCommunication.includes(expected) || expected.includes(bankCommunication));
+    });
     if (exactCommunication) return { ...exactCommunication, __communicationMatch: true };
   }
-  const freeCommunication = candidates.find((expense) => recurringFreeCommunicationMatch(bankRow, expense));
+  const freeCommunication = identityCandidates.find((expense) => recurringFreeCommunicationMatch(bankRow, expense));
   if (freeCommunication) return { ...freeCommunication, __freeCommunicationMatch: true };
-  return candidates[0] || null;
+
+  const datedCandidates = identityCandidates.filter((expense) => {
+    const recurringDay = Number(expense.day) || 1;
+    return Math.abs(recurringDay - day) <= DATE_TOLERANCE_DAYS;
+  });
+  return datedCandidates[0] || null;
 }
 
-function matchEvidence(bankRow, appRow, recurringExpenses) {
+function learnedBankIdentityMatches(rule, bankRow) {
+  if (!rule || !bankRow) return false;
+  if (normalize(rule.bankLabel) !== normalize(bankRow.label)) return false;
+  const expectedStructured = normalizedCommunication(rule.structuredCommunication || '');
+  if (expectedStructured) {
+    const actual = normalizedCommunication(bankRow.structuredCommunication || bankRow.communication);
+    return actual.includes(expectedStructured);
+  }
+  return true;
+}
+
+function learnedTargetMatches(rule, appRow) {
+  if (!rule?.target || !appRow) return false;
+  const target = rule.target;
+  if (target.label && normalize(target.label) === normalize(appRow.label)) return true;
+  if (target.category && target.category === appRow.category) {
+    if (!target.store) return true;
+    return normalize(target.store) === normalize(appRow.store || '');
+  }
+  return false;
+}
+
+function learnedEvidence(bankRow, appRow, learnedRules) {
+  const rule = (learnedRules || []).find((item) => learnedBankIdentityMatches(item, bankRow) && learnedTargetMatches(item, appRow));
+  if (!rule) return null;
+  return {
+    auto: true,
+    confidence: 100,
+    reason: 'Correspondance apprise et confirmée précédemment',
+    recurring: null,
+    learned: true,
+  };
+}
+
+function suggestionForBankRow(bankRow, learnedRules) {
+  const rule = (learnedRules || []).find((item) => learnedBankIdentityMatches(item, bankRow));
+  return rule?.target || null;
+}
+
+function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
   const amountDelta = Math.abs(Math.abs(Number(appRow.amount) || 0) - Math.abs(bankRow.amount));
   const dayDelta = dateDistance(bankRow.date, appRow.date);
   const directionMatches = (bankRow.amount > 0) === (appRow.type === 'income');
-  if (!directionMatches || amountDelta > AMOUNT_TOLERANCE || dayDelta > DATE_TOLERANCE_DAYS) return null;
+  if (!directionMatches || amountDelta > AMOUNT_TOLERANCE) return null;
+
+  const learned = learnedEvidence(bankRow, appRow, learnedRules);
+  if (learned && dayDelta <= 7) return learned;
+  if (dayDelta > DATE_TOLERANCE_DAYS) return null;
 
   const directLabel = labelsLikelyMatch(bankRow, appRow);
   const alias = aliasMatch(bankRow, appRow);
@@ -438,7 +517,7 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
   return null;
 }
 
-function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
+function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
@@ -464,7 +543,7 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses) {
       .map((row, index) => ({
         row,
         index,
-        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, recurringExpenses),
+        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, recurringExpenses, learnedRules),
       }))
       .filter(({ evidence }) => evidence)
       .sort((left, right) => right.evidence.confidence - left.evidence.confidence
@@ -576,14 +655,17 @@ export default function BelfiusAudit({
   onSynchronizeBelfiusBalance,
   onAddBankOperation,
   onSavingsDetected,
+  onAuditSnapshot,
+  onEditAppOperation,
 }) {
   // RC2.4.4 : le dernier relevé reste disponible entre les ouvertures de l'application.
   const [audit, setAudit] = useState(loadPersistedAudit);
   const [error, setError] = useState('');
+  const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
   const synchronizationKey = useRef('');
   const result = useMemo(
-    () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses) : null,
-    [audit, operations, recurringExpenses, selectedMonth],
+    () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules) : null,
+    [audit, learnedRules, operations, recurringExpenses, selectedMonth],
   );
 
   const handleFile = async (event) => {
@@ -602,12 +684,36 @@ export default function BelfiusAudit({
       setAudit(parsedAudit);
       persistAudit(parsedAudit);
       if (typeof onSavingsDetected === 'function') {
-        onSavingsDetected(detectSavingsTransfers(parsedAudit.rows));
+        onSavingsDetected(detectSavingsTransfers(parsedAudit.rows), parsedAudit);
       }
     } catch (exception) {
       setAudit(null);
       setError(exception.message || "Le fichier n'a pas pu être analysé.");
     }
+  };
+
+  const confirmMatch = (bankRow, appRow) => {
+    const rule = {
+      id: crypto.randomUUID(),
+      bankLabel: bankRow.label || '',
+      structuredCommunication: bankRow.structuredCommunication || '',
+      freeCommunication: bankRow.communication || '',
+      target: {
+        label: appRow.label || '',
+        category: appRow.category || '',
+        store: appRow.store || '',
+        person: appRow.person || 'Foyer',
+        type: appRow.type || 'variable',
+      },
+      confirmedAt: new Date().toISOString(),
+    };
+    const nextRules = [
+      ...learnedRules.filter((item) => !(normalize(item.bankLabel) === normalize(rule.bankLabel)
+        && normalize(item.target?.label) === normalize(rule.target.label))),
+      rule,
+    ];
+    persistLearnedRules(nextRules);
+    setLearnedRules(nextRules);
   };
 
   const safeMonth = result?.auditMonth || selectedMonth || '';
@@ -625,12 +731,22 @@ export default function BelfiusAudit({
     && result.review.length === 0,
   );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
-  const canSynchronize = auditIsClean
-    && Math.abs(difference) >= 0.01
-    && balanceMonth === result?.auditMonth
-    && typeof onSynchronizeBelfiusBalance === 'function';
+  const canSynchronize = false; // RC2.4.6 : le CSV reste une référence de contrôle, jamais une écriture silencieuse.
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
   const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
+
+  useEffect(() => {
+    if (!audit || typeof onAuditSnapshot !== 'function') return;
+    onAuditSnapshot({
+      balance: Number(audit.balance || 0),
+      balanceDate: audit.balanceDate || '',
+      importedAt: audit.importedAt || '',
+      remaining: remainingToTreat,
+      confirmations: result?.review.length || 0,
+      anomalies: monthMissing.length + actionableExtra.length,
+      clean: auditIsClean && Math.abs(difference) < 0.01,
+    });
+  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, difference, monthMissing.length, actionableExtra.length, remainingToTreat, result?.review.length]);
 
   useEffect(() => {
     if (!canSynchronize || !audit) return;
@@ -710,9 +826,23 @@ export default function BelfiusAudit({
               {result.review.map(({ bank, candidates, reason }) => (
                 <article key={`review-${bank.id}`}>
                   <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
-                  <span>
-                    {reason} → {candidates.map(({ app, confidence }) => `${app.label} (${confidence}%)`).join(' / ')}
-                  </span>
+                  <div className="audit-review-proposals">
+                    <span>{reason}</span>
+                    {candidates.map((candidate) => (
+                      <div className="audit-review-choice" key={candidate.app.id}>
+                        <span>{candidate.app.label} ({candidate.confidence}%)</span>
+                        <div className="audit-review-actions">
+                          <button type="button" className="audit-confirm" onClick={() => confirmMatch(bank, candidate.app)}>✓ Valider</button>
+                          {typeof onEditAppOperation === 'function' && (
+                            <button type="button" className="audit-correct" onClick={() => onEditAppOperation(candidate.app)}>Corriger</button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {typeof onAddBankOperation === 'function' && (
+                      <button type="button" className="audit-none" onClick={() => onAddBankOperation({ ...bank, learnedSuggestion: suggestionForBankRow(bank, learnedRules) })}>Aucune proposition / créer</button>
+                    )}
+                  </div>
                 </article>
               ))}
             </details>
@@ -751,7 +881,7 @@ export default function BelfiusAudit({
                   <span className="audit-missing-actions">
                     <b>{money(row.amount)}</b>
                     {typeof onAddBankOperation === 'function' && (
-                      <button type="button" className="audit-pencil" title="Enregistrer dans Mon Foyer" aria-label={`Enregistrer ${row.label} dans Mon Foyer`} onClick={() => onAddBankOperation(row)}>
+                      <button type="button" className="audit-pencil" title="Enregistrer dans Mon Foyer" aria-label={`Enregistrer ${row.label} dans Mon Foyer`} onClick={() => onAddBankOperation({ ...row, learnedSuggestion: suggestionForBankRow(row, learnedRules) })}>
                         <Pencil size={17} />
                       </button>
                     )}

@@ -44,7 +44,7 @@ const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
-const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna'];
+const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna', 'Papa'];
 const RECURRENCE_OPTIONS = [
   { value: 'once', label: 'Une seule fois', months: 0 },
   { value: 'monthly', label: 'Mensuelle', months: 1 },
@@ -55,6 +55,20 @@ const RECURRENCE_OPTIONS = [
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
+const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
+
+function savingsBucketForGoal(goal) {
+  const text = String(goal?.label || goal?.id || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (text.includes('vacance') || text.includes('loisir')) return 'vacances';
+  if (text.includes('voiture') || text.includes('auto')) return 'voiture';
+  if (text.includes('pension')) return 'pension';
+  if (text.includes('urgence')) return 'urgence';
+  if (text.includes('maison')) return 'maison';
+  return String(goal?.id || 'autre');
+}
 
 const iconMap = {
   nourriture: ShoppingBasket,
@@ -406,6 +420,7 @@ export default function App() {
   const [data, setData] = useState(loadState);
   const [activeView, setActiveView] = useState('home');
   const [bankSavings, setBankSavings] = useState({});
+  const [belfiusSnapshot, setBelfiusSnapshot] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
   const [draft, setDraft] = useState(makeEmptyOperation);
   const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
@@ -1109,10 +1124,11 @@ export default function App() {
       ...makeEmptyOperation(),
       date: bankRow?.date || currentDate(),
       type: Number(bankRow?.amount || 0) > 0 ? 'income' : recurringCandidate ? 'fixed' : 'variable',
-      category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : category,
-      store: label,
+      category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : (bankRow?.learnedSuggestion?.category || category),
+      store: bankRow?.learnedSuggestion?.store || label,
       paymentMethod: 'Compte Belfius',
-      label: recurringCandidate?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
+      person: bankRow?.learnedSuggestion?.person || 'Foyer',
+      label: recurringCandidate?.label || bankRow?.learnedSuggestion?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
       amount,
       recurrence: recurringCandidate?.frequency || 'once',
       recurringDay: recurringCandidate?.day || Number(String(bankRow?.date || currentDate()).slice(8, 10)),
@@ -1479,6 +1495,58 @@ export default function App() {
       operations: [...savedOperations, ...data.operations],
     });
     setRecurringStatus(`${savedOperations.length} frais fixe(s) ajoute(s) pour ${selectedMonth}.`);
+  };
+
+  const handleBankSavingsDetected = (detection, auditMeta = {}) => {
+    const totals = detection?.totals || detection || {};
+    const transfers = detection?.transfers || [];
+    setBankSavings(totals);
+    if (!transfers.length) return;
+
+    let applied = {};
+    try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+    const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
+    if (!freshTransfers.length) return;
+
+    const increments = freshTransfers.reduce((map, transfer) => {
+      map[transfer.bucket] = (map[transfer.bucket] || 0) + Math.abs(Number(transfer.amount) || 0);
+      return map;
+    }, {});
+
+    setData((current) => {
+      const changedGoals = [];
+      const savingsGoals = current.savingsGoals.map((goal) => {
+        const bucket = savingsBucketForGoal(goal);
+        const increment = increments[bucket] || 0;
+        if (!increment) return goal;
+        const next = { ...goal, saved: Number(goal.saved || 0) + increment };
+        changedGoals.push(next);
+        return next;
+      });
+      const nextData = { ...current, savingsGoals };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+
+      if (USE_REMOTE_BUDGET && changedGoals.length) {
+        changedGoals.forEach((goal) => {
+          supabase.from('savings_goals')
+            .update({ saved: Number(goal.saved) })
+            .eq('id', goal.id)
+            .eq('household_id', householdId)
+            .then(() => {});
+        });
+      }
+      return nextData;
+    });
+
+    freshTransfers.forEach((transfer) => {
+      applied[transfer.fingerprint] = {
+        bucket: transfer.bucket,
+        amount: transfer.amount,
+        appliedAt: new Date().toISOString(),
+        source: auditMeta.fileName || 'Belfius CSV',
+      };
+    });
+    localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
   };
 
   const synchronizeBelfiusBalance = async ({ balance, balanceDate, month }) => {
@@ -1870,6 +1938,21 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {belfiusSnapshot && (
+                  <details className={`belfius-real-balance ${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}`}>
+                    <summary>
+                      <span>Solde Belfius réel</span>
+                      <strong>{formatCurrency(belfiusSnapshot.balance)}</strong>
+                    </summary>
+                    <div className="belfius-real-balance-details">
+                      <span>Relevé : {belfiusSnapshot.balanceDate || 'dernier CSV importé'}</span>
+                      <span>Solde Mon Foyer : {formatCurrency(paymentBalances['Compte Belfius'] || 0)}</span>
+                      <span>Écart : {formatCurrency((paymentBalances['Compte Belfius'] || 0) - Number(belfiusSnapshot.balance || 0))}</span>
+                      <span>{belfiusSnapshot.remaining || 0} opération(s) à traiter</span>
+                      <strong>{belfiusSnapshot.clean ? 'Conforme à Belfius' : 'Rapprochement en cours'}</strong>
+                    </div>
+                  </details>
+                )}
               </div>
               <PiggyBank size={42} />
             </div>
@@ -2057,7 +2140,7 @@ export default function App() {
               </div>
               <div className="goals-grid">
                 {data.savingsGoals.map((goal) => (
-                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[goal.id] || 0} />
+                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />
                 ))}
               </div>
             </section>
@@ -2386,7 +2469,9 @@ export default function App() {
               selectedMonth={selectedMonth}
               recurringExpenses={data.recurringFixedExpenses || []}
               onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
-              onSavingsDetected={setBankSavings}
+              onSavingsDetected={handleBankSavingsDetected}
+              onAuditSnapshot={setBelfiusSnapshot}
+              onEditAppOperation={editOperation}
               onAddBankOperation={addBankOperationFromAudit}
             />
 

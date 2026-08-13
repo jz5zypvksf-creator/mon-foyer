@@ -1720,3 +1720,26 @@ input, select, textarea {
 @media (max-width: 600px) {
   .goal-bank-sync { align-items: flex-start; flex-direction: column; gap: 3px; }
 }
+
+
+/* V32 RC2.4.6 — apprentissage, solde réel et cohérence visuelle */
+.audit-pencil, .operation-row .icon-button, .operation-row button[aria-label*="Modifier"] {
+  width: 38px; height: 38px; min-height: 38px; padding: 0; border: 0; border-radius: 999px;
+  display: inline-grid; place-items: center; background: #e5f3ea; color: #2f7d57; cursor: pointer;
+}
+.audit-pencil:hover, .operation-row button[aria-label*="Modifier"]:hover { background: #d7ebdf; }
+.audit-review-proposals { display: grid; gap: 8px; min-width: min(100%, 430px); }
+.audit-review-choice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.72); }
+.audit-review-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.audit-confirm, .audit-correct, .audit-none { min-height: 34px; padding: 6px 10px; border: 0; border-radius: 999px; font-weight: 800; cursor: pointer; }
+.audit-confirm { background: #dff2e6; color: #256744; }
+.audit-correct { background: #e8f1fb; color: #245f91; }
+.audit-none { justify-self: end; background: #f2f3f4; color: #5f6b74; }
+.belfius-real-balance { margin-top: 10px; border: 1px solid rgba(255,255,255,.35); border-radius: 14px; background: rgba(255,255,255,.12); overflow: hidden; }
+.belfius-real-balance summary { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; cursor: pointer; font-size: .8rem; }
+.belfius-real-balance summary strong { font-size: .95rem; }
+.belfius-real-balance.is-clean summary strong { color: #d9f7e4; }
+.belfius-real-balance.has-gap summary strong { color: #fff1c9; }
+.belfius-real-balance-details { display: grid; gap: 4px; padding: 0 11px 10px; font-size: .75rem; }
+.belfius-real-balance-details strong { margin-top: 3px; font-size: .78rem; }
+@media(max-width:600px){ .audit-review-choice{align-items:flex-start;flex-direction:column}.audit-none{justify-self:start} }
