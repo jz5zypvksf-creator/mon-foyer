@@ -1,0 +1,155 @@
+name: RC2.4.6 Beobank reconciliation fix
+
+on:
+  push:
+    branches: [v32-rc2-4-6]
+    paths:
+      - '.github/workflows/rc246-beobank-reconcile-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v32-rc2-4-6
+      - name: Patch Belfius reconciliation rules
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/BelfiusAudit.jsx')
+          s = p.read_text()
+
+          old = """function learnedBankIdentityMatches(rule, bankRow) {
+  if (!rule || !bankRow) return false;
+  if (normalize(rule.bankLabel) !== normalize(bankRow.label)) return false;
+  const expectedStructured = normalizedCommunication(rule.structuredCommunication || '');
+  if (expectedStructured) {
+    const actual = normalizedCommunication(bankRow.structuredCommunication || bankRow.communication);
+    return actual.includes(expectedStructured);
+  }
+  return true;
+}
+"""
+          new = """function learnedBankIdentityMatches(rule, bankRow) {
+  if (!rule || !bankRow) return false;
+  if (normalize(rule.bankLabel) !== normalize(bankRow.label)) return false;
+  const expectedStructured = normalizedCommunication(rule.structuredCommunication || '');
+  if (expectedStructured) {
+    const actual = normalizedCommunication(bankRow.structuredCommunication || bankRow.communication);
+    return actual.includes(expectedStructured);
+  }
+  const expectedFree = normalize(rule.freeCommunication || '');
+  if (expectedFree) {
+    const actualFree = normalize(bankRow.communication || bankRow.details || '');
+    return actualFree === expectedFree || actualFree.includes(expectedFree);
+  }
+  return true;
+}
+
+function isBeobankSavingsTransfer(row) {
+  if (!row || Number(row.amount) >= 0) return false;
+  return normalize(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`).includes('beobank');
+}
+
+function isBeobankSavingsAppRow(row) {
+  const text = normalize(`${row?.label || ''} ${row?.store || ''}`);
+  return text.includes('beobank') || text.includes('epargne loisirs') || text.includes('epargne vacances');
+}
+"""
+          if old not in s:
+              raise SystemExit('learned identity block not found')
+          s = s.replace(old, new, 1)
+
+          old = """  const monthBankRows = bankRows
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .map((row) => ({ ...row }));
+  const appRows = operations
+    .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
+    .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
+"""
+          new = """  // Les transferts vers Beobank sont des transferts internes d'épargne Vacances/Loisirs.
+  // Ils sont pris en charge par detectSavingsTransfers et ne participent jamais au moteur
+  // de correspondances de dépenses/revenus (sinon un même montant peut proposer Mega, etc.).
+  const monthBankRows = bankRows
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .filter((row) => !isBeobankSavingsTransfer(row))
+    .map((row) => ({ ...row }));
+  const appRows = operations
+    .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
+    .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
+    .filter((row) => !isBeobankSavingsAppRow(row))
+    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
+"""
+          if old not in s:
+              raise SystemExit('reconcile source block not found')
+          s = s.replace(old, new, 1)
+
+          old = """  const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
+  const synchronizationKey = useRef('');
+"""
+          new = """  const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
+  const [confirmationMessage, setConfirmationMessage] = useState('');
+  const synchronizationKey = useRef('');
+"""
+          if old not in s:
+              raise SystemExit('state block not found')
+          s = s.replace(old, new, 1)
+
+          old = """    const nextRules = [
+      ...learnedRules.filter((item) => !(normalize(item.bankLabel) === normalize(rule.bankLabel)
+        && normalize(item.target?.label) === normalize(rule.target.label))),
+      rule,
+    ];
+    persistLearnedRules(nextRules);
+    setLearnedRules(nextRules);
+  };
+"""
+          new = """    const sameIdentity = (item) => {
+      if (normalize(item.bankLabel) !== normalize(rule.bankLabel)) return false;
+      const oldStructured = normalizedCommunication(item.structuredCommunication || '');
+      const newStructured = normalizedCommunication(rule.structuredCommunication || '');
+      if (oldStructured || newStructured) return oldStructured === newStructured;
+      const oldFree = normalize(item.freeCommunication || '');
+      const newFree = normalize(rule.freeCommunication || '');
+      if (oldFree || newFree) return oldFree === newFree;
+      return true;
+    };
+    // Une identité bancaire ne conserve qu'une décision utilisateur active :
+    // valider un nouveau choix remplace toute règle contradictoire antérieure.
+    const nextRules = [...learnedRules.filter((item) => !sameIdentity(item)), rule];
+    persistLearnedRules(nextRules);
+    setLearnedRules(nextRules);
+    setConfirmationMessage(`Correspondance validée et mémorisée : ${bankRow.label} → ${appRow.label}.`);
+  };
+"""
+          if old not in s:
+              raise SystemExit('confirm rule block not found')
+          s = s.replace(old, new, 1)
+
+          marker = """      <p className=\"hint\">Le fichier complet est lu, mais l'audit porte uniquement sur le mois sélectionné.</p>
+"""
+          insert = marker + """      {confirmationMessage && (
+        <p className=\"hint audit-confirmation-message\"><CheckCircle2 size={15} /> {confirmationMessage}</p>
+      )}
+"""
+          if marker not in s:
+              raise SystemExit('UI marker not found')
+          s = s.replace(marker, insert, 1)
+
+          p.write_text(s)
+      - name: Verify build
+        run: npm install && npm run build
+      - name: Commit correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/BelfiusAudit.jsx package-lock.json
+          git commit -m "RC2.4.6: make Beobank savings exclusive and validation effective"
+          git push origin HEAD:v32-rc2-4-6
