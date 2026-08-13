@@ -15,8 +15,64 @@ function beobankImporterIntegration() {
       const oldBlock = `{data.savingsGoals.map((goal) => (\n                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />\n                ))}`;
       const newBlock = `{data.savingsGoals.map((goal) => (\n                  <div key={goal.id}>\n                    <GoalCard goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />\n                    {savingsBucketForGoal(goal) === 'vacances' && (\n                      <BeobankStatementImport currentBalance={Number(goal.saved || 0)} onApply={(balance) => updateGoal(goal.id, 'saved', balance)} />\n                    )}\n                  </div>\n                ))}`;
       patched = patched.replace(oldBlock, newBlock);
-      if (patched === code || !patched.includes('BeobankStatementImport')) {
-        throw new Error('RC2.4.6 Beobank: integration target not found; refusing misleading build.');
+
+      // RC2.4.6 — une domiciliation est une identité bancaire distincte d'une communication.
+      patched = patched.replaceAll(
+        'structured_communication, free_communication, free_communication_mode',
+        'structured_communication, direct_debit_reference, free_communication, free_communication_mode',
+      );
+      patched = patched.replaceAll(
+        "    structuredCommunication: '',\n    freeCommunication: '',",
+        "    structuredCommunication: '',\n    directDebitReference: '',\n    freeCommunication: '',",
+      );
+      patched = patched.replaceAll(
+        "      structuredCommunication: expense.structured_communication || '',\n      freeCommunication:",
+        "      structuredCommunication: expense.structured_communication || '',\n      directDebitReference: expense.direct_debit_reference || '',\n      freeCommunication:",
+      );
+      patched = patched.replace(
+        "      structuredCommunication: operation.structuredCommunication ?? existing?.structuredCommunication ?? existing?.structured_communication ?? '',\n      freeCommunication:",
+        "      structuredCommunication: operation.structuredCommunication ?? existing?.structuredCommunication ?? existing?.structured_communication ?? '',\n      directDebitReference: operation.directDebitReference ?? existing?.directDebitReference ?? existing?.direct_debit_reference ?? '',\n      freeCommunication:",
+      );
+      patched = patched.replaceAll(
+        "        structured_communication: recurringExpense.structuredCommunication || null,\n        free_communication:",
+        "        structured_communication: recurringExpense.structuredCommunication || null,\n        direct_debit_reference: recurringExpense.directDebitReference || null,\n        free_communication:",
+      );
+      patched = patched.replace(
+        "          structuredCommunication: draft.structuredCommunication || '',\n          freeCommunication:",
+        "          structuredCommunication: draft.structuredCommunication || '',\n          directDebitReference: draft.directDebitReference || '',\n          freeCommunication:",
+      );
+      patched = patched.replaceAll(
+        "      structuredCommunication: recurringExpense?.structuredCommunication || recurringExpense?.structured_communication || '',\n      freeCommunication:",
+        "      structuredCommunication: recurringExpense?.structuredCommunication || recurringExpense?.structured_communication || '',\n      directDebitReference: recurringExpense?.directDebitReference || recurringExpense?.direct_debit_reference || '',\n      freeCommunication:",
+      );
+      patched = patched.replaceAll(
+        "      structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',\n      freeCommunication:",
+        "      structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',\n      directDebitReference: expense.directDebitReference || expense.direct_debit_reference || '',\n      freeCommunication:",
+      );
+      patched = patched.replace(
+        "      structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),\n      freeCommunication:",
+        "      structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),\n      directDebitReference: String(recurringDraft.directDebitReference || '').trim(),\n      freeCommunication:",
+      );
+      patched = patched.replaceAll(
+        "        structured_communication: fixedExpense.structuredCommunication || null,\n        free_communication:",
+        "        structured_communication: fixedExpense.structuredCommunication || null,\n        direct_debit_reference: fixedExpense.directDebitReference || null,\n        free_communication:",
+      );
+      patched = patched.replace(
+        "        structuredCommunication: savedExpense.structured_communication || '',\n        freeCommunication:",
+        "        structuredCommunication: savedExpense.structured_communication || '',\n        directDebitReference: savedExpense.direct_debit_reference || '',\n        freeCommunication:",
+      );
+
+      patched = patched.replace(
+        `                      <label>\n                        Communication structurée`,
+        `                      <label>\n                        Référence de domiciliation / mandat\n                        <input\n                          value={draft.directDebitReference || ''}\n                          onChange={(event) => setDraft({ ...draft, directDebitReference: event.target.value })}\n                          placeholder="Ex. 400677427629"\n                        />\n                      </label>\n                      <label>\n                        Communication structurée`,
+      );
+      patched = patched.replace(
+        `                  <label>\n                    Communication structurée`,
+        `                  <label>\n                    Référence de domiciliation / mandat\n                    <input\n                      value={recurringDraft.directDebitReference || ''}\n                      onChange={(event) => setRecurringDraft({ ...recurringDraft, directDebitReference: event.target.value })}\n                      placeholder="Ex. 400677427629"\n                    />\n                  </label>\n                  <label>\n                    Communication structurée`,
+      );
+
+      if (patched === code || !patched.includes('BeobankStatementImport') || !patched.includes('Référence de domiciliation / mandat')) {
+        throw new Error('RC2.4.6 App: integration target not found; refusing misleading build.');
       }
       return { code: patched, map: null };
     },
@@ -33,24 +89,37 @@ function belfiusAuditRc246Integration() {
 
       patched = patched.replace(
         "import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';",
-        "import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';\nimport { classifyBankBusinessRule, hasStrongCommunicationFingerprint, isTrueOrphanAppOperation, shouldOfferAmountDateFallback } from './belfiusMatchingRules.js';",
+        "import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';\nimport { classifyBankBusinessRule, hasStrongCommunicationFingerprint, isTrueOrphanAppOperation, shouldOfferAmountDateFallback, strongCommunicationMatch } from './belfiusMatchingRules.js';",
       );
 
       patched = patched.replace(
         /function isBeobankSavingsTransfer\(row\) \{[\s\S]*?\n\}/,
         "function isBeobankSavingsTransfer(row) {\n  return Boolean(classifyBankBusinessRule(row));\n}",
       );
-
+      patched = patched.replace(
+        "      structuredCommunication: extractStructuredCommunication(cells[communicationIndex] || ''),",
+        "      structuredCommunication: extractStructuredCommunication(cells[communicationIndex] || ''),\n      rawDetails: cells.join(' '),",
+      );
+      patched = patched.replace(
+        "  // L'empreinte bancaire est prioritaire sur le jour théorique du prélèvement.\n  if (bankCommunication) {",
+        "  // Référence de domiciliation / mandat : empreinte bancaire prioritaire.\n  const directDebit = identityCandidates.find((expense) => strongCommunicationMatch(bankRow, expense)?.kind === 'direct-debit');\n  if (directDebit) return { ...directDebit, __directDebitMatch: true };\n\n  // L'empreinte bancaire est prioritaire sur le jour théorique du prélèvement.\n  if (bankCommunication) {",
+      );
+      patched = patched.replace(
+        "  if (recurring && recurring.__freeCommunicationMatch) {",
+        "  if (recurring && recurring.__directDebitMatch) {\n    return { auto: true, confidence: 100, reason: `Référence de domiciliation Belfius reconnue : ${recurring.label}`, recurring };\n  }\n  if (recurring && recurring.__freeCommunicationMatch) {",
+      );
+      patched = patched.replace(
+        "  return structuredMatch || recurringFreeCommunicationMatch(bankRow, expense);",
+        "  return Boolean(strongCommunicationMatch(bankRow, expense)) || structuredMatch || recurringFreeCommunicationMatch(bankRow, expense);",
+      );
       patched = patched.replace(
         "  // Montant/date seuls ne sont plus une preuve suffisante : ils deviennent une proposition.\n  return {",
-        "  // Une communication forte connue interdit toute proposition concurrente basée seulement sur montant/date.\n  if (!shouldOfferAmountDateFallback(bankRow, recurringExpenses)) return null;\n\n  // Montant/date seuls ne sont plus une preuve suffisante : ils deviennent une proposition.\n  return {",
+        "  // Une empreinte forte connue interdit toute proposition concurrente basée seulement sur montant/date.\n  if (!shouldOfferAmountDateFallback(bankRow, recurringExpenses)) return null;\n\n  // Montant/date seuls ne sont plus une preuve suffisante : ils deviennent une proposition.\n  return {",
       );
-
       patched = patched.replace(
         ".filter((row) => !isBeobankSavingsTransfer(row))",
         ".filter((row) => !classifyBankBusinessRule(row)?.excludeFromExpenseMatching)",
       );
-
       patched = patched.replace(
         "    if (usedApp.has(appIndex)) return;",
         "    if (usedApp.has(appIndex) || pendingApp.has(appIndex)) return;",
@@ -72,22 +141,18 @@ function belfiusAuditRc246Integration() {
         "export default function BelfiusAudit({",
         "function sameAppIdentity(left, right) {\n  return normalize(left?.label) === normalize(right?.label)\n    && Math.abs(Number(left?.amount || 0) - Number(right?.amount || 0)) <= AMOUNT_TOLERANCE\n    && (left?.person || 'Foyer') === (right?.person || 'Foyer');\n}\n\nexport default function BelfiusAudit({",
       );
-
       patched = patched.replace(
         "  const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') <= cutoffDate);",
         "  const matchedApps = result?.matched?.map((entry) => entry.app) || [];\n  const actionableExtra = monthExtra\n    .filter((row) => !cutoffDate || String(row.date || '') <= cutoffDate)\n    .filter((row) => isTrueOrphanAppOperation(row, { cutoffDate }))\n    .filter((row) => !matchedApps.some((matched) => matched.id !== row.id && sameAppIdentity(matched, row)));",
       );
-
       patched = patched.replace(
         "  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;",
         "  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;\n  const strongFingerprintCount = (audit?.rows || []).filter((row) => hasStrongCommunicationFingerprint(row, recurringExpenses)).length;",
       );
-
       patched = patched.replace(
         "          Tu peux quitter l'application et reprendre l'audit sans recharger le fichier.",
         "          {strongFingerprintCount > 0 ? ` ${strongFingerprintCount} empreinte(s) bancaire(s) forte(s) reconnue(s).` : ''}\n          Tu peux quitter l'application et reprendre l'audit sans recharger le fichier.",
       );
-
       patched = patched.replace(
         '<span><i className="audit-dot" />À vérifier Mon Foyer</span>',
         '<span><i className="audit-dot" />Écritures sans mouvement</span>',
@@ -102,6 +167,7 @@ function belfiusAuditRc246Integration() {
         "shouldOfferAmountDateFallback(bankRow, recurringExpenses)",
         "Écritures Mon Foyer sans mouvement Belfius",
         "sameAppIdentity",
+        "__directDebitMatch",
       ];
       if (requiredMarkers.some((marker) => !patched.includes(marker))) {
         throw new Error('RC2.4.6 Belfius: integration target not found; refusing misleading build.');
