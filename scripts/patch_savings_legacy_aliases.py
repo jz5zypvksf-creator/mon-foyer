@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-shot migration helper for the savings preview branch.
 p = Path('src/App.jsx')
 s = p.read_text()
 
