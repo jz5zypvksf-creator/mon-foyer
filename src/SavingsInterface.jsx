@@ -11,23 +11,35 @@ function normalize(value) {
 }
 
 export function savingsBucketForDisplay(goal) {
-  const text = normalize(`${goal?.label || ''} ${goal?.bucket || ''}`);
+  const text = normalize(`${goal?.label || ''} ${goal?.bucket || ''}`).trim();
   if (text.includes('vacance') || text.includes('loisir')) return 'vacances';
   if (text.includes('garage') || text.includes('entretien vehicule')) return 'garage';
   if (text.includes('taxe') || text.includes('impot')) return 'taxes';
-  if (text.includes('solde peugeot')) return 'solde_peugeot';
-  if (text.includes('frais divers maison') || text.includes('frais divers foyer')) return 'frais_maison';
+  // Les anciennes cartes sont réutilisées : Voiture = solde Peugeot, Maison = frais maison/foyer.
+  if (text === 'voiture' || text.includes('solde peugeot') || text.includes('epargne voiture')) return 'solde_peugeot';
+  if (text === 'maison' || text.includes('frais divers maison') || text.includes('frais divers foyer') || text.includes('epargne maison')) return 'frais_maison';
   if (text.includes('pension alain')) return 'pension_alain';
   if (text.includes('pension esther')) return 'pension_esther';
-  if (text === 'voiture' || text.includes('epargne voiture')) return 'voiture';
-  if (text === 'maison' || text.includes('epargne maison')) return 'maison';
   if (text.includes('urgence')) return 'urgence';
+  if (text === 'autre' || text.includes('autre')) return 'autre';
   return goal?.bucket || goal?.id || 'autre';
+}
+
+function canonicalLabel(bucket, fallback) {
+  return savingsRuleForBucket(bucket)?.label || fallback;
+}
+
+function preferredGoal(current, candidate) {
+  if (!current) return candidate;
+  const currentWeight = Math.abs(Number(current.saved || 0)) * 100000 + Math.abs(Number(current.target || 0));
+  const candidateWeight = Math.abs(Number(candidate.saved || 0)) * 100000 + Math.abs(Number(candidate.target || 0));
+  return candidateWeight > currentWeight ? candidate : current;
 }
 
 function SavingsCard({ goal, detected = 0, onUpdate }) {
   const bucket = savingsBucketForDisplay(goal);
   const rule = savingsRuleForBucket(bucket);
+  const label = canonicalLabel(bucket, goal.label);
   const target = Number(goal.target || 0);
   const saved = Number(goal.saved || 0);
   const ratio = target > 0 ? Math.round((saved / target) * 100) : null;
@@ -38,7 +50,7 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
     <article className="savings-op-card">
       <div className="savings-op-head">
         <div>
-          <strong>{goal.label}</strong>
+          <strong>{label}</strong>
           {rule && <span className="savings-op-ref">OP {rule.op}</span>}
         </div>
         {ratio !== null && <b>{ratio}%</b>}
@@ -67,11 +79,23 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
 }
 
 export default function SavingsInterface({ goals = [], bankSavings = {}, onUpdate }) {
-  const total = goals.reduce((sum, goal) => sum + Number(goal.saved || 0), 0);
-  const ordered = [...goals].sort((a, b) => {
-    const order = ['voiture', 'vacances', 'garage', 'taxes', 'frais_maison', 'solde_peugeot', 'pension_alain', 'pension_esther', 'maison', 'urgence', 'autre'];
-    return order.indexOf(savingsBucketForDisplay(a)) - order.indexOf(savingsBucketForDisplay(b));
+  const byBucket = new Map();
+  goals.forEach((goal) => {
+    const bucket = savingsBucketForDisplay(goal);
+    if (bucket === 'autre') return;
+    byBucket.set(bucket, preferredGoal(byBucket.get(bucket), goal));
   });
+
+  const order = ['solde_peugeot', 'vacances', 'garage', 'taxes', 'frais_maison', 'pension_alain', 'pension_esther', 'urgence'];
+  const displayedGoals = [...byBucket.entries()]
+    .sort(([bucketA], [bucketB]) => {
+      const a = order.indexOf(bucketA);
+      const b = order.indexOf(bucketB);
+      return (a < 0 ? 999 : a) - (b < 0 ? 999 : b);
+    })
+    .map(([, goal]) => goal);
+
+  const total = displayedGoals.reduce((sum, goal) => sum + Number(goal.saved || 0), 0);
 
   return (
     <section className="panel savings-interface">
@@ -81,9 +105,9 @@ export default function SavingsInterface({ goals = [], bankSavings = {}, onUpdat
       </div>
       <p className="hint">Les numéros d’ordre permanent servent d’identifiants bancaires. Le montant peut varier sans casser la reconnaissance.</p>
       <div className="goals-grid">
-        {ordered.map((goal) => {
+        {displayedGoals.map((goal) => {
           const bucket = savingsBucketForDisplay(goal);
-          return <SavingsCard key={goal.id} goal={goal} detected={bankSavings[bucket] || 0} onUpdate={onUpdate} />;
+          return <SavingsCard key={bucket} goal={goal} detected={bankSavings[bucket] || 0} onUpdate={onUpdate} />;
         })}
       </div>
     </section>
