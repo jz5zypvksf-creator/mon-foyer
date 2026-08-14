@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 
+// Hotfix ciblé : détail Papa/Nonna + suppression du doublon Taxes du 03/08/2026.
 const path = 'vite.config.js';
 let source = fs.readFileSync(path, 'utf8');
 
