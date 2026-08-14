@@ -1,0 +1,33 @@
+name: Dev savings legacy aliases
+on:
+  push:
+    branches:
+      - dev/savings-op-controls
+    paths:
+      - scripts/patch_savings_legacy_aliases.py
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/savings-op-controls
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch aliases
+        run: python3 scripts/patch_savings_legacy_aliases.py
+      - name: Install
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.jsx package-lock.json
+          git commit -m 'Fusionne Voiture et Maison avec les postes épargne OP'
+          git push origin HEAD:dev/savings-op-controls
