@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Landmark, CheckCircle2, AlertTriangle } from 'lucide-react';
 import BeobankStatementImport from './BeobankStatementImport.jsx';
 import './BeobankStatementImport.css';
@@ -8,6 +9,10 @@ const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', cur
 
 function normalize(value) {
   return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function inputMoney(value) {
+  return Number(value || 0).toFixed(2).replace('.', ',');
 }
 
 export function savingsBucketForDisplay(goal) {
@@ -45,6 +50,17 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
   const ratio = target > 0 ? Math.round((saved / target) * 100) : null;
   const progress = ratio === null ? 0 : Math.min(Math.max(ratio, 0), 100);
   const detectedOk = detected > 0;
+  const [draft, setDraft] = useState({ saved: inputMoney(saved), target: inputMoney(target) });
+
+  // Les valeurs Supabase arrivent après le premier rendu. Les champs doivent donc
+  // suivre les données réelles et ne jamais conserver les valeurs initiales de démonstration.
+  useEffect(() => {
+    setDraft({ saved: inputMoney(saved), target: inputMoney(target) });
+  }, [goal.id, saved, target]);
+
+  const commit = (field) => {
+    onUpdate(goal.id, field, draft[field]);
+  };
 
   return (
     <article className="savings-op-card">
@@ -65,10 +81,24 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
       )}
       <div className="goal-inputs">
         <label>Mis de côté (épargne)
-          <input type="text" inputMode="decimal" defaultValue={saved.toFixed(2).replace('.', ',')} onBlur={(event) => onUpdate(goal.id, 'saved', event.target.value)} />
+          <input
+            type="text"
+            inputMode="decimal"
+            value={draft.saved}
+            onChange={(event) => setDraft((current) => ({ ...current, saved: event.target.value }))}
+            onBlur={() => commit('saved')}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+          />
         </label>
         <label>Objectif
-          <input type="text" inputMode="decimal" defaultValue={target.toFixed(2).replace('.', ',')} onBlur={(event) => onUpdate(goal.id, 'target', event.target.value)} />
+          <input
+            type="text"
+            inputMode="decimal"
+            value={draft.target}
+            onChange={(event) => setDraft((current) => ({ ...current, target: event.target.value }))}
+            onBlur={() => commit('target')}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+          />
         </label>
       </div>
       {bucket === 'vacances' && (
