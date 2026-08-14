@@ -13,31 +13,21 @@ function careHotfixIntegration() {
       if (!isApp) return null;
       let patched = code;
 
-      if (!patched.includes('const viewCareHistory = (person) =>')) {
-        patched = patched.replace(
-          '  const editingOperation = useMemo(() => {',
-          "  const viewCareHistory = (person) => { setHistoryPerson(person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); };\n\n  const editingOperation = useMemo(() => {",
-        );
-      }
-
       const reimbursementButton = '<button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>';
-      const detailButton = '<button type="button" className="secondary-button" onClick={() => viewCareHistory(item.person)}>Voir le détail</button>';
-      if (!patched.includes('onClick={() => viewCareHistory(item.person)}>Voir le détail</button>')) {
+      const detailButton = '<button type="button" className="secondary-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
+      if (!patched.includes('>Voir le détail</button>')) {
         patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
       }
 
       if (!patched.includes('mon-foyer-cleanup-taxes-2026-08-v1')) {
-        const careAnchor = /  const careSummary = useMemo\(\(\) => careBalances\(data\.operations(?:, selectedMonth)?\), \[[^\]]+\]\);/;
-        const match = patched.match(careAnchor);
-        if (!match) throw new Error('careSummary introuvable pour le nettoyage ciblé');
-
-        const cleanupLines = [
-          match[0],
+        const anchor = '  const editingOperation = useMemo(() => {';
+        if (!patched.includes(anchor)) throw new Error('Point insertion nettoyage introuvable');
+        const cleanup = [
           "  useEffect(() => {",
           "    const cleanupKey = 'mon-foyer-cleanup-taxes-2026-08-v1';",
           "    if (localStorage.getItem(cleanupKey) === 'done') return;",
-          "    const normalizeCareLabel = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();",
-          "    const isTaxes300 = (row) => Math.abs(Number(row?.amount || 0) - 300) < 0.01 && normalizeCareLabel(row?.label).includes('epargne taxes');",
+          "    const normalizeCleanupLabel = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();",
+          "    const isTaxes300 = (row) => Math.abs(Number(row?.amount || 0) - 300) < 0.01 && normalizeCleanupLabel(row?.label).includes('epargne taxes');",
           "    const correct = data.operations.find((row) => row.date === '2026-08-04' && isTaxes300(row));",
           "    const duplicates = correct ? data.operations.filter((row) => row.date === '2026-08-03' && isTaxes300(row)) : [];",
           "    if (!correct || duplicates.length === 0) return;",
@@ -58,8 +48,9 @@ function careHotfixIntegration() {
           "      applyLocalCleanup();",
           "    }",
           "  }, [data.operations]);",
-        ];
-        patched = patched.replace(match[0], cleanupLines.join('\n'));
+          "",
+        ].join('\n');
+        patched = patched.replace(anchor, cleanup + anchor);
       }
 
       if (!patched.includes('Voir le détail') || !patched.includes('mon-foyer-cleanup-taxes-2026-08-v1')) {
