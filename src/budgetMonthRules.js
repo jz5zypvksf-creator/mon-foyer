@@ -90,8 +90,11 @@ export function careBalanceForMonth(operations = [], person = '', monthKey = '')
   return { person, carriedBalance, expenses, reimbursed, balance };
 }
 
-export function careBalances(operations = [], monthKey = '') {
-  return ['Papa', 'Nonna'].map((person) => (
-    monthKey ? careBalanceForMonth(operations, person, monthKey) : careBalanceForPerson(operations, person)
-  ));
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function careBalances(operations = [], monthKey = currentMonthKey()) {
+  return ['Papa', 'Nonna'].map((person) => careBalanceForMonth(operations, person, monthKey));
 }
