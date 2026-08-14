@@ -108,4 +108,29 @@ function finalRc246Integration() {
   };
 }
 
-export default defineConfig({ plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), react()] });
+
+function careUxFinalIntegration() {
+  return {
+    name: 'mon-foyer-care-ux-final',
+    enforce: 'post',
+    transform(code, id) {
+      const isApp = id.endsWith('/src/App.jsx') || id.endsWith('\\src\\App.jsx');
+      const isAudit = id.endsWith('/src/BelfiusAudit.jsx') || id.endsWith('\\src\\BelfiusAudit.jsx');
+      if (!isApp && !isAudit) return null;
+      let patched = code;
+      if (isApp) {
+        patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);');
+        patched = patched.replace('  const editingOperation = useMemo(() => {', "  const viewCareHistory = (person) => { setHistoryPerson(person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); };\n\n  const editingOperation = useMemo(() => {");
+        patched = patched.replace('{careSummary.map((item) => (<div key={item.person} className="forecast-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Dépenses : {formatCurrency(item.expenses)}</span><span>Remboursé : {formatCurrency(item.reimbursed)}</span></div><div><strong className={item.balance > 0 ? \'expense\' : \'income\'}>{formatCurrency(item.balance)}</strong><button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}', '{careSummary.map((item) => (<div key={item.person} className="forecast-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Solde reporté : {formatCurrency(item.carriedBalance || 0)}</span><span>Dépenses du mois : {formatCurrency(item.expenses)}</span><span>Remboursé ce mois : {formatCurrency(item.reimbursed)}</span></div><div><strong className={item.balance > 0 ? \'expense\' : \'income\'}>{formatCurrency(item.balance)}</strong><button type="button" className="secondary-button" onClick={() => viewCareHistory(item.person)}>Voir le détail</button><button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}');
+        patched = patched.replace('<input type="text" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="0,00" />', '<input type="text" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} onBlur={() => { const value = parseDecimal(draft.amount); if (Number.isFinite(value)) setDraft({ ...draft, amount: value.toFixed(2).replace(\'.\', \',\') }); }} placeholder="0,00" />');
+        patched = patched.replace('<input type="text" inputMode="decimal" value={recurringDraft.amount} onChange={(event) => setRecurringDraft({ ...recurringDraft, amount: event.target.value })} placeholder="0,00" />', '<input type="text" inputMode="decimal" value={recurringDraft.amount} onChange={(event) => setRecurringDraft({ ...recurringDraft, amount: event.target.value })} onBlur={() => { const value = parseDecimal(recurringDraft.amount); if (Number.isFinite(value)) setRecurringDraft({ ...recurringDraft, amount: value.toFixed(2).replace(\'.\', \',\') }); }} placeholder="0,00" />');
+      }
+      if (isAudit) {
+        patched = patched.replace('    const automatic = candidates.filter(({ evidence }) => evidence.auto);\n    if (automatic.length === 1) {', "    const automatic = candidates.filter(({ evidence }) => evidence.auto);\n    const learnedAutomatic = automatic.filter(({ evidence }) => String(evidence.reason || '').toLowerCase().includes('apprise'));\n    if (learnedAutomatic.length === 1) { const selected = learnedAutomatic[0]; usedBank.add(bankIndex); usedApp.add(selected.index); matched.push({ bank: bankRow, app: selected.row, ...selected.evidence }); return; }\n    if (automatic.length === 1) {");
+      }
+      return patched === code ? null : { code: patched, map: null };
+    },
+  };
+}
+
+export default defineConfig({ plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careUxFinalIntegration(), react()] });
