@@ -178,33 +178,13 @@ function parseBelfius(text) {
 function detectSavingsTransfers(rows) {
   const totals = {};
   const transfers = [];
-  const add = (bucket, row) => {
-    const amount = Math.abs(Number(row.amount) || 0);
-    totals[bucket] = (totals[bucket] || 0) + amount;
-    transfers.push({
-      bucket,
-      amount,
-      date: row.date,
-      label: row.label,
-      communication: row.communication || '',
-      fingerprint: [row.date, Number(row.amount).toFixed(2), normalize(row.label), normalize(row.communication || row.details)].join('|'),
-    });
-  };
-
   (rows || []).forEach((row) => {
-    if (row.amount >= 0) return;
-    const text = normalize(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`);
+    const rule = classifyBankBusinessRule(row);
+    if (!rule || rule.kind !== 'internal-savings-transfer') return;
     const amount = Math.abs(Number(row.amount) || 0);
-
-    // Règle métier RC2.4.6 : tous les transferts vers Beobank alimentent Vacances/Loisirs.
-    if (text.includes('beobank')) { add('vacances', row); return; }
-    if (text.includes('pour voiture') || text.includes('epargne voiture')) { add('voiture', row); return; }
-    if (text.includes('vacances') || text.includes('epargne vacances') || text.includes('loisirs')) { add('vacances', row); return; }
-    if (text.includes('fonds urgence') || text.includes('fonds d urgence') || text.includes('epargne urgence')) { add('urgence', row); return; }
-    if (text.includes('epargne maison') || text.includes('reserve maison')) { add('maison', row); return; }
-    if (text.includes('pension') || (text.includes('ethias') && Math.abs(amount - 110) <= AMOUNT_TOLERANCE)) { add('pension', row); return; }
+    totals[rule.bucket] = (totals[rule.bucket] || 0) + amount;
+    transfers.push({ bucket: rule.bucket, amount, date: row.date, label: row.label, orderReference: rule.orderReference || '', communication: row.communication || '', fingerprint: [row.date, Number(row.amount).toFixed(2), rule.orderReference || normalize(row.label), normalize(row.communication || row.details)].join('|') });
   });
-
   return { totals, transfers };
 }
 
@@ -570,6 +550,8 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
         || dateDistance(left.row.date, bankRow.date) - dateDistance(right.row.date, bankRow.date));
 
     const automatic = candidates.filter(({ evidence }) => evidence.auto);
+    const learnedAutomatic = automatic.filter(({ evidence }) => evidence.learned || String(evidence.reason || '').toLowerCase().includes('apprise'));
+    if (learnedAutomatic.length === 1) { const selected = learnedAutomatic[0]; usedBank.add(bankIndex); usedApp.add(selected.index); matched.push({ bank: bankRow, app: selected.row, ...selected.evidence }); return; }
     if (automatic.length === 1) {
       const selected = automatic[0];
       usedBank.add(bankIndex);

@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
+import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
 
 const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -63,6 +64,12 @@ function savingsBucketForGoal(goal) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
   if (text.includes('vacance') || text.includes('loisir')) return 'vacances';
+  if (text.includes('garage') || text.includes('entretien vehicule')) return 'garage';
+  if (text.includes('taxe') || text.includes('impot')) return 'taxes';
+  if (text.includes('solde peugeot')) return 'solde_peugeot';
+  if (text.includes('frais divers maison') || text.includes('frais divers foyer')) return 'frais_maison';
+  if (text.includes('pension alain')) return 'pension_alain';
+  if (text.includes('pension esther')) return 'pension_esther';
   if (text.includes('voiture') || text.includes('auto')) return 'voiture';
   if (text.includes('pension')) return 'pension';
   if (text.includes('urgence')) return 'urgence';
@@ -287,6 +294,7 @@ function makeEmptyOperation() {
     structuredCommunication: '',
     freeCommunication: '',
     freeCommunicationMode: 'contains',
+    savingsSource: '',
   };
 }
 
@@ -477,6 +485,36 @@ export default function App() {
       return nextData;
     });
   };
+
+  useEffect(() => {
+    const existingBuckets = new Set((data.savingsGoals || []).map(savingsBucketForDisplay));
+    const missing = REQUIRED_SAVINGS_GOALS.filter((goal) => !existingBuckets.has(goal.bucket));
+    if (!missing.length) return;
+    let cancelled = false;
+    const ensure = async () => {
+      if (USE_REMOTE_BUDGET) {
+        const payload = missing.map((goal) => ({ household_id: householdId, label: goal.label, target: 0, saved: 0 }));
+        const { data: rows, error } = await supabase.from('savings_goals').insert(payload).select('id, label, target, saved');
+        if (cancelled || error || !rows?.length) return;
+        setData((current) => {
+          const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved) }))] };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+          return nextData;
+        });
+      } else {
+        setData((current) => {
+          const nowExisting = new Set((current.savingsGoals || []).map(savingsBucketForDisplay));
+          const additions = missing.filter((goal) => !nowExisting.has(goal.bucket)).map((goal) => ({ ...goal, id: `local-savings-${goal.bucket}` }));
+          if (!additions.length) return current;
+          const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...additions] };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+          return nextData;
+        });
+      }
+    };
+    ensure();
+    return () => { cancelled = true; };
+  }, [data.savingsGoals.length, session]);
 
   const monthOperations = useMemo(
     () => data.operations.filter((operation) => operation.date.startsWith(selectedMonth)),
@@ -945,6 +983,8 @@ export default function App() {
     if (!draft.label.trim() || !amount) return;
 
     setOperationStatus('');
+    const savingsSourceGoal = draft.type === 'income' && draft.savingsSource ? data.savingsGoals.find((goal) => goal.id === draft.savingsSource) : null;
+    if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatCurrency(savingsSourceGoal.saved) + '.'); return; }
 
     if (draft.recurrence !== 'once' && draft.type !== 'income' && !draft.recurringId) {
       const recurringCandidate = {
@@ -976,6 +1016,7 @@ export default function App() {
     const operation = {
       ...draft,
       amount,
+      label: savingsSourceGoal ? `Transfert depuis épargne — ${savingsSourceGoal.label} · ${draft.label.trim()}` : draft.label.trim(),
       // Le bénéficiaire / point de vente est utile pour tous les débits, y compris les frais fixes.
       store: draft.type === 'income' ? '' : draft.store,
       category: draft.type === 'income' ? 'revenus' : draft.category,
@@ -985,6 +1026,7 @@ export default function App() {
     delete operation.recurrence;
     delete operation.recurringDay;
     delete operation.recurringId;
+    delete operation.savingsSource;
 
     if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
       const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
@@ -1065,7 +1107,16 @@ export default function App() {
       }
     }
 
-    saveData({ ...data, operations, recurringFixedExpenses });
+    let savingsGoals = data.savingsGoals;
+    if (!editingId && savingsSourceGoal) {
+      const nextSaved = Number(savingsSourceGoal.saved || 0) - amount;
+      savingsGoals = data.savingsGoals.map((goal) => goal.id === savingsSourceGoal.id ? { ...goal, saved: nextSaved } : goal);
+      if (USE_REMOTE_BUDGET) {
+        const { error: savingsError } = await supabase.from('savings_goals').update({ saved: nextSaved }).eq('id', savingsSourceGoal.id).eq('household_id', householdId);
+        if (savingsError) { setOperationStatus('Transfert enregistré mais mise à jour de l’épargne impossible : ' + savingsError.message); return; }
+      }
+    }
+    saveData({ ...data, operations, recurringFixedExpenses, savingsGoals });
     setDraft(makeEmptyOperation());
     setEditingId(null);
     if (!USE_REMOTE_BUDGET) setActiveView('history');
@@ -2151,17 +2202,7 @@ export default function App() {
               {categoryStatus && <p className="hint">{categoryStatus}</p>}
             </section>
 
-            <section className="panel">
-              <div className="section-title">
-                <h2>Epargne</h2>
-                <span>{formatCurrency(data.savingsGoals.reduce((sum, goal) => sum + goal.saved, 0))}</span>
-              </div>
-              <div className="goals-grid">
-                {data.savingsGoals.map((goal) => (
-                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />
-                ))}
-              </div>
-            </section>
+            <SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />
           </section>
         )}
 
@@ -2234,6 +2275,17 @@ export default function App() {
                   })}
                 </select>
               </label>
+
+              {draft.type === 'income' && (
+                <label>
+                  Source du revenu
+                  <select value={draft.savingsSource || ''} onChange={(event) => setDraft({ ...draft, savingsSource: event.target.value })}>
+                    <option value="">Revenu du foyer</option>
+                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}
+                  </select>
+                  {draft.savingsSource && <span className="hint">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
+                </label>
+              )}
 
               <div className={draft.type === 'income' ? 'form-row single' : 'form-row'}>
                 <label>

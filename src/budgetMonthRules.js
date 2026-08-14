@@ -19,7 +19,7 @@ export function isSalaryIncome(operation) {
 
 export function budgetIncomeOperationsForMonth(operations = [], monthKey = '') {
   const previous = previousMonthKey(monthKey);
-  const currentIncome = operations.filter((operation) => operation.type === 'income' && String(operation.date || '').startsWith(monthKey));
+  const currentIncome = operations.filter((operation) => operation.type === 'income' && String(operation.date || '').startsWith(monthKey) && !String(operation.label || '').toLowerCase().includes('transfert depuis épargne'));
   const currentSalaryPersons = new Set(currentIncome.filter(isSalaryIncome).map((operation) => operation.person || 'Foyer'));
 
   const carriedSalaries = operations.filter((operation) => {
