@@ -5,6 +5,7 @@ on:
       - dev/savings-op-controls
     paths:
       - scripts/patch_savings_interface.py
+      - .github/workflows/dev-savings-build.yml
 jobs:
   build:
     runs-on: ubuntu-latest
