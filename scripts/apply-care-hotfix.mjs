@@ -7,7 +7,8 @@ let source = fs.readFileSync(path, 'utf8');
 function careHotfixIntegration() {
   return {
     name: 'mon-foyer-care-hotfix',
-    enforce: 'post',
+    // Doit s'exécuter après les autres plugins métier "pre" mais avant React.
+    enforce: 'pre',
     transform(code, id) {
       const isApp = id.endsWith('/src/App.jsx') || id.endsWith('\\src\\App.jsx');
       if (!isApp) return null;
@@ -69,7 +70,7 @@ if (!source.includes('function careHotfixIntegration()')) {
 
 source = source.replace(
   'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careUxFinalIntegration(), react()]',
-  'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careUxFinalIntegration(), careHotfixIntegration(), react()]',
+  'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), careUxFinalIntegration(), react()]',
 );
 
 if (!source.includes('careHotfixIntegration()')) throw new Error('Plugin careHotfix non branché');
