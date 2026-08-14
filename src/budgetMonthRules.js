@@ -2,6 +2,8 @@
 // Les salaires versés en fin de mois précédent financent le mois suivant,
 // sans déplacer ni dupliquer leur écriture bancaire réelle.
 
+export const CARE_TRACKING_START_DATE = '2026-08-01';
+
 export function previousMonthKey(monthKey) {
   const [year, month] = String(monthKey || '').split('-').map(Number);
   if (!year || !month) return '';
@@ -46,17 +48,50 @@ export function forecastBalances({ appAvailable = 0, appBelfiusBalance = 0, real
   return { appForecast, belfiusForecast: bankAdjustedAvailable - Number(remainingToCover || 0) };
 }
 
+function careRowsFromStart(operations = [], person = '') {
+  return operations.filter((operation) => (
+    operation.person === person
+    && String(operation.date || '') >= CARE_TRACKING_START_DATE
+  ));
+}
+
 export function careBalanceForPerson(operations = [], person = '') {
-  const rows = operations.filter((operation) => operation.person === person);
+  const rows = careRowsFromStart(operations, person);
   const expenses = rows
     .filter((operation) => operation.type === 'fixed' || operation.type === 'variable')
     .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
   const reimbursed = rows
     .filter((operation) => operation.type === 'reimbursement')
     .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
-  return { person, expenses, reimbursed, balance: expenses - reimbursed };
+  return { person, expenses, reimbursed, balance: Math.max(0, expenses - reimbursed) };
 }
 
-export function careBalances(operations = []) {
-  return ['Papa', 'Nonna'].map((person) => careBalanceForPerson(operations, person));
+export function careBalanceForMonth(operations = [], person = '', monthKey = '') {
+  const rows = careRowsFromStart(operations, person);
+  const beforeMonth = rows.filter((operation) => String(operation.date || '').slice(0, 7) < monthKey);
+  const inMonth = rows.filter((operation) => String(operation.date || '').startsWith(monthKey));
+
+  const previousExpenses = beforeMonth
+    .filter((operation) => operation.type === 'fixed' || operation.type === 'variable')
+    .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
+  const previousReimbursements = beforeMonth
+    .filter((operation) => operation.type === 'reimbursement')
+    .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
+  const carriedBalance = Math.max(0, previousExpenses - previousReimbursements);
+
+  const expenses = inMonth
+    .filter((operation) => operation.type === 'fixed' || operation.type === 'variable')
+    .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
+  const reimbursed = inMonth
+    .filter((operation) => operation.type === 'reimbursement')
+    .reduce((sum, operation) => sum + Number(operation.amount || 0), 0);
+  const balance = Math.max(0, carriedBalance + expenses - reimbursed);
+
+  return { person, carriedBalance, expenses, reimbursed, balance };
+}
+
+export function careBalances(operations = [], monthKey = '') {
+  return ['Papa', 'Nonna'].map((person) => (
+    monthKey ? careBalanceForMonth(operations, person, monthKey) : careBalanceForPerson(operations, person)
+  ));
 }
