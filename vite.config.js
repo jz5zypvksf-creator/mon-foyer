@@ -247,6 +247,13 @@ function leisureVacationsIntegration() {
         );
       }
 
+      if (!patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")) {
+        patched = patched.replace(
+          "import LeisureVacations from './LeisureVacations.jsx';",
+          "import LeisureVacations from './LeisureVacations.jsx';\nimport DuplicateAudit from './DuplicateAudit.jsx';",
+        );
+      }
+
       const savingsBlock = '<SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />';
       if (!patched.includes('leisure-launch-card')) {
         patched = patched.replace(
@@ -263,6 +270,24 @@ function leisureVacationsIntegration() {
         );
       }
 
+      // Audit anti-doublons de l'historique du mois affiché.
+      const historyAnchor = "        {activeView === 'history' && (\n          <section className=\"view\">\n            <div className=\"panel\">";
+      if (!patched.includes('mode="history"')) {
+        patched = patched.replace(
+          historyAnchor,
+          "        {activeView === 'history' && (\n          <section className=\"view\">\n            <DuplicateAudit mode=\"history\" operations={data.operations} selectedMonth={selectedMonth} />\n            <div className=\"panel\">",
+        );
+      }
+
+      // Audit anti-doublons des frais fixes récurrents, visible dans Réglages.
+      const settingsAnchor = "        {activeView === 'settings' && (\n          <section className=\"view\">";
+      if (!patched.includes('mode="recurring"')) {
+        patched = patched.replace(
+          settingsAnchor,
+          "        {activeView === 'settings' && (\n          <section className=\"view\">\n            <DuplicateAudit mode=\"recurring\" recurringExpenses={data.recurringFixedExpenses || []} />",
+        );
+      }
+
       // Accès permanent depuis la navigation principale, entre Historique et Messages.
       if (!patched.includes('label="Loisirs"')) {
         patched = patched.replace(
@@ -272,10 +297,13 @@ function leisureVacationsIntegration() {
       }
 
       if (!patched.includes("import LeisureVacations from './LeisureVacations.jsx';")
+        || !patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")
         || !patched.includes('leisure-launch-card')
         || !patched.includes("activeView === 'leisure'")
-        || !patched.includes('label="Loisirs"')) {
-        throw new Error('Intégration Loisirs/Vacances incomplète');
+        || !patched.includes('label="Loisirs"')
+        || !patched.includes('mode="history"')
+        || !patched.includes('mode="recurring"')) {
+        throw new Error('Intégration Loisirs/Vacances + audit doublons incomplète');
       }
       return { code: patched, map: null };
     },
