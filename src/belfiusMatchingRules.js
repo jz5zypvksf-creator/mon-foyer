@@ -64,12 +64,10 @@ export function classifyBankBusinessRule(row) {
     expectedMonthly: savingsRule.expectedMonthly,
     kind: 'internal-savings-transfer',
     auto: true,
-    // Un OP connu doit rester dans le moteur de rapprochement : il doit solder
-    // l'écriture Mon Foyer correspondante grâce à sa référence, sans dépendre du jour.
-    excludeFromExpenseMatching: false,
+    // Les OP d'épargne sont contrôlés dans la rubrique Épargne. Ils ne doivent jamais
+    // polluer le rapprochement général ni apparaître comme "opérations Belfius absentes".
+    excludeFromExpenseMatching: true,
   };
-  // Beobank reste un cas particulier : le transfert alimente directement la réserve
-  // Vacances/Loisirs et ne doit pas être proposé à une dépense quelconque.
   if (isBeobankTransfer(row)) return {
     key: 'beobank', destination: 'Vacances / Loisirs', bucket: 'vacances',
     kind: 'internal-savings-transfer', auto: true, excludeFromExpenseMatching: true,
