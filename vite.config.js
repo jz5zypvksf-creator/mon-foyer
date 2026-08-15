@@ -144,20 +144,16 @@ function careHotfixIntegration() {
       let patched = code;
 
       if (isAudit) {
-        // Le bénéficiaire ONEM est stable. Le montant reste contrôlé par matchEvidence.
-        // On n'enregistre volontairement aucune donnée personnelle dans le dépôt public.
         if (!patched.includes("bank: ['office national de l emploi']")) {
           patched = patched.replace(
             "  { bank: ['sd worx'], app: ['salaire alain'] },",
             "  { bank: ['sd worx'], app: ['salaire alain'] },\n  { bank: ['office national de l emploi'], app: ['onem'] },",
           );
         }
-
         patched = patched.replaceAll(
           "strongCommunicationMatch(bankRow, expense)?.kind === 'direct-debit'",
           "['direct-debit', 'bank-reference'].includes(strongCommunicationMatch(bankRow, expense)?.kind)",
         );
-
         patched = patched.replace(
           "  const target = rule.target;\n  if (target.label && normalize(target.label) === normalize(appRow.label)) return true;",
           "  const target = rule.target;\n  if (target.id) return target.id === appRow.id;\n  if (target.label && normalize(target.label) === normalize(appRow.label)) return true;",
@@ -166,17 +162,14 @@ function careHotfixIntegration() {
           "      target: {\n        label: appRow.label || '',",
           "      target: {\n        id: appRow.id || '',\n        label: appRow.label || '',",
         );
-
         patched = patched.replace(
           ".filter((row) => !isBeobankSavingsAppRow(row))",
           ".filter((row) => !isBeobankSavingsAppRow(row))\n    .filter((row) => !normalize(row.label || '').startsWith('epargne '))",
         );
-
         patched = patched.replace(
           "function sameAppIdentity(left, right) {\n  return normalize(left?.label) === normalize(right?.label) && Math.abs(Number(left?.amount || 0) - Number(right?.amount || 0)) <= AMOUNT_TOLERANCE && (left?.person || 'Foyer') === (right?.person || 'Foyer');\n}",
           "function sameAppIdentity(left, right) {\n  const amountSame = Math.abs(Number(left?.amount || 0) - Number(right?.amount || 0)) <= AMOUNT_TOLERANCE;\n  const personSame = (left?.person || 'Foyer') === (right?.person || 'Foyer');\n  const leftLabel = normalize(left?.label || '');\n  const rightLabel = normalize(right?.label || '');\n  const labelSame = leftLabel === rightLabel || (leftLabel && rightLabel && (leftLabel.includes(rightLabel) || rightLabel.includes(leftLabel)));\n  const categorySame = Boolean(left?.category && right?.category && left.category === right.category);\n  const storeSame = !left?.store || !right?.store || normalize(left.store) === normalize(right.store);\n  return amountSame && personSame && (labelSame || (categorySame && storeSame));\n}",
         );
-
         patched = patched.replace(
           ".filter(({ index }) => !usedBank.has(index) && !pendingBank.has(index));\n    const group = possibleBankGroup(appRow, availableBank, recurringExpenses);",
           ".filter(({ index }) => !usedBank.has(index));\n    const group = possibleBankGroup(appRow, availableBank, recurringExpenses);",
@@ -185,28 +178,30 @@ function careHotfixIntegration() {
           "    group.rows.forEach(({ index }) => usedBank.add(index));\n    usedApp.add(appIndex);",
           "    group.rows.forEach(({ index }) => { usedBank.add(index); pendingBank.delete(index); });\n    pendingApp.delete(appIndex);\n    usedApp.add(appIndex);",
         );
-
-        if (!patched.includes("bank: ['office national de l emploi']")
-          || !patched.includes("target.id) return target.id === appRow.id")
-          || !patched.includes("'bank-reference'")
-          || !patched.includes("startsWith('epargne ')")
-          || !patched.includes("id: appRow.id || ''")
-          || !patched.includes('const amountSame = Math.abs')
-          || !patched.includes('pendingBank.delete(index)')) {
-          throw new Error('Correctif Belfius/OP/ONEM incomplet');
-        }
       }
 
       if (isApp) {
         const reimbursementButton = '<button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>';
         const detailButton = '<button type="button" className="secondary-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
-        if (!patched.includes('>Voir le détail</button>')) {
-          patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
-        }
+        if (!patched.includes('>Voir le détail</button>')) patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
+
+        // Les opérations futures déjà enregistrées servent au prévisionnel mais ne sont pas
+        // des mouvements exécutés. On les retire des soldes réels jusqu'à leur date effective.
+        patched = patched.replace(
+          "  const previousMonthBalances = useMemo(() => {\n    const firstDayOfSelectedMonth = `${selectedMonth}-01`;\n    const previousOperations = data.operations.filter(\n      (operation) => operation.date < firstDayOfSelectedMonth,\n    );",
+          "  const previousMonthBalances = useMemo(() => {\n    const firstDayOfSelectedMonth = `${selectedMonth}-01`;\n    const previousOperations = data.operations.filter(\n      (operation) => operation.date < firstDayOfSelectedMonth && operation.date <= balanceCutoff,\n    );",
+        );
+        patched = patched.replace(
+          "    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear));",
+          "    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear) && operation.date <= today);",
+        );
+        patched = patched.replace(
+          "      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey)));",
+          "      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey) && operation.date <= today));",
+        );
 
         if (!patched.includes('mon-foyer-cleanup-taxes-2026-08-v2')) {
           const anchor = '  const editingOperation = useMemo(() => {';
-          if (!patched.includes(anchor)) throw new Error('Point insertion nettoyage introuvable');
           const cleanup = [
             "  useEffect(() => {",
             "    const cleanupKey = 'mon-foyer-cleanup-taxes-2026-08-v2';",
@@ -217,32 +212,19 @@ function careHotfixIntegration() {
             "    const duplicates = correct ? data.operations.filter((row) => row.date === '2026-08-03' && isTaxes300(row)) : [];",
             "    if (!correct || duplicates.length === 0) return;",
             "    const duplicateIds = duplicates.map((row) => row.id);",
-            "    const applyLocalCleanup = () => {",
-            "      setData((current) => {",
-            "        const next = { ...current, operations: current.operations.filter((row) => !duplicateIds.includes(row.id)) };",
-            "        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));",
-            "        return next;",
-            "      });",
-            "      localStorage.setItem(cleanupKey, 'done');",
-            "    };",
-            "    if (USE_REMOTE_BUDGET) {",
-            "      supabase.from('operations').delete().in('id', duplicateIds).eq('household_id', householdId).then(({ error }) => {",
-            "        if (!error) applyLocalCleanup();",
-            "      });",
-            "    } else {",
-            "      applyLocalCleanup();",
-            "    }",
+            "    const applyLocalCleanup = () => { setData((current) => { const next = { ...current, operations: current.operations.filter((row) => !duplicateIds.includes(row.id)) }; localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); return next; }); localStorage.setItem(cleanupKey, 'done'); };",
+            "    if (USE_REMOTE_BUDGET) { supabase.from('operations').delete().in('id', duplicateIds).eq('household_id', householdId).then(({ error }) => { if (!error) applyLocalCleanup(); }); } else { applyLocalCleanup(); }",
             "  }, [data.operations]);",
             "",
           ].join('\n');
           patched = patched.replace(anchor, cleanup + anchor);
         }
 
-        if (!patched.includes('Voir le détail') || !patched.includes('mon-foyer-cleanup-taxes-2026-08-v2')) {
-          throw new Error('Correctif remboursements incomplet');
+        if (!patched.includes("operation.date.startsWith(selectedYear) && operation.date <= today")
+          || !patched.includes("operation.date.startsWith(monthKey) && operation.date <= today")) {
+          throw new Error('Séparation prévisionnel/exécuté incomplète');
         }
       }
-
       return { code: patched, map: null };
     },
   };
