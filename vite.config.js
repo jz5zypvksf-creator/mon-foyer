@@ -136,56 +136,97 @@ function careUxFinalIntegration() {
 function careHotfixIntegration() {
   return {
     name: 'mon-foyer-care-hotfix',
-    // Doit s'exécuter après les autres plugins métier "pre" mais avant React.
+    // Après les autres plugins métier "pre", avant React.
     enforce: 'pre',
     transform(code, id) {
       const isApp = id.endsWith('/src/App.jsx') || id.endsWith('\\src\\App.jsx');
-      if (!isApp) return null;
+      const isAudit = id.endsWith('/src/BelfiusAudit.jsx') || id.endsWith('\\src\\BelfiusAudit.jsx');
+      if (!isApp && !isAudit) return null;
       let patched = code;
 
-      const reimbursementButton = '<button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>';
-      const detailButton = '<button type="button" className="secondary-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
-      if (!patched.includes('>Voir le détail</button>')) {
-        patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
+      if (isAudit) {
+        // belfiusMatchingRules retourne désormais « bank-reference » pour mandat / OP.
+        patched = patched.replaceAll(
+          "strongCommunicationMatch(bankRow, expense)?.kind === 'direct-debit'",
+          "['direct-debit', 'bank-reference'].includes(strongCommunicationMatch(bankRow, expense)?.kind)",
+        );
+
+        // Une validation manuelle doit désigner une écriture précise, pas toutes les
+        // écritures portant le même libellé/catégorie.
+        patched = patched.replace(
+          "  const target = rule.target;\n  if (target.label && normalize(target.label) === normalize(appRow.label)) return true;",
+          "  const target = rule.target;\n  if (target.id) return target.id === appRow.id;\n  if (target.label && normalize(target.label) === normalize(appRow.label)) return true;",
+        );
+        patched = patched.replace(
+          "      target: {\n        label: appRow.label || '',",
+          "      target: {\n        id: appRow.id || '',\n        label: appRow.label || '',",
+        );
+
+        // Les versements vers une réserve d'épargne sont des transferts internes.
+        // Ils sont contrôlés via les OP et la section Épargne, pas comme dépenses
+        // Belfius orphelines.
+        patched = patched.replace(
+          ".filter((row) => !isBeobankSavingsAppRow(row))",
+          ".filter((row) => !isBeobankSavingsAppRow(row))\n    .filter((row) => !normalize(row.label || '').startsWith('epargne '))",
+        );
+
+        if (!patched.includes("target.id) return target.id === appRow.id")
+          || !patched.includes("'bank-reference'")
+          || !patched.includes("startsWith('epargne ')")
+          || !patched.includes("id: appRow.id || ''")) {
+          throw new Error('Correctif Belfius/OP incomplet');
+        }
       }
 
-      if (!patched.includes('mon-foyer-cleanup-taxes-2026-08-v1')) {
-        const anchor = '  const editingOperation = useMemo(() => {';
-        if (!patched.includes(anchor)) throw new Error('Point insertion nettoyage introuvable');
-        const cleanup = [
-          "  useEffect(() => {",
-          "    const cleanupKey = 'mon-foyer-cleanup-taxes-2026-08-v1';",
-          "    if (localStorage.getItem(cleanupKey) === 'done') return;",
-          "    const normalizeCleanupLabel = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();",
-          "    const isTaxes300 = (row) => Math.abs(Number(row?.amount || 0) - 300) < 0.01 && normalizeCleanupLabel(row?.label).includes('epargne taxes');",
-          "    const correct = data.operations.find((row) => row.date === '2026-08-04' && isTaxes300(row));",
-          "    const duplicates = correct ? data.operations.filter((row) => row.date === '2026-08-03' && isTaxes300(row)) : [];",
-          "    if (!correct || duplicates.length === 0) return;",
-          "    const duplicateIds = duplicates.map((row) => row.id);",
-          "    const applyLocalCleanup = () => {",
-          "      setData((current) => {",
-          "        const next = { ...current, operations: current.operations.filter((row) => !duplicateIds.includes(row.id)) };",
-          "        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));",
-          "        return next;",
-          "      });",
-          "      localStorage.setItem(cleanupKey, 'done');",
-          "    };",
-          "    if (USE_REMOTE_BUDGET) {",
-          "      supabase.from('operations').delete().in('id', duplicateIds).eq('household_id', householdId).then(({ error }) => {",
-          "        if (!error) applyLocalCleanup();",
-          "      });",
-          "    } else {",
-          "      applyLocalCleanup();",
-          "    }",
-          "  }, [data.operations]);",
-          "",
-        ].join('\n');
-        patched = patched.replace(anchor, cleanup + anchor);
+      if (isApp) {
+        const reimbursementButton = '<button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>';
+        const detailButton = '<button type="button" className="secondary-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
+        if (!patched.includes('>Voir le détail</button>')) {
+          patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
+        }
+
+        // V2 : réessaie le nettoyage même si une ancienne Preview avait déjà exécuté
+        // la première version. La ligne du 03/08 n'est retirée que si la ligne correcte
+        // du 04/08 à 300 € est présente simultanément.
+        if (!patched.includes('mon-foyer-cleanup-taxes-2026-08-v2')) {
+          const anchor = '  const editingOperation = useMemo(() => {';
+          if (!patched.includes(anchor)) throw new Error('Point insertion nettoyage introuvable');
+          const cleanup = [
+            "  useEffect(() => {",
+            "    const cleanupKey = 'mon-foyer-cleanup-taxes-2026-08-v2';",
+            "    if (localStorage.getItem(cleanupKey) === 'done') return;",
+            "    const normalizeCleanupLabel = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();",
+            "    const isTaxes300 = (row) => Math.abs(Number(row?.amount || 0) - 300) < 0.01 && normalizeCleanupLabel(row?.label).includes('epargne taxes');",
+            "    const correct = data.operations.find((row) => row.date === '2026-08-04' && isTaxes300(row));",
+            "    const duplicates = correct ? data.operations.filter((row) => row.date === '2026-08-03' && isTaxes300(row)) : [];",
+            "    if (!correct || duplicates.length === 0) return;",
+            "    const duplicateIds = duplicates.map((row) => row.id);",
+            "    const applyLocalCleanup = () => {",
+            "      setData((current) => {",
+            "        const next = { ...current, operations: current.operations.filter((row) => !duplicateIds.includes(row.id)) };",
+            "        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));",
+            "        return next;",
+            "      });",
+            "      localStorage.setItem(cleanupKey, 'done');",
+            "    };",
+            "    if (USE_REMOTE_BUDGET) {",
+            "      supabase.from('operations').delete().in('id', duplicateIds).eq('household_id', householdId).then(({ error }) => {",
+            "        if (!error) applyLocalCleanup();",
+            "      });",
+            "    } else {",
+            "      applyLocalCleanup();",
+            "    }",
+            "  }, [data.operations]);",
+            "",
+          ].join('\n');
+          patched = patched.replace(anchor, cleanup + anchor);
+        }
+
+        if (!patched.includes('Voir le détail') || !patched.includes('mon-foyer-cleanup-taxes-2026-08-v2')) {
+          throw new Error('Correctif remboursements incomplet');
+        }
       }
 
-      if (!patched.includes('Voir le détail') || !patched.includes('mon-foyer-cleanup-taxes-2026-08-v1')) {
-        throw new Error('Care hotfix incomplet');
-      }
       return { code: patched, map: null };
     },
   };
