@@ -50,18 +50,26 @@ export function hasStrongCommunicationFingerprint(bankRow, recurringExpenses = [
 }
 
 export function recurringExpenseHasBankMovement(expense, bankRows = []) {
-  if (!expense) return false;
-  return bankRows.some((row) => Boolean(strongCommunicationMatch(row, expense)));
+  return Boolean(expense) && bankRows.some((row) => Boolean(strongCommunicationMatch(row, expense)));
 }
 
 export function classifyBankBusinessRule(row) {
   if (!row || Number(row.amount) >= 0) return null;
   const savingsRule = savingsRuleForText(bankHaystack(row));
   if (savingsRule) return {
-    key: `op-${savingsRule.op}`, destination: savingsRule.label, bucket: savingsRule.bucket,
-    orderReference: savingsRule.op, expectedMonthly: savingsRule.expectedMonthly,
-    kind: 'internal-savings-transfer', auto: true, excludeFromExpenseMatching: true,
+    key: `op-${savingsRule.op}`,
+    destination: savingsRule.label,
+    bucket: savingsRule.bucket,
+    orderReference: savingsRule.op,
+    expectedMonthly: savingsRule.expectedMonthly,
+    kind: 'internal-savings-transfer',
+    auto: true,
+    // Un OP connu doit rester dans le moteur de rapprochement : il doit solder
+    // l'écriture Mon Foyer correspondante grâce à sa référence, sans dépendre du jour.
+    excludeFromExpenseMatching: false,
   };
+  // Beobank reste un cas particulier : le transfert alimente directement la réserve
+  // Vacances/Loisirs et ne doit pas être proposé à une dépense quelconque.
   if (isBeobankTransfer(row)) return {
     key: 'beobank', destination: 'Vacances / Loisirs', bucket: 'vacances',
     kind: 'internal-savings-transfer', auto: true, excludeFromExpenseMatching: true,
