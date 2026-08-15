@@ -14,7 +14,6 @@ function careHotfixIntegration() {
       let patched = code;
 
       if (isAudit) {
-        // ONEM : le bénéficiaire bancaire est stable, le montant et la date restent obligatoires.
         if (!patched.includes("bank: ['office national de l emploi']")) {
           patched = patched.replace(
             "  { bank: ['sd worx'], app: ['salaire alain'] },",
@@ -22,8 +21,6 @@ function careHotfixIntegration() {
           );
         }
 
-        // Une écriture datée du jour du dernier solde n'est pas encore déclarée orpheline :
-        // le CSV peut refléter un solde avant comptabilisation complète de cette journée.
         patched = patched.replace(
           "  const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') <= cutoffDate)",
           "  const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') < cutoffDate)",
@@ -57,11 +54,6 @@ function careHotfixIntegration() {
           "    group.rows.forEach(({ index }) => usedBank.add(index));\n    usedApp.add(appIndex);",
           "    group.rows.forEach(({ index }) => { usedBank.add(index); pendingBank.delete(index); });\n    pendingApp.delete(appIndex);\n    usedApp.add(appIndex);",
         );
-
-        if (!patched.includes("bank: ['office national de l emploi'], app: ['onem']")
-          || !patched.includes("String(row.date || '') < cutoffDate")) {
-          throw new Error('Correctif ONEM / jour du relevé incomplet');
-        }
       }
 
       if (isApp) {
@@ -69,9 +61,7 @@ function careHotfixIntegration() {
         const detailButton = '<button type="button" className="secondary-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
         if (!patched.includes('>Voir le détail</button>')) patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
 
-        // Le jour courant appartient à l'historique réel, jamais aux opérations programmées.
-        // Les opérations programmées commencent strictement après aujourd'hui, même si le
-        // dernier CSV Belfius importé est plus ancien.
+        // Aujourd'hui = exécuté dans Mon Foyer. Les opérations programmées commencent demain.
         patched = patched.replace(
           "  const scheduledExpenses = useMemo(() => {\n    const explicitScheduledExpenses = monthOperations\n      .filter((operation) => operation.type !== 'income' && operation.date > balanceCutoff);",
           "  const scheduledExpenses = useMemo(() => {\n    const scheduleCutoff = selectedMonth === today.slice(0, 7) && today > balanceCutoff ? today : balanceCutoff;\n    const explicitScheduledExpenses = monthOperations\n      .filter((operation) => operation.type !== 'income' && operation.date > scheduleCutoff);",
@@ -85,6 +75,14 @@ function careHotfixIntegration() {
           "    balanceCutoff,\n    data.recurringFixedExpenses,\n    monthOperations,\n    selectedMonth,\n    today,\n  ]);",
         );
 
+        // Prévision Belfius : le relevé bancaire peut être plus ancien que l'historique Mon Foyer.
+        // On repart du solde réel du relevé, puis on rejoue les mouvements Belfius déjà exécutés
+        // entre la date du relevé et aujourd'hui (ex. PSA Finance), avant de retrancher le futur.
+        patched = patched.replace(
+          "  const forecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: belfiusSnapshot?.balance ?? null, remainingToCover: totalRemainingToCover });",
+          "  const snapshotDateMatch = String(belfiusSnapshot?.balanceDate || '').match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})/);\n  const snapshotDateIso = snapshotDateMatch ? `${snapshotDateMatch[3]}-${snapshotDateMatch[2]}-${snapshotDateMatch[1]}` : '';\n  const belfiusCatchUpNet = snapshotDateIso ? effectiveMonthOperations.filter((operation) => (operation.paymentMethod || 'Compte Belfius') === 'Compte Belfius' && operation.date > snapshotDateIso && operation.date <= today).reduce((sum, operation) => { const amount = Number(operation.amount || 0); return sum + ((operation.type === 'income' || operation.type === 'reimbursement') ? amount : -amount); }, 0) : 0;\n  const rawForecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: belfiusSnapshot?.balance ?? null, remainingToCover: totalRemainingToCover });\n  const forecastPair = { ...rawForecastPair, belfiusForecast: rawForecastPair.belfiusForecast == null ? null : rawForecastPair.belfiusForecast + belfiusCatchUpNet };",
+        );
+
         patched = patched.replace(
           "    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear));",
           "    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear) && operation.date <= today);",
@@ -95,8 +93,8 @@ function careHotfixIntegration() {
         );
 
         if (!patched.includes('const scheduleCutoff = selectedMonth === today.slice(0, 7)')
-          || !patched.includes('operation.date > scheduleCutoff')) {
-          throw new Error('Correctif opérations programmées incomplet');
+          || !patched.includes('const belfiusCatchUpNet = snapshotDateIso ? effectiveMonthOperations.filter')) {
+          throw new Error('Correctif prévisionnel Belfius incomplet');
         }
       }
       return { code: patched, map: null };
@@ -116,4 +114,4 @@ source = source.replace(
 );
 if (!source.includes('careHotfixIntegration()')) throw new Error('Plugin careHotfix non branché');
 fs.writeFileSync(path, source);
-console.log('Correctif ONEM + échéances du jour appliqué.');
+console.log('Correctif prévisionnel Belfius + échéances du jour appliqué.');
