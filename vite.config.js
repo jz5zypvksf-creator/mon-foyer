@@ -263,9 +263,18 @@ function leisureVacationsIntegration() {
         );
       }
 
+      // Accès permanent depuis la navigation principale, entre Historique et Messages.
+      if (!patched.includes('label="Loisirs"')) {
+        patched = patched.replace(
+          '<NavButton icon={ReceiptText} label="Historique" active={activeView === \'history\'} onClick={() => setActiveView(\'history\')} />',
+          '<NavButton icon={ReceiptText} label="Historique" active={activeView === \'history\'} onClick={() => setActiveView(\'history\')} />\n        <NavButton icon={Umbrella} label="Loisirs" active={activeView === \'leisure\'} onClick={() => setActiveView(\'leisure\')} />',
+        );
+      }
+
       if (!patched.includes("import LeisureVacations from './LeisureVacations.jsx';")
         || !patched.includes('leisure-launch-card')
-        || !patched.includes("activeView === 'leisure'")) {
+        || !patched.includes("activeView === 'leisure'")
+        || !patched.includes('label="Loisirs"')) {
         throw new Error('Intégration Loisirs/Vacances incomplète');
       }
       return { code: patched, map: null };
