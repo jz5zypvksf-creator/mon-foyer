@@ -1,0 +1,34 @@
+name: Dev savings build
+on:
+  push:
+    branches:
+      - dev/savings-op-controls
+    paths:
+      - scripts/patch_savings_interface.py
+      - .github/workflows/dev-savings-build.yml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/savings-op-controls
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Patch sources
+        run: python3 scripts/patch_savings_interface.py
+      - name: Install
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/App.jsx src/BelfiusAudit.jsx src/budgetMonthRules.js package-lock.json
+          git commit -m 'Développe interface Épargne et contrôles OP'
+          git push origin HEAD:dev/savings-op-controls

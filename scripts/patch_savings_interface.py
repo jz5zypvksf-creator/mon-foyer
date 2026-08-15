@@ -1,0 +1,118 @@
+from pathlib import Path
+
+p = Path('src/App.jsx')
+s = p.read_text()
+s = s.replace("import BelfiusAudit from './BelfiusAudit.jsx';", "import BelfiusAudit from './BelfiusAudit.jsx';\nimport SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';")
+s = s.replace("  if (text.includes('vacance') || text.includes('loisir')) return 'vacances';\n  if (text.includes('voiture') || text.includes('auto')) return 'voiture';\n  if (text.includes('pension')) return 'pension';\n  if (text.includes('urgence')) return 'urgence';\n  if (text.includes('maison')) return 'maison';", "  if (text.includes('vacance') || text.includes('loisir')) return 'vacances';\n  if (text.includes('garage') || text.includes('entretien vehicule')) return 'garage';\n  if (text.includes('taxe') || text.includes('impot')) return 'taxes';\n  if (text.includes('solde peugeot')) return 'solde_peugeot';\n  if (text.includes('frais divers maison') || text.includes('frais divers foyer')) return 'frais_maison';\n  if (text.includes('pension alain')) return 'pension_alain';\n  if (text.includes('pension esther')) return 'pension_esther';\n  if (text.includes('voiture') || text.includes('auto')) return 'voiture';\n  if (text.includes('pension')) return 'pension';\n  if (text.includes('urgence')) return 'urgence';\n  if (text.includes('maison')) return 'maison';")
+s = s.replace("    freeCommunicationMode: 'contains',\n  };\n}\n\nfunction makeEmptyRecurringFixedExpense", "    freeCommunicationMode: 'contains',\n    savingsSource: '',\n  };\n}\n\nfunction makeEmptyRecurringFixedExpense")
+marker = "  const monthOperations = useMemo(\n"
+ensure = """  useEffect(() => {
+    const existingBuckets = new Set((data.savingsGoals || []).map(savingsBucketForDisplay));
+    const missing = REQUIRED_SAVINGS_GOALS.filter((goal) => !existingBuckets.has(goal.bucket));
+    if (!missing.length) return;
+    let cancelled = false;
+    const ensure = async () => {
+      if (USE_REMOTE_BUDGET) {
+        const payload = missing.map((goal) => ({ household_id: householdId, label: goal.label, target: 0, saved: 0 }));
+        const { data: rows, error } = await supabase.from('savings_goals').insert(payload).select('id, label, target, saved');
+        if (cancelled || error || !rows?.length) return;
+        setData((current) => {
+          const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved) }))] };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+          return nextData;
+        });
+      } else {
+        setData((current) => {
+          const nowExisting = new Set((current.savingsGoals || []).map(savingsBucketForDisplay));
+          const additions = missing.filter((goal) => !nowExisting.has(goal.bucket)).map((goal) => ({ ...goal, id: `local-savings-${goal.bucket}` }));
+          if (!additions.length) return current;
+          const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...additions] };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+          return nextData;
+        });
+      }
+    };
+    ensure();
+    return () => { cancelled = true; };
+  }, [data.savingsGoals.length, session]);
+
+"""
+if marker not in s: raise SystemExit('monthOperations marker missing')
+s = s.replace(marker, ensure + marker, 1)
+old_section = """            <section className=\"panel\">
+              <div className=\"section-title\">
+                <h2>Epargne</h2>
+                <span>{formatCurrency(data.savingsGoals.reduce((sum, goal) => sum + goal.saved, 0))}</span>
+              </div>
+              <div className=\"goals-grid\">
+                {data.savingsGoals.map((goal) => (
+                  <GoalCard key={goal.id} goal={goal} onUpdate={updateGoal} bankDetected={bankSavings[savingsBucketForGoal(goal)] || 0} />
+                ))}
+              </div>
+            </section>"""
+if old_section not in s: raise SystemExit('Savings section missing')
+s = s.replace(old_section, "            <SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />", 1)
+income_anchor = "              <div className={draft.type === 'income' ? 'form-row single' : 'form-row'}>"
+income_source = """              {draft.type === 'income' && (
+                <label>
+                  Source du revenu
+                  <select value={draft.savingsSource || ''} onChange={(event) => setDraft({ ...draft, savingsSource: event.target.value })}>
+                    <option value=\"\">Revenu du foyer</option>
+                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}
+                  </select>
+                  {draft.savingsSource && <span className=\"hint\">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
+                </label>
+              )}
+
+"""
+if income_anchor not in s: raise SystemExit('Income form anchor missing')
+s = s.replace(income_anchor, income_source + income_anchor, 1)
+submit_anchor = "    if (!draft.label.trim() || !amount) return;\n\n    setOperationStatus('');"
+submit_replace = "    if (!draft.label.trim() || !amount) return;\n\n    setOperationStatus('');\n    const savingsSourceGoal = draft.type === 'income' && draft.savingsSource ? data.savingsGoals.find((goal) => goal.id === draft.savingsSource) : null;\n    if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatCurrency(savingsSourceGoal.saved) + '.'); return; }"
+if submit_anchor not in s: raise SystemExit('Submit anchor missing')
+s = s.replace(submit_anchor, submit_replace, 1)
+s = s.replace("    const operation = {\n      ...draft,\n      amount,", "    const operation = {\n      ...draft,\n      amount,\n      label: savingsSourceGoal ? `Transfert depuis épargne — ${savingsSourceGoal.label} · ${draft.label.trim()}` : draft.label.trim(),")
+s = s.replace("    delete operation.recurringId;", "    delete operation.recurringId;\n    delete operation.savingsSource;")
+save_anchor = "    saveData({ ...data, operations, recurringFixedExpenses });"
+save_replace = """    let savingsGoals = data.savingsGoals;
+    if (!editingId && savingsSourceGoal) {
+      const nextSaved = Number(savingsSourceGoal.saved || 0) - amount;
+      savingsGoals = data.savingsGoals.map((goal) => goal.id === savingsSourceGoal.id ? { ...goal, saved: nextSaved } : goal);
+      if (USE_REMOTE_BUDGET) {
+        const { error: savingsError } = await supabase.from('savings_goals').update({ saved: nextSaved }).eq('id', savingsSourceGoal.id).eq('household_id', householdId);
+        if (savingsError) { setOperationStatus('Transfert enregistré mais mise à jour de l’épargne impossible : ' + savingsError.message); return; }
+      }
+    }
+    saveData({ ...data, operations, recurringFixedExpenses, savingsGoals });"""
+if save_anchor not in s: raise SystemExit('Save anchor missing')
+s = s.replace(save_anchor, save_replace, 1)
+p.write_text(s)
+
+b = Path('src/BelfiusAudit.jsx')
+t = b.read_text()
+start = t.index('function detectSavingsTransfers(rows) {')
+end = t.index('\nfunction labelText(bankRow)', start)
+replacement = """function detectSavingsTransfers(rows) {
+  const totals = {};
+  const transfers = [];
+  (rows || []).forEach((row) => {
+    const rule = classifyBankBusinessRule(row);
+    if (!rule || rule.kind !== 'internal-savings-transfer') return;
+    const amount = Math.abs(Number(row.amount) || 0);
+    totals[rule.bucket] = (totals[rule.bucket] || 0) + amount;
+    transfers.push({ bucket: rule.bucket, amount, date: row.date, label: row.label, orderReference: rule.orderReference || '', communication: row.communication || '', fingerprint: [row.date, Number(row.amount).toFixed(2), rule.orderReference || normalize(row.label), normalize(row.communication || row.details)].join('|') });
+  });
+  return { totals, transfers };
+}
+"""
+t = t[:start] + replacement + t[end:]
+old = "    const automatic = candidates.filter(({ evidence }) => evidence.auto);\n    if (automatic.length === 1) {"
+new = "    const automatic = candidates.filter(({ evidence }) => evidence.auto);\n    const learnedAutomatic = automatic.filter(({ evidence }) => evidence.learned || String(evidence.reason || '').toLowerCase().includes('apprise'));\n    if (learnedAutomatic.length === 1) { const selected = learnedAutomatic[0]; usedBank.add(bankIndex); usedApp.add(selected.index); matched.push({ bank: bankRow, app: selected.row, ...selected.evidence }); return; }\n    if (automatic.length === 1) {"
+if old not in t: raise SystemExit('Learned priority anchor missing')
+t = t.replace(old, new, 1)
+b.write_text(t)
+
+budget = Path('src/budgetMonthRules.js')
+u = budget.read_text()
+u = u.replace("  const currentIncome = operations.filter((operation) => operation.type === 'income' && String(operation.date || '').startsWith(monthKey));", "  const currentIncome = operations.filter((operation) => operation.type === 'income' && String(operation.date || '').startsWith(monthKey) && !String(operation.label || '').toLowerCase().includes('transfert depuis épargne'));")
+budget.write_text(u)
