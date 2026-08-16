@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, Hotel, MapPin, Plane, ReceiptText, Save, Utensils } from 'lucide-react';
 import BeobankStatementImport from './BeobankStatementImport.jsx';
 import './LeisureVacations.css';
@@ -44,6 +44,12 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   const totalSpent = useMemo(() => entries.reduce((sum, row) => sum + Number(row.amount || 0), 0), [entries]);
   const sortedEntries = useMemo(() => [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), [entries]);
 
+  // Le champ de solde suit toujours la valeur réelle du poste Épargne Vacances/Loisirs,
+  // y compris lorsque celle-ci arrive de Supabase après le premier rendu de la Preview.
+  useEffect(() => {
+    setManualBalance(String(Number(goal?.saved || 0).toFixed(2)).replace('.', ','));
+  }, [goal?.id, goal?.saved]);
+
   const persistEntries = (next) => {
     setEntries(next);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -80,7 +86,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     await updateBalance(balance - amount);
     setManualBalance(String((balance - amount).toFixed(2)).replace('.', ','));
     setDraft(makeDraft());
-    setStatus('Dépense enregistrée et solde Vacances/Loisirs mis à jour.');
+    setStatus('Dépense enregistrée et solde Vacances/Loisirs mis à jour dans les deux écrans.');
   };
 
   const applyManualBalance = async () => {
@@ -90,7 +96,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       return;
     }
     await updateBalance(value);
-    setStatus('Solde Beobank mis à jour manuellement.');
+    setStatus('Solde Beobank mis à jour et synchronisé avec Épargne Vacances/Loisirs.');
   };
 
   const removeEntry = async (row) => {
@@ -98,7 +104,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     persistEntries(entries.filter((item) => item.id !== row.id));
     await updateBalance(balance + Number(row.amount || 0));
     setManualBalance(String((balance + Number(row.amount || 0)).toFixed(2)).replace('.', ','));
-    setStatus('Dépense supprimée et montant recrédité.');
+    setStatus('Dépense supprimée et montant recrédité dans Vacances/Loisirs.');
   };
 
   return (
