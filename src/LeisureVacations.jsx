@@ -9,6 +9,7 @@ const CATEGORIES = [
   { value: 'hotel', label: 'Hôtel', icon: Hotel },
   { value: 'flight', label: 'Voyage en avion', icon: Plane },
   { value: 'package', label: 'Avion + hôtel', icon: Plane },
+  { value: 'other-expense', label: 'Autre type de dépense', icon: ReceiptText },
   { value: 'other', label: 'Autre loisir', icon: ReceiptText },
 ];
 
@@ -44,8 +45,6 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   const totalSpent = useMemo(() => entries.reduce((sum, row) => sum + Number(row.amount || 0), 0), [entries]);
   const sortedEntries = useMemo(() => [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)), [entries]);
 
-  // Le champ de solde suit toujours la valeur réelle du poste Épargne Vacances/Loisirs,
-  // y compris lorsque celle-ci arrive de Supabase après le premier rendu de la Preview.
   useEffect(() => {
     setManualBalance(String(Number(goal?.saved || 0).toFixed(2)).replace('.', ','));
   }, [goal?.id, goal?.saved]);
