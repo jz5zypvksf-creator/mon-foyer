@@ -19,7 +19,11 @@
 .duplicate-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 11px; border-bottom: 1px solid #e7ece9; }
 .duplicate-row:last-child { border-bottom: 0; }
 .duplicate-row > div { min-width: 0; }
-.duplicate-row > div strong, .duplicate-row > div span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.duplicate-row > div span { margin-top: 3px; color: #657382; font-size: .78rem; }
-.duplicate-row > strong { color: #b34b4b; white-space: nowrap; }
-@media (max-width: 520px) { .duplicate-row { grid-template-columns: 1fr; gap: 4px; } .duplicate-row > strong { justify-self: start; } }
+.duplicate-row > div > strong, .duplicate-row > div > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duplicate-row > div > span { margin-top: 3px; color: #657382; font-size: .78rem; }
+.duplicate-bank-fingerprint { color: #2f6f4e !important; }
+.duplicate-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.duplicate-row-actions > strong { color: #b34b4b; white-space: nowrap; }
+.duplicate-delete { width: 34px; height: 34px; border: 0; border-radius: 999px; display: inline-grid; place-items: center; background: #fdeaea; color: #b64545; cursor: pointer; }
+.duplicate-delete:hover { background: #f9dada; }
+@media (max-width: 520px) { .duplicate-row { grid-template-columns: 1fr; gap: 7px; } .duplicate-row-actions { justify-content: space-between; } }
