@@ -119,7 +119,8 @@ function careUxFinalIntegration() {
       if (!isApp && !isAudit) return null;
       let patched = code;
       if (isApp) {
-        patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);');
+        patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);\n  const careTotalToRecover = careSummary.reduce((sum, item) => sum + Math.max(Number(item.balance || 0), 0), 0);');
+        patched = patched.replace('<div className="section-title"><h2>Dépenses à récupérer</h2><span>Papa & Nonna</span></div>', '<div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatCurrency(careTotalToRecover)}</strong></div><p className="scheduled-caption">Papa & Nonna</p>');
         patched = patched.replace('  const editingOperation = useMemo(() => {', "  const viewCareHistory = (person) => { setHistoryPerson(person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); };\n\n  const editingOperation = useMemo(() => {");
         patched = patched.replace('{careSummary.map((item) => (<div key={item.person} className="forecast-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Dépenses : {formatCurrency(item.expenses)}</span><span>Remboursé : {formatCurrency(item.reimbursed)}</span></div><div><strong className={item.balance > 0 ? \'expense\' : \'income\'}>{formatCurrency(item.balance)}</strong><button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}', '{careSummary.map((item) => (<div key={item.person} className="forecast-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Solde reporté : {formatCurrency(item.carriedBalance || 0)}</span><span>Dépenses du mois : {formatCurrency(item.expenses)}</span><span>Remboursé ce mois : {formatCurrency(item.reimbursed)}</span></div><div><strong className={item.balance > 0 ? \'expense\' : \'income\'}>{formatCurrency(item.balance)}</strong><button type="button" className="secondary-button" onClick={() => viewCareHistory(item.person)}>Voir le détail</button><button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}');
         patched = patched.replace('<input type="text" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="0,00" />', '<input type="text" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} onBlur={() => { const value = parseDecimal(draft.amount); if (Number.isFinite(value)) setDraft({ ...draft, amount: value.toFixed(2).replace(\'.\', \',\') }); }} placeholder="0,00" />');
@@ -259,9 +260,6 @@ function leisureVacationsIntegration() {
         );
       }
 
-      // Une opération déjà datée d'aujourd'hui ou d'une date passée appartient à l'Historique.
-      // Elle ne peut plus rester simultanément dans « Opérations programmées », même si le
-      // dernier relevé Belfius est antérieur. Cela retire notamment PSA Finance du 15/08 le 16/08.
       patched = patched.replace(
         ".filter((operation) => operation.type !== 'income' && operation.date > scheduleCutoff);",
         ".filter((operation) => operation.type !== 'income' && operation.date > today);",
@@ -269,6 +267,11 @@ function leisureVacationsIntegration() {
       patched = patched.replace(
         "        operation.date > scheduleCutoff\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
         "        operation.date > today\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
+      );
+
+      patched = patched.replace(
+        '<h2>Dépenses programmées</h2>\n                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>',
+        '<h2>Dépenses programmées</h2>\n                <strong>Total : {formatCurrency(scheduledExpenseTotal)}</strong>',
       );
 
       const savingsBlock = '<SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />';
@@ -319,7 +322,7 @@ function leisureVacationsIntegration() {
         || !patched.includes('mode="history"')
         || !patched.includes('mode="recurring"')
         || !patched.includes("operation.type !== 'income' && operation.date > today")) {
-        throw new Error('Intégration Loisirs/Vacances + audit doublons + échéances incomplète');
+        throw new Error('Intégration Loisirs/Vacances + audit + échéances incomplète');
       }
       return { code: patched, map: null };
     },
