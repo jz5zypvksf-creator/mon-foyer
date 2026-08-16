@@ -260,6 +260,7 @@ function leisureVacationsIntegration() {
         );
       }
 
+      // Une opération passée ou datée d'aujourd'hui est exécutée, pas programmée.
       patched = patched.replace(
         ".filter((operation) => operation.type !== 'income' && operation.date > scheduleCutoff);",
         ".filter((operation) => operation.type !== 'income' && operation.date > today);",
@@ -269,10 +270,28 @@ function leisureVacationsIntegration() {
         "        operation.date > today\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
       );
 
+      // Totaux lisibles en un coup d'œil.
       patched = patched.replace(
         '<h2>Dépenses programmées</h2>\n                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>',
         '<h2>Dépenses programmées</h2>\n                <strong>Total : {formatCurrency(scheduledExpenseTotal)}</strong>',
       );
+      patched = patched.replace(
+        'const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);',
+        "const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);\n  const careTotalToRecover = careSummary.reduce((sum, item) => sum + Math.max(Number(item.balance || 0), 0), 0);",
+      );
+      patched = patched.replace(
+        '<div className="section-title"><h2>Dépenses à récupérer</h2><span>Papa & Nonna</span></div>',
+        '<div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatCurrency(careTotalToRecover)}</strong></div><p className="scheduled-caption">Papa & Nonna</p>',
+      );
+
+      // Contrôle explicite de l'écart entre la comptabilité Mon Foyer et le dernier solde Belfius.
+      const scheduledAnchor = '            <section className="panel scheduled-panel">';
+      if (!patched.includes('Contrôle de la balance Belfius')) {
+        patched = patched.replace(
+          scheduledAnchor,
+          `            {belfiusSnapshot && (\n              <section className="panel">\n                <div className="section-title"><h2>Contrôle de la balance Belfius</h2><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>\n                <div className="history-summary">\n                  <div><span>Solde Mon Foyer</span><strong>{formatCurrency(paymentBalances['Compte Belfius'] || 0)}</strong></div>\n                  <div><span>Solde Belfius réel</span><strong>{formatCurrency(belfiusSnapshot.balance || 0)}</strong></div>\n                  <div><span>Écart comptable</span><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>\n                </div>\n                <p className="hint">{Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'Balance conforme au dernier relevé Belfius.' : 'Écart à auditer : il peut provenir d’un solde d’ouverture absent, d’une écriture manquante ou d’un doublon. Aucun ajustement automatique n’est effectué.'}</p>\n              </section>\n            )}\n\n${scheduledAnchor}`,
+        );
+      }
 
       const savingsBlock = '<SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />';
       if (!patched.includes('leisure-launch-card')) {
@@ -294,7 +313,7 @@ function leisureVacationsIntegration() {
       if (!patched.includes('mode="history"')) {
         patched = patched.replace(
           historyAnchor,
-          "        {activeView === 'history' && (\n          <section className=\"view\">\n            <DuplicateAudit mode=\"history\" operations={data.operations} selectedMonth={selectedMonth} />\n            <div className=\"panel\">",
+          "        {activeView === 'history' && (\n          <section className=\"view\">\n            <DuplicateAudit mode=\"history\" operations={data.operations} selectedMonth={selectedMonth} onDeleteOperation={(row) => deleteOperation(row.id)} />\n            <div className=\"panel\">",
         );
       }
 
@@ -302,7 +321,7 @@ function leisureVacationsIntegration() {
       if (!patched.includes('mode="recurring"')) {
         patched = patched.replace(
           settingsAnchor,
-          "        {activeView === 'settings' && (\n          <section className=\"view\">\n            <DuplicateAudit mode=\"recurring\" recurringExpenses={data.recurringFixedExpenses || []} />",
+          "        {activeView === 'settings' && (\n          <section className=\"view\">\n            <DuplicateAudit mode=\"recurring\" recurringExpenses={data.recurringFixedExpenses || []} onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)} />",
         );
       }
 
@@ -314,15 +333,13 @@ function leisureVacationsIntegration() {
       }
 
       if (!patched.includes("import LeisureVacations from './LeisureVacations.jsx';")
-        || !patched.includes("import './NavSix.css';")
         || !patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")
-        || !patched.includes('leisure-launch-card')
-        || !patched.includes("activeView === 'leisure'")
-        || !patched.includes('label="Loisirs"')
-        || !patched.includes('mode="history"')
-        || !patched.includes('mode="recurring"')
+        || !patched.includes('Total : {formatCurrency(careTotalToRecover)}')
+        || !patched.includes('Contrôle de la balance Belfius')
+        || !patched.includes('onDeleteOperation={(row) => deleteOperation(row.id)}')
+        || !patched.includes('onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)}')
         || !patched.includes("operation.type !== 'income' && operation.date > today")) {
-        throw new Error('Intégration Loisirs/Vacances + audit + échéances incomplète');
+        throw new Error('Intégration finale Loisirs/Audit/Totaux incomplète');
       }
       return { code: patched, map: null };
     },
