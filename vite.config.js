@@ -243,7 +243,12 @@ function leisureVacationsIntegration() {
       if (!patched.includes("import LeisureVacations from './LeisureVacations.jsx';")) {
         patched = patched.replace(
           "import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';",
-          "import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';\nimport LeisureVacations from './LeisureVacations.jsx';",
+          "import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';\nimport LeisureVacations from './LeisureVacations.jsx';\nimport './NavSix.css';",
+        );
+      } else if (!patched.includes("import './NavSix.css';")) {
+        patched = patched.replace(
+          "import LeisureVacations from './LeisureVacations.jsx';",
+          "import LeisureVacations from './LeisureVacations.jsx';\nimport './NavSix.css';",
         );
       }
 
@@ -270,7 +275,6 @@ function leisureVacationsIntegration() {
         );
       }
 
-      // Audit anti-doublons de l'historique du mois affiché.
       const historyAnchor = "        {activeView === 'history' && (\n          <section className=\"view\">\n            <div className=\"panel\">";
       if (!patched.includes('mode="history"')) {
         patched = patched.replace(
@@ -279,7 +283,6 @@ function leisureVacationsIntegration() {
         );
       }
 
-      // Audit anti-doublons des frais fixes récurrents, visible dans Réglages.
       const settingsAnchor = "        {activeView === 'settings' && (\n          <section className=\"view\">";
       if (!patched.includes('mode="recurring"')) {
         patched = patched.replace(
@@ -288,7 +291,6 @@ function leisureVacationsIntegration() {
         );
       }
 
-      // Accès permanent depuis la navigation principale, entre Historique et Messages.
       if (!patched.includes('label="Loisirs"')) {
         patched = patched.replace(
           '<NavButton icon={ReceiptText} label="Historique" active={activeView === \'history\'} onClick={() => setActiveView(\'history\')} />',
@@ -297,6 +299,7 @@ function leisureVacationsIntegration() {
       }
 
       if (!patched.includes("import LeisureVacations from './LeisureVacations.jsx';")
+        || !patched.includes("import './NavSix.css';")
         || !patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")
         || !patched.includes('leisure-launch-card')
         || !patched.includes("activeView === 'leisure'")
