@@ -40,6 +40,41 @@ function leisureVacationsIntegration() {
         "        operation.date > today\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
       );
 
+      // Lecture budgétaire mensuelle : le grand solde est Revenus budgétaires du mois
+      // moins dépenses exécutées du mois. Le report historique des moyens de paiement
+      // reste visible séparément mais n'altère plus le résultat du mois.
+      patched = patched.replace(
+        "  const availableForPayments = useMemo(\n    () => PAYMENT_METHODS.reduce((sum, method) => sum + (paymentBalances[method] || 0), 0),\n    [paymentBalances],\n  );",
+        "  const availableForPayments = totals.balance;",
+      );
+
+      // Le budget nourriture restant est une enveloppe indicative, pas une dépense déjà engagée.
+      // Le prévisionnel financier ne déduit donc que les opérations effectivement programmées.
+      patched = patched.replace(
+        "  const totalRemainingToCover = scheduledExpenseTotal + remainingFoodBudget;",
+        "  const totalRemainingToCover = scheduledExpenseTotal;",
+      );
+      patched = patched.replace(
+        '<span>Dépenses programmées : {formatCurrency(scheduledExpenseTotal)}</span>\n                  <span>Budget nourriture restant : {formatCurrency(remainingFoodBudget)}</span>',
+        '<span>Dépenses programmées : {formatCurrency(scheduledExpenseTotal)}</span>\n                  <span>Budget nourriture restant : {formatCurrency(remainingFoodBudget)} · indicatif, non déduit</span>',
+      );
+      patched = patched.replace(
+        '<div><span>− Budget nourriture restant</span><strong>− {formatCurrency(remainingFoodBudget)}</strong></div>',
+        '<div><span>Budget nourriture restant (indicatif)</span><strong>{formatCurrency(remainingFoodBudget)}</strong></div>',
+      );
+      patched = patched.replace(
+        '<span>Disponible pour les paiements</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
+        '<span>Solde budgétaire du mois</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
+      );
+      patched = patched.replace(
+        '<span>Disponible actuel : {formatCurrency(availableForPayments)}</span>',
+        '<span>Solde budgétaire actuel : {formatCurrency(availableForPayments)}</span>',
+      );
+      patched = patched.replace(
+        '<div><span>Disponible actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>',
+        '<div><span>Solde budgétaire actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>',
+      );
+
       // Totaux lisibles en un coup d'œil.
       patched = patched.replace(
         '<h2>Dépenses programmées</h2>\n                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>',
@@ -59,7 +94,7 @@ function leisureVacationsIntegration() {
       if (!patched.includes('Contrôle de la balance Belfius')) {
         patched = patched.replace(
           scheduledAnchor,
-          `            {belfiusSnapshot && (\n              <section className="panel">\n                <div className="section-title"><h2>Contrôle de la balance Belfius</h2><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>\n                <div className="history-summary">\n                  <div><span>Solde Mon Foyer</span><strong>{formatCurrency(paymentBalances['Compte Belfius'] || 0)}</strong></div>\n                  <div><span>Solde Belfius réel</span><strong>{formatCurrency(belfiusSnapshot.balance || 0)}</strong></div>\n                  <div><span>Écart comptable</span><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>\n                </div>\n                <p className="hint">{Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'Balance conforme au dernier relevé Belfius.' : 'Écart à auditer : il peut provenir d’un solde d’ouverture absent, d’une écriture manquante ou d’un doublon. Aucun ajustement automatique n’est effectué.'}</p>\n              </section>\n            )}\n\n${scheduledAnchor}`,
+          `            {belfiusSnapshot && (\n              <section className="panel">\n                <div className="section-title"><h2>Contrôle de la balance Belfius</h2><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>\n                <div className="history-summary">\n                  <div><span>Solde Mon Foyer cumulé</span><strong>{formatCurrency(paymentBalances['Compte Belfius'] || 0)}</strong></div>\n                  <div><span>Solde Belfius réel</span><strong>{formatCurrency(belfiusSnapshot.balance || 0)}</strong></div>\n                  <div><span>Écart comptable</span><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>\n                </div>\n                <p className="hint">Ce contrôle bancaire est distinct du solde budgétaire mensuel. {Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'Balance conforme au dernier relevé Belfius.' : 'Écart à auditer : il peut provenir d’un solde d’ouverture absent, d’une écriture manquante ou d’un doublon. Aucun ajustement automatique n’est effectué.'}</p>\n              </section>\n            )}\n\n${scheduledAnchor}`,
         );
       }
 
@@ -106,10 +141,12 @@ function leisureVacationsIntegration() {
         || !patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")
         || !patched.includes('Total : {formatCurrency(careTotalToRecover)}')
         || !patched.includes('Contrôle de la balance Belfius')
+        || !patched.includes('const availableForPayments = totals.balance;')
+        || !patched.includes('const totalRemainingToCover = scheduledExpenseTotal;')
         || !patched.includes('onDeleteOperation={(row) => deleteOperation(row.id)}')
         || !patched.includes('onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)}')
         || !patched.includes("operation.type !== 'income' && operation.date > today")) {
-        throw new Error('Intégration finale Loisirs/Audit/Totaux incomplète');
+        throw new Error('Intégration finale Loisirs/Audit/Totaux/Balance mensuelle incomplète');
       }
       return { code: patched, map: null };
     },
@@ -131,4 +168,4 @@ source = source.replace(
 
 if (!source.includes('leisureVacationsIntegration()')) throw new Error('Plugin Loisirs/Vacances non branché');
 fs.writeFileSync(path, source);
-console.log('Interface Loisirs/Vacances + audit balance + doublons + totaux intégrés.');
+console.log('Interface Loisirs/Vacances + balance budgétaire mensuelle intégrées.');
