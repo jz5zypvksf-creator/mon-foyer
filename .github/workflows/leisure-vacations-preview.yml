@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/apply-leisure-integration.mjs
+      - run: node scripts/apply-savings-transfer-integration.mjs
       - run: npm install
       - run: npm run build
       - name: Commit integrated Vite config
@@ -29,6 +30,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No integration change to commit"
           else
-            git commit -m "Intègre la Preview Loisirs/Vacances"
+            git commit -m "Intègre la Preview Loisirs/Vacances et transfert épargne"
             git push
           fi
