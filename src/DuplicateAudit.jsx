@@ -58,14 +58,7 @@ function probablePairs(rows, matcher, exactGroups) {
 }
 
 function recurringExactSignature(row) {
-  return [
-    normalize(row.label),
-    Number(row.amount || 0).toFixed(2),
-    Number(row.day || 0),
-    row.person || 'Foyer',
-    row.category || '',
-    row.frequency || 'monthly',
-  ].join('|');
+  return [normalize(row.label), Number(row.amount || 0).toFixed(2), Number(row.day || 0), row.person || 'Foyer', row.category || '', row.frequency || 'monthly'].join('|');
 }
 
 function recurringProbable(left, right) {
@@ -83,24 +76,13 @@ function recurringProbable(left, right) {
 }
 
 function operationExactSignature(row) {
-  return [
-    row.date || '',
-    Number(row.amount || 0).toFixed(2),
-    row.type || '',
-    row.person || 'Foyer',
-    row.paymentMethod || row.payment_method || 'Compte Belfius',
-    normalize(row.label),
-  ].join('|');
+  return [row.date || '', Number(row.amount || 0).toFixed(2), row.type || '', row.person || 'Foyer', row.paymentMethod || row.payment_method || 'Compte Belfius', normalize(row.label)].join('|');
 }
 
 function mentionsDifferentNamedPersons(left, right) {
   const a = normalize(left.label);
   const b = normalize(right.label);
-  const leftAlain = a.includes('alain');
-  const rightAlain = b.includes('alain');
-  const leftEsther = a.includes('esther');
-  const rightEsther = b.includes('esther');
-  return (leftAlain && rightEsther) || (leftEsther && rightAlain);
+  return (a.includes('alain') && b.includes('esther')) || (a.includes('esther') && b.includes('alain'));
 }
 
 function operationProbable(left, right) {
@@ -109,12 +91,8 @@ function operationProbable(left, right) {
   if ((left.type || '') !== (right.type || '')) return false;
   if ((left.person || 'Foyer') !== (right.person || 'Foyer')) return false;
   if ((left.paymentMethod || left.payment_method || 'Compte Belfius') !== (right.paymentMethod || right.payment_method || 'Compte Belfius')) return false;
-
-  // Deux épargnes nominatives distinctes (ex. pension Alain / pension Esther)
-  // ne sont jamais considérées comme doublons sur le seul montant/date.
   const savingsLike = String(left.category || '').startsWith('epargne') || String(right.category || '').startsWith('epargne');
   if (savingsLike && mentionsDifferentNamedPersons(left, right)) return false;
-
   const sameStore = normalize(left.store) && normalize(left.store) === normalize(right.store);
   const sameCategory = left.category && left.category === right.category;
   return labelSimilarity(left.label, right.label) >= 0.66 || (!savingsLike && sameStore && sameCategory);
@@ -145,26 +123,12 @@ function DuplicateGroup({ title, groups, kind, onDelete }) {
                 <div className="duplicate-row" key={row.id}>
                   <div>
                     <strong>{row.label}</strong>
-                    <span>
-                      {row.date ? `${row.date} · ` : ''}{row.person || 'Foyer'}
-                      {row.day ? ` · jour ${row.day}` : ''}
-                      {row.category ? ` · ${row.category}` : ''}
-                    </span>
+                    <span>{row.date ? `${row.date} · ` : ''}{row.person || 'Foyer'}{row.day ? ` · jour ${row.day}` : ''}{row.category ? ` · ${row.category}` : ''}</span>
                     {fingerprint && <span className="duplicate-bank-fingerprint">{fingerprint}</span>}
                   </div>
                   <div className="duplicate-row-actions">
                     <strong>{money(row.amount)}</strong>
-                    {onDelete && (
-                      <button
-                        type="button"
-                        className="duplicate-delete"
-                        title="Supprimer cette ligne"
-                        aria-label={`Supprimer ${row.label}`}
-                        onClick={() => onDelete(row)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
+                    {onDelete && <button type="button" className="duplicate-delete" title="Supprimer cette ligne" aria-label={`Supprimer ${row.label}`} onClick={() => onDelete(row)}><Trash2 size={16} /></button>}
                   </div>
                 </div>
               );
@@ -180,47 +144,23 @@ export default function DuplicateAudit({ mode, recurringExpenses = [], operation
   const audit = useMemo(() => {
     if (mode === 'recurring') {
       const exact = groupExact(recurringExpenses, recurringExactSignature);
-      const probable = probablePairs(recurringExpenses, recurringProbable, exact);
-      return { exact, probable };
+      return { exact, probable: probablePairs(recurringExpenses, recurringProbable, exact) };
     }
     const monthRows = selectedMonth ? operations.filter((row) => String(row.date || '').startsWith(selectedMonth)) : operations;
     const exact = groupExact(monthRows, operationExactSignature);
-    const probable = probablePairs(monthRows, operationProbable, exact);
-    return { exact, probable };
+    return { exact, probable: probablePairs(monthRows, operationProbable, exact) };
   }, [mode, operations, recurringExpenses, selectedMonth]);
 
   const total = audit.exact.length + audit.probable.length;
   const deleteHandler = mode === 'recurring' ? onDeleteRecurring : onDeleteOperation;
 
-  const handleDelete = (row) => {
-    if (!deleteHandler) return;
-    const label = row.label || 'cette ligne';
-    if (!window.confirm(`Supprimer « ${label} » ? Cette action supprimera réellement l’écriture sélectionnée.`)) return;
-    deleteHandler(row);
-  };
-
   return (
     <section className={`panel duplicate-audit ${total ? 'has-duplicates' : 'is-clean'}`}>
       <div className="duplicate-head">
-        <div className="duplicate-title">
-          {total ? <AlertTriangle size={21} /> : <CheckCircle2 size={21} />}
-          <div>
-            <h2>Contrôle des doublons</h2>
-            <span>{mode === 'recurring' ? 'Frais fixes récurrents' : `Historique${selectedMonth ? ` · ${selectedMonth}` : ''}`}</span>
-          </div>
-        </div>
+        <div className="duplicate-title">{total ? <AlertTriangle size={21} /> : <CheckCircle2 size={21} />}<div><h2>Contrôle des doublons</h2><span>{mode === 'recurring' ? 'Frais fixes récurrents' : `Historique${selectedMonth ? ` · ${selectedMonth}` : ''}`}</span></div></div>
         <div className="duplicate-count"><Copy size={16} /> {total}</div>
       </div>
-
-      {!total ? (
-        <p className="duplicate-clean">Aucun doublon exact ou probable détecté avec les données actuellement chargées.</p>
-      ) : (
-        <>
-          <p className="duplicate-warning">Tu peux maintenant supprimer directement la ligne incorrecte. Une confirmation est demandée avant chaque suppression.</p>
-          <DuplicateGroup title="Doublons exacts" groups={audit.exact} kind="exact" onDelete={deleteHandler ? handleDelete : null} />
-          <DuplicateGroup title="Doublons probables" groups={audit.probable} kind="probable" onDelete={deleteHandler ? handleDelete : null} />
-        </>
-      )}
+      {!total ? <p className="duplicate-clean">Aucun doublon exact ou probable détecté avec les données actuellement chargées.</p> : <><p className="duplicate-warning">Tu peux supprimer directement la ligne incorrecte. L’application demandera confirmation avant la suppression réelle.</p><DuplicateGroup title="Doublons exacts" groups={audit.exact} kind="exact" onDelete={deleteHandler || null} /><DuplicateGroup title="Doublons probables" groups={audit.probable} kind="probable" onDelete={deleteHandler || null} /></>}
     </section>
   );
 }
