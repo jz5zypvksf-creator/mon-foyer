@@ -259,6 +259,18 @@ function leisureVacationsIntegration() {
         );
       }
 
+      // Une opération déjà datée d'aujourd'hui ou d'une date passée appartient à l'Historique.
+      // Elle ne peut plus rester simultanément dans « Opérations programmées », même si le
+      // dernier relevé Belfius est antérieur. Cela retire notamment PSA Finance du 15/08 le 16/08.
+      patched = patched.replace(
+        ".filter((operation) => operation.type !== 'income' && operation.date > scheduleCutoff);",
+        ".filter((operation) => operation.type !== 'income' && operation.date > today);",
+      );
+      patched = patched.replace(
+        "        operation.date > scheduleCutoff\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
+        "        operation.date > today\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
+      );
+
       const savingsBlock = '<SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />';
       if (!patched.includes('leisure-launch-card')) {
         patched = patched.replace(
@@ -305,8 +317,9 @@ function leisureVacationsIntegration() {
         || !patched.includes("activeView === 'leisure'")
         || !patched.includes('label="Loisirs"')
         || !patched.includes('mode="history"')
-        || !patched.includes('mode="recurring"')) {
-        throw new Error('Intégration Loisirs/Vacances + audit doublons incomplète');
+        || !patched.includes('mode="recurring"')
+        || !patched.includes("operation.type !== 'income' && operation.date > today")) {
+        throw new Error('Intégration Loisirs/Vacances + audit doublons + échéances incomplète');
       }
       return { code: patched, map: null };
     },
