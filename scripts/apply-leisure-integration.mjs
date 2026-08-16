@@ -30,9 +30,6 @@ function leisureVacationsIntegration() {
         );
       }
 
-      // Une opération déjà datée d'aujourd'hui ou d'une date passée appartient à l'Historique.
-      // Elle ne peut plus rester simultanément dans « Opérations programmées », même si le
-      // dernier relevé Belfius est antérieur. Cela retire notamment PSA Finance du 15/08 le 16/08.
       patched = patched.replace(
         ".filter((operation) => operation.type !== 'income' && operation.date > scheduleCutoff);",
         ".filter((operation) => operation.type !== 'income' && operation.date > today);",
@@ -40,6 +37,12 @@ function leisureVacationsIntegration() {
       patched = patched.replace(
         "        operation.date > scheduleCutoff\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
         "        operation.date > today\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
+      );
+
+      // Lecture immédiate du total global des opérations programmées.
+      patched = patched.replace(
+        '<h2>Dépenses programmées</h2>\n                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>',
+        '<h2>Dépenses programmées</h2>\n                <strong>Total : {formatCurrency(scheduledExpenseTotal)}</strong>',
       );
 
       const savingsBlock = '<SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />';
@@ -89,8 +92,9 @@ function leisureVacationsIntegration() {
         || !patched.includes('label="Loisirs"')
         || !patched.includes('mode="history"')
         || !patched.includes('mode="recurring"')
-        || !patched.includes("operation.type !== 'income' && operation.date > today")) {
-        throw new Error('Intégration Loisirs/Vacances + audit doublons + échéances incomplète');
+        || !patched.includes("operation.type !== 'income' && operation.date > today")
+        || !patched.includes('Total : {formatCurrency(scheduledExpenseTotal)}')) {
+        throw new Error('Intégration Loisirs/Vacances + audit + totaux incomplète');
       }
       return { code: patched, map: null };
     },
@@ -105,6 +109,19 @@ const existingStart = source.lastIndexOf('function leisureVacationsIntegration()
 if (existingStart >= 0) source = source.slice(0, existingStart) + leisureVacationsIntegration.toString() + '\n' + source.slice(exportIndex);
 else source = source.slice(0, exportIndex) + '\n' + leisureVacationsIntegration.toString() + '\n' + source.slice(exportIndex);
 
+// Complète la couche UX postérieure : total global des dépenses à récupérer.
+source = source.replace(
+  "patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);');",
+  "patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);\\n  const careTotalToRecover = careSummary.reduce((sum, item) => sum + Math.max(Number(item.balance || 0), 0), 0);');",
+);
+
+if (!source.includes("Total à récupérer")) {
+  source = source.replace(
+    "patched = patched.replace('  const editingOperation = useMemo(() => {', \"  const viewCareHistory = (person) => { setHistoryPerson(person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); };\\n\\n  const editingOperation = useMemo(() => {\");",
+    "patched = patched.replace('<div className=\\\"section-title\\\"><h2>Dépenses à récupérer</h2><span>Papa & Nonna</span></div>', '<div className=\\\"section-title\\\"><h2>Dépenses à récupérer</h2><strong>Total à récupérer : {formatCurrency(careTotalToRecover)}</strong></div><p className=\\\"scheduled-caption\\\">Papa & Nonna</p>');\\n        patched = patched.replace('  const editingOperation = useMemo(() => {', \"  const viewCareHistory = (person) => { setHistoryPerson(person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); };\\n\\n  const editingOperation = useMemo(() => {\");",
+  );
+}
+
 source = source.replace(
   'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), careUxFinalIntegration(), react()]',
   'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), leisureVacationsIntegration(), careUxFinalIntegration(), react()]',
@@ -112,4 +129,4 @@ source = source.replace(
 
 if (!source.includes('leisureVacationsIntegration()')) throw new Error('Plugin Loisirs/Vacances non branché');
 fs.writeFileSync(path, source);
-console.log('Interface Loisirs/Vacances + audit + échéances intégrés, design préservé.');
+console.log('Interface Loisirs/Vacances + audit + totaux globaux intégrés.');
