@@ -1,0 +1,29 @@
+.duplicate-audit { display: grid; gap: 12px; }
+.duplicate-audit.has-duplicates { border-color: #edd7a7; background: #fffdf7; }
+.duplicate-audit.is-clean { border-color: #cfe4d7; background: #f8fcf9; }
+.duplicate-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.duplicate-title { display: flex; align-items: center; gap: 10px; min-width: 0; color: #163a5f; }
+.duplicate-title > div { min-width: 0; }
+.duplicate-title h2 { margin: 0; }
+.duplicate-title span { display: block; margin-top: 2px; color: #657382; font-size: .82rem; font-weight: 700; }
+.duplicate-count { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 999px; background: #eef4f1; color: #163a5f; font-weight: 850; white-space: nowrap; }
+.duplicate-clean, .duplicate-warning { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: .86rem; line-height: 1.4; }
+.duplicate-clean { background: #eaf6ee; color: #2f6f4e; }
+.duplicate-warning { background: #fff4d9; color: #815b08; }
+.duplicate-section { overflow: hidden; border: 1px solid #e2e7e4; border-radius: 14px; background: #fff; }
+.duplicate-section summary { display: flex; justify-content: space-between; gap: 10px; padding: 11px 12px; cursor: pointer; color: #163a5f; font-weight: 850; }
+.duplicate-section.exact summary { background: #fff2f2; }
+.duplicate-section.probable summary { background: #fff9ea; }
+.duplicate-groups { display: grid; gap: 8px; padding: 8px; }
+.duplicate-group { overflow: hidden; border: 1px solid #e4e9e6; border-radius: 12px; }
+.duplicate-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 11px; border-bottom: 1px solid #e7ece9; }
+.duplicate-row:last-child { border-bottom: 0; }
+.duplicate-row > div { min-width: 0; }
+.duplicate-row > div > strong, .duplicate-row > div > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duplicate-row > div > span { margin-top: 3px; color: #657382; font-size: .78rem; }
+.duplicate-bank-fingerprint { color: #2f6f4e !important; }
+.duplicate-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.duplicate-row-actions > strong { color: #b34b4b; white-space: nowrap; }
+.duplicate-delete { width: 34px; height: 34px; border: 0; border-radius: 999px; display: inline-grid; place-items: center; background: #fdeaea; color: #b64545; cursor: pointer; }
+.duplicate-delete:hover { background: #f9dada; }
+@media (max-width: 520px) { .duplicate-row { grid-template-columns: 1fr; gap: 7px; } .duplicate-row-actions { justify-content: space-between; } }
