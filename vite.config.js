@@ -278,6 +278,13 @@ function leisureVacationsIntegration() {
         "  const availableForPayments = totals.balance;",
       );
 
+      // Le badge Compte Belfius doit refléter le dernier solde bancaire réellement importé.
+      // Le cumul interne reste réservé au contrôle de rapprochement.
+      patched = patched.replace(
+        "                      <em className={paymentBalances[method] >= 0 ? 'positive' : 'negative'}>\n                        {formatCurrency(paymentBalances[method])}\n                      </em>",
+        "                      {(() => { const displayedBalance = method === 'Compte Belfius' && belfiusSnapshot ? Number(belfiusSnapshot.balance || 0) : Number(paymentBalances[method] || 0); return <em className={displayedBalance >= 0 ? 'positive' : 'negative'}>{formatCurrency(displayedBalance)}</em>; })()}",
+      );
+
       // Le budget nourriture restant est une enveloppe indicative, pas une dépense déjà engagée.
       // Le prévisionnel financier ne déduit donc que les opérations effectivement programmées.
       patched = patched.replace(
@@ -372,6 +379,7 @@ function leisureVacationsIntegration() {
         || !patched.includes('Total : {formatCurrency(careTotalToRecover)}')
         || !patched.includes('Contrôle de la balance Belfius')
         || !patched.includes('const availableForPayments = totals.balance;')
+        || !patched.includes("method === 'Compte Belfius' && belfiusSnapshot")
         || !patched.includes('const totalRemainingToCover = scheduledExpenseTotal;')
         || !patched.includes('onDeleteOperation={(row) => deleteOperation(row.id)}')
         || !patched.includes('onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)}')
