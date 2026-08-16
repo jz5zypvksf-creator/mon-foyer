@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AlertTriangle, CheckCircle2, Copy } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Trash2 } from 'lucide-react';
 import './DuplicateAudit.css';
 
 const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value || 0));
@@ -93,18 +93,45 @@ function operationExactSignature(row) {
   ].join('|');
 }
 
+function mentionsDifferentNamedPersons(left, right) {
+  const a = normalize(left.label);
+  const b = normalize(right.label);
+  const leftAlain = a.includes('alain');
+  const rightAlain = b.includes('alain');
+  const leftEsther = a.includes('esther');
+  const rightEsther = b.includes('esther');
+  return (leftAlain && rightEsther) || (leftEsther && rightAlain);
+}
+
 function operationProbable(left, right) {
   if ((left.date || '') !== (right.date || '')) return false;
   if (Math.abs(Number(left.amount || 0) - Number(right.amount || 0)) > 0.01) return false;
   if ((left.type || '') !== (right.type || '')) return false;
   if ((left.person || 'Foyer') !== (right.person || 'Foyer')) return false;
   if ((left.paymentMethod || left.payment_method || 'Compte Belfius') !== (right.paymentMethod || right.payment_method || 'Compte Belfius')) return false;
+
+  // Deux épargnes nominatives distinctes (ex. pension Alain / pension Esther)
+  // ne sont jamais considérées comme doublons sur le seul montant/date.
+  const savingsLike = String(left.category || '').startsWith('epargne') || String(right.category || '').startsWith('epargne');
+  if (savingsLike && mentionsDifferentNamedPersons(left, right)) return false;
+
   const sameStore = normalize(left.store) && normalize(left.store) === normalize(right.store);
   const sameCategory = left.category && left.category === right.category;
-  return labelSimilarity(left.label, right.label) >= 0.66 || (sameStore && sameCategory);
+  return labelSimilarity(left.label, right.label) >= 0.66 || (!savingsLike && sameStore && sameCategory);
 }
 
-function DuplicateGroup({ title, groups, kind }) {
+function bankFingerprintText(row) {
+  const parts = [];
+  const mandate = row.directDebitReference || row.direct_debit_reference;
+  const structured = row.structuredCommunication || row.structured_communication;
+  const free = row.freeCommunication || row.free_communication;
+  if (mandate) parts.push(`Mandat/OP ${mandate}`);
+  if (structured) parts.push(`Communication ${structured}`);
+  if (free) parts.push(`Motif ${free}`);
+  return parts.join(' · ');
+}
+
+function DuplicateGroup({ title, groups, kind, onDelete }) {
   if (!groups.length) return null;
   return (
     <details className={`duplicate-section ${kind}`} open={kind === 'exact'}>
@@ -112,19 +139,36 @@ function DuplicateGroup({ title, groups, kind }) {
       <div className="duplicate-groups">
         {groups.map((group, index) => (
           <article className="duplicate-group" key={`${kind}-${index}`}>
-            {group.map((row) => (
-              <div className="duplicate-row" key={row.id}>
-                <div>
-                  <strong>{row.label}</strong>
-                  <span>
-                    {row.date ? `${row.date} · ` : ''}{row.person || 'Foyer'}
-                    {row.day ? ` · jour ${row.day}` : ''}
-                    {row.category ? ` · ${row.category}` : ''}
-                  </span>
+            {group.map((row) => {
+              const fingerprint = bankFingerprintText(row);
+              return (
+                <div className="duplicate-row" key={row.id}>
+                  <div>
+                    <strong>{row.label}</strong>
+                    <span>
+                      {row.date ? `${row.date} · ` : ''}{row.person || 'Foyer'}
+                      {row.day ? ` · jour ${row.day}` : ''}
+                      {row.category ? ` · ${row.category}` : ''}
+                    </span>
+                    {fingerprint && <span className="duplicate-bank-fingerprint">{fingerprint}</span>}
+                  </div>
+                  <div className="duplicate-row-actions">
+                    <strong>{money(row.amount)}</strong>
+                    {onDelete && (
+                      <button
+                        type="button"
+                        className="duplicate-delete"
+                        title="Supprimer cette ligne"
+                        aria-label={`Supprimer ${row.label}`}
+                        onClick={() => onDelete(row)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <strong>{money(row.amount)}</strong>
-              </div>
-            ))}
+              );
+            })}
           </article>
         ))}
       </div>
@@ -132,7 +176,7 @@ function DuplicateGroup({ title, groups, kind }) {
   );
 }
 
-export default function DuplicateAudit({ mode, recurringExpenses = [], operations = [], selectedMonth = '' }) {
+export default function DuplicateAudit({ mode, recurringExpenses = [], operations = [], selectedMonth = '', onDeleteOperation, onDeleteRecurring }) {
   const audit = useMemo(() => {
     if (mode === 'recurring') {
       const exact = groupExact(recurringExpenses, recurringExactSignature);
@@ -146,6 +190,14 @@ export default function DuplicateAudit({ mode, recurringExpenses = [], operation
   }, [mode, operations, recurringExpenses, selectedMonth]);
 
   const total = audit.exact.length + audit.probable.length;
+  const deleteHandler = mode === 'recurring' ? onDeleteRecurring : onDeleteOperation;
+
+  const handleDelete = (row) => {
+    if (!deleteHandler) return;
+    const label = row.label || 'cette ligne';
+    if (!window.confirm(`Supprimer « ${label} » ? Cette action supprimera réellement l’écriture sélectionnée.`)) return;
+    deleteHandler(row);
+  };
 
   return (
     <section className={`panel duplicate-audit ${total ? 'has-duplicates' : 'is-clean'}`}>
@@ -164,9 +216,9 @@ export default function DuplicateAudit({ mode, recurringExpenses = [], operation
         <p className="duplicate-clean">Aucun doublon exact ou probable détecté avec les données actuellement chargées.</p>
       ) : (
         <>
-          <p className="duplicate-warning">Aucune suppression automatique : contrôle les lignes avant toute correction.</p>
-          <DuplicateGroup title="Doublons exacts" groups={audit.exact} kind="exact" />
-          <DuplicateGroup title="Doublons probables" groups={audit.probable} kind="probable" />
+          <p className="duplicate-warning">Tu peux maintenant supprimer directement la ligne incorrecte. Une confirmation est demandée avant chaque suppression.</p>
+          <DuplicateGroup title="Doublons exacts" groups={audit.exact} kind="exact" onDelete={deleteHandler ? handleDelete : null} />
+          <DuplicateGroup title="Doublons probables" groups={audit.probable} kind="probable" onDelete={deleteHandler ? handleDelete : null} />
         </>
       )}
     </section>
