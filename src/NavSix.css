@@ -1,0 +1,21 @@
+.bottom-nav {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 430px) {
+  .bottom-nav {
+    gap: 2px;
+    padding-inline: 5px;
+  }
+
+  .nav-item {
+    min-width: 0;
+    padding-inline: 2px;
+    font-size: 0.57rem;
+  }
+
+  .nav-item svg {
+    width: 20px;
+    height: 20px;
+  }
+}
