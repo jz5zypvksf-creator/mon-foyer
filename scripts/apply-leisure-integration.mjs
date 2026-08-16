@@ -91,38 +91,8 @@ function leisureVacationsIntegration() {
         || !patched.includes('label="Loisirs"')
         || !patched.includes('mode="history"')
         || !patched.includes('mode="recurring"')
-        || !patched.includes("operation.type !== 'income' && operation.date > today")
-        || !patched.includes('Total : {formatCurrency(scheduledExpenseTotal)}')) {
-        throw new Error('Intégration Loisirs/Vacances + audit + total programmé incomplète');
-      }
-      return { code: patched, map: null };
-    },
-  };
-}
-
-function quickTotalsIntegration() {
-  return {
-    name: 'mon-foyer-quick-totals',
-    enforce: 'post',
-    transform(code, id) {
-      if (!id.endsWith('/src/App.jsx') && !id.endsWith('\\src\\App.jsx')) return null;
-      let patched = code;
-
-      const careSummaryLine = 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);';
-      if (patched.includes(careSummaryLine) && !patched.includes('const careTotalToRecover =')) {
-        patched = patched.replace(
-          careSummaryLine,
-          `${careSummaryLine}\n  const careTotalToRecover = careSummary.reduce((sum, item) => sum + Math.max(Number(item.balance || 0), 0), 0);`,
-        );
-      }
-
-      patched = patched.replace(
-        '<div className="section-title"><h2>Dépenses à récupérer</h2><span>Papa & Nonna</span></div>',
-        '<div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatCurrency(careTotalToRecover)}</strong></div><p className="scheduled-caption">Papa & Nonna</p>',
-      );
-
-      if (!patched.includes('const careTotalToRecover =') || !patched.includes('Total : {formatCurrency(careTotalToRecover)}')) {
-        throw new Error('Total global des dépenses à récupérer non intégré');
+        || !patched.includes("operation.type !== 'income' && operation.date > today")) {
+        throw new Error('Intégration Loisirs/Vacances + audit + échéances incomplète');
       }
       return { code: patched, map: null };
     },
@@ -133,38 +103,24 @@ const exportMarker = '\nexport default defineConfig(';
 const exportIndex = source.indexOf(exportMarker);
 if (exportIndex < 0) throw new Error('vite.config.js: export marker introuvable');
 
-const replaceFunction = (name, fn) => {
-  const start = source.lastIndexOf(`function ${name}()`, exportIndex);
-  if (start < 0) {
-    source = source.slice(0, exportIndex) + '\n' + fn.toString() + '\n' + source.slice(exportIndex);
-    return;
-  }
-  const nextFunction = source.indexOf('\nfunction ', start + 1);
-  const end = nextFunction >= 0 && nextFunction < exportIndex ? nextFunction : exportIndex;
-  source = source.slice(0, start) + fn.toString() + '\n' + source.slice(end);
-};
+const existingStart = source.lastIndexOf('function leisureVacationsIntegration()', exportIndex);
+if (existingStart >= 0) source = source.slice(0, existingStart) + leisureVacationsIntegration.toString() + '\n' + source.slice(exportIndex);
+else source = source.slice(0, exportIndex) + '\n' + leisureVacationsIntegration.toString() + '\n' + source.slice(exportIndex);
 
-replaceFunction('leisureVacationsIntegration', leisureVacationsIntegration);
-replaceFunction('quickTotalsIntegration', quickTotalsIntegration);
+const careOld = `patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);');`;
+const careNew = `patched = patched.replace('const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);', 'const careSummary = useMemo(() => careBalances(data.operations, selectedMonth), [data.operations, selectedMonth]);\\n  const careTotalToRecover = careSummary.reduce((sum, item) => sum + Math.max(Number(item.balance || 0), 0), 0);');`;
+if (source.includes(careOld)) source = source.replace(careOld, careNew);
+
+const careTitlePatch = `        patched = patched.replace('<div className="section-title"><h2>Dépenses à récupérer</h2><span>Papa & Nonna</span></div>', '<div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatCurrency(careTotalToRecover)}</strong></div><p className="scheduled-caption">Papa & Nonna</p>');`;
+if (!source.includes('Total : {formatCurrency(careTotalToRecover)}')) {
+  source = source.replace(careNew, `${careNew}\n${careTitlePatch}`);
+}
 
 source = source.replace(
-  /plugins:\s*\[([^\]]*)\]/,
-  (match, inner) => {
-    const names = inner.split(',').map((item) => item.trim()).filter(Boolean);
-    const without = names.filter((item) => item !== 'leisureVacationsIntegration()' && item !== 'quickTotalsIntegration()');
-    const careIndex = without.indexOf('careUxFinalIntegration()');
-    if (careIndex >= 0) {
-      without.splice(careIndex, 0, 'leisureVacationsIntegration()');
-      without.splice(careIndex + 2, 0, 'quickTotalsIntegration()');
-    } else {
-      without.push('leisureVacationsIntegration()', 'quickTotalsIntegration()');
-    }
-    return `plugins: [${without.join(', ')}]`;
-  },
+  'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), careUxFinalIntegration(), react()]',
+  'plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), leisureVacationsIntegration(), careUxFinalIntegration(), react()]',
 );
 
-if (!source.includes('leisureVacationsIntegration()') || !source.includes('quickTotalsIntegration()')) {
-  throw new Error('Plugins Preview non branchés');
-}
+if (!source.includes('leisureVacationsIntegration()')) throw new Error('Plugin Loisirs/Vacances non branché');
 fs.writeFileSync(path, source);
 console.log('Interface Loisirs/Vacances + totaux globaux intégrés.');
