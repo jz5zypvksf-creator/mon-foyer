@@ -34,12 +34,23 @@
   color:#fff;
   background:#b86b00;
 }
-.connection-status.is-restored{
+.connection-status.is-restored,
+.connection-status.is-ready{
   color:#176044;
   border-color:#a8d7bd;
   background:#eef9f2;
 }
-.connection-status.is-restored span{
+.connection-status.is-restored span,
+.connection-status.is-ready span{
   color:#fff;
   background:#26825f;
+}
+.connection-status.is-error{
+  color:#8c2f2a;
+  border-color:#e3aaa5;
+  background:#fff0ef;
+}
+.connection-status.is-error span{
+  color:#fff;
+  background:#b94a43;
 }
