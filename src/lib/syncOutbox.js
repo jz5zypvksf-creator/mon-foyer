@@ -31,7 +31,9 @@ export function enqueueOperationMutation(mutation, storage = globalThis.localSto
 
 export function isRetryableSyncError(error) {
   const message = String(error?.message || '').toLowerCase();
-  return !globalThis.navigator?.onLine
+  const isOffline = typeof globalThis.navigator !== 'undefined'
+    && globalThis.navigator.onLine === false;
+  return isOffline
     || message.includes('failed to fetch')
     || message.includes('network')
     || message.includes('timeout');
