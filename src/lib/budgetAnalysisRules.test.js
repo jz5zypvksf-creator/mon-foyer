@@ -21,6 +21,24 @@ test('août incomplet ne produit aucune tendance inventée', () => {
   assert.equal(analysis.emergency.key, 'insufficient-history');
 });
 
+test('août reçoit les salaires de fin juillet sans compter les dépenses futures deux fois', () => {
+  const analysis = analyzeBudget({
+    operations: [
+      { date: '2026-07-30', type: 'income', amount: 2328.05, label: 'Salaire Esther' },
+      { date: '2026-07-31', type: 'income', amount: 1892.68, label: 'Salaire Alain' },
+      { date: '2026-08-04', type: 'income', amount: 895.47, label: 'Autres revenus' },
+      { date: '2026-08-12', type: 'fixed', amount: 3761.74, label: 'Frais fixes' },
+      { date: '2026-08-17', type: 'variable', amount: 1199.53, label: 'Variables' },
+      { date: '2026-08-29', type: 'fixed', amount: 148.29, label: 'À venir' },
+    ],
+    selectedMonth: '2026-08', currentDate: '2026-08-17',
+    scheduledExpenseTotal: 148.29, remainingFoodBudget: 30.24, emergencyFundSaved: 0,
+  });
+  assert.ok(Math.abs(analysis.current.income - 5116.20) < 0.005);
+  assert.ok(Math.abs(analysis.current.expenses - 4961.27) < 0.005);
+  assert.ok(Math.abs(analysis.forecastBalance - 6.64) < 0.005);
+});
+
 test('la suggestion du fonds d’urgence utilise trois mois terminés', () => {
   const analysis = analyzeBudget({
     operations: [

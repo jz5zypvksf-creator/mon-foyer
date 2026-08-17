@@ -10,19 +10,34 @@ function isExcludedFromBudget(operation) {
     || label.startsWith('transfert depuis epargne');
 }
 
-function summarizeMonth(operations, month) {
-  return operations.reduce((summary, operation) => {
-    if (!String(operation?.date || '').startsWith(month) || isExcludedFromBudget(operation)) return summary;
-    const value = amount(operation.amount);
-    if (operation.type === 'income') summary.income += value;
-    if (operation.type === 'fixed' || operation.type === 'variable') summary.expenses += value;
-    return summary;
-  }, { month, income: 0, expenses: 0, surplus: 0 });
-}
-
 function previousMonth(month) {
   const [year, number] = month.split('-').map(Number);
   return new Date(Date.UTC(year, number - 2, 1)).toISOString().slice(0, 7);
+}
+
+function isSalary(operation) {
+  return String(operation?.label || '').toLowerCase().includes('salaire');
+}
+
+function summarizeBudgetMonth(operations, month, throughDate = '') {
+  const salaryMonth = previousMonth(month);
+  return operations.reduce((summary, operation) => {
+    if (isExcludedFromBudget(operation)) return summary;
+    const date = String(operation?.date || '');
+    const value = amount(operation.amount);
+    const isWithinCutoff = !throughDate || date <= throughDate;
+
+    // Les salaires reçus en fin de mois financent le mois suivant. Ils sont donc
+    // exclus de leur mois bancaire et rattachés une seule fois au mois budgétaire suivant.
+    if (operation.type === 'income') {
+      if (date.startsWith(salaryMonth) && isSalary(operation)) summary.income += value;
+      if (date.startsWith(month) && !isSalary(operation) && isWithinCutoff) summary.income += value;
+    }
+    if (date.startsWith(month) && isWithinCutoff) {
+      if (operation.type === 'fixed' || operation.type === 'variable') summary.expenses += value;
+    }
+    return summary;
+  }, { month, income: 0, expenses: 0, surplus: 0 });
 }
 
 function completedMonthsWithData(operations, selectedMonth, todayMonth) {
@@ -39,20 +54,23 @@ function roundDownFive(value) {
 }
 
 export function analyzeBudget({
-  operations = [], selectedMonth, currentDate, forecastBalance = 0,
+  operations = [], selectedMonth, currentDate,
   scheduledExpenseTotal = 0, remainingFoodBudget = 0, emergencyFundSaved = 0,
 } = {}) {
   const todayMonth = String(currentDate || '').slice(0, 7);
   const completedMonths = completedMonthsWithData(operations, selectedMonth, todayMonth);
   const history = completedMonths.map((month) => {
-    const summary = summarizeMonth(operations, month);
+    const summary = summarizeBudgetMonth(operations, month);
     return { ...summary, surplus: summary.income - summary.expenses };
   });
-  const current = summarizeMonth(operations, selectedMonth);
+  const currentCutoff = selectedMonth === todayMonth ? String(currentDate || '') : '';
+  const current = summarizeBudgetMonth(operations, selectedMonth, currentCutoff);
   current.surplus = current.income - current.expenses;
 
-  const forecastRatio = current.income > 0 ? forecastBalance / current.income : null;
-  const status = forecastBalance < 0
+  const calculatedForecastBalance = current.surplus - amount(scheduledExpenseTotal);
+
+  const forecastRatio = current.income > 0 ? calculatedForecastBalance / current.income : null;
+  const status = calculatedForecastBalance < 0
     ? { key: 'danger', label: 'Déficit prévisionnel' }
     : forecastRatio !== null && forecastRatio < 0.05
       ? { key: 'warning', label: 'Équilibre fragile' }
@@ -97,7 +115,7 @@ export function analyzeBudget({
 
   return {
     selectedMonth, isCurrentMonth: selectedMonth === todayMonth, status, current,
-    forecastBalance: amount(forecastBalance), scheduledExpenseTotal: amount(scheduledExpenseTotal),
+    forecastBalance: calculatedForecastBalance, scheduledExpenseTotal: amount(scheduledExpenseTotal),
     remainingFoodBudget: amount(remainingFoodBudget), history, trend, emergency,
   };
 }
