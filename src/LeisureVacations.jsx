@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, Hotel, MapPin, Pencil, Plane, ReceiptText, Save, Utensils, X } from 'lucide-react';
 import BeobankStatementImport from './BeobankStatementImport.jsx';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
+import { isRetryableSyncError } from './lib/syncOutbox.js';
+import {
+  enqueueLeisureMutation,
+  readLeisureOutbox,
+  writeLeisureOutbox,
+} from './lib/leisureOutbox.js';
 import './LeisureVacations.css';
 
 const STORAGE_KEY = 'mon-foyer-leisure-v1';
@@ -81,6 +87,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   const [editingId, setEditingId] = useState(null);
   const [manualBalance, setManualBalance] = useState(String(goal?.saved ?? 0));
   const [status, setStatus] = useState('');
+  const [pendingSyncCount, setPendingSyncCount] = useState(() => readLeisureOutbox().length);
   const [historyMode, setHistoryMode] = useState('month');
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [selectedYear, setSelectedYear] = useState(currentMonth().slice(0, 4));
@@ -126,6 +133,44 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     if (!USE_REMOTE_LEISURE) return undefined;
     let cancelled = false;
 
+    const flushPendingEntries = async () => {
+      const queue = readLeisureOutbox();
+      setPendingSyncCount(queue.length);
+      if (!queue.length || !navigator.onLine) return;
+
+      const remaining = [];
+      for (const mutation of queue) {
+        let entryError = null;
+        if (mutation.action === 'upsert') {
+          ({ error: entryError } = await supabase
+            .from('leisure_expenses')
+            .upsert(mutation.payload, { onConflict: 'id' }));
+        } else if (mutation.action === 'delete') {
+          ({ error: entryError } = await supabase
+            .from('leisure_expenses')
+            .delete()
+            .eq('household_id', householdId)
+            .eq('id', mutation.expenseId));
+        }
+
+        let balanceError = null;
+        if (!entryError && mutation.goalId && Number.isFinite(Number(mutation.balance))) {
+          ({ error: balanceError } = await supabase
+            .from('savings_goals')
+            .update({ saved: Number(mutation.balance) })
+            .eq('household_id', householdId)
+            .eq('id', mutation.goalId));
+        }
+        if (entryError || balanceError) remaining.push(mutation);
+      }
+
+      writeLeisureOutbox(remaining);
+      setPendingSyncCount(remaining.length);
+      setStatus(remaining.length
+        ? remaining.length + ' modification(s) Loisirs toujours en attente.'
+        : 'Dépenses Loisirs et solde Beobank synchronisés.');
+    };
+
     const loadSharedEntries = async () => {
       const localEntries = loadEntries();
       const migrationRequired = localStorage.getItem(MIGRATION_KEY) !== 'done';
@@ -160,7 +205,13 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       }
     };
 
-    loadSharedEntries();
+    const synchronizeAndLoad = async () => {
+      await flushPendingEntries();
+      await loadSharedEntries();
+    };
+    synchronizeAndLoad();
+    window.addEventListener('online', synchronizeAndLoad);
+    window.addEventListener('focus', synchronizeAndLoad);
 
     const channel = supabase
       .channel('leisure-expenses-' + householdId)
@@ -169,6 +220,8 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
 
     return () => {
       cancelled = true;
+      window.removeEventListener('online', synchronizeAndLoad);
+      window.removeEventListener('focus', synchronizeAndLoad);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -178,26 +231,61 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   };
 
-  const saveSharedEntry = async (row) => {
+  const saveSharedEntry = async (row, nextBalance) => {
     if (!USE_REMOTE_LEISURE) return true;
+    const mutation = {
+      recordId: row.id,
+      expenseId: row.id,
+      action: 'upsert',
+      payload: remoteEntryPayload(row),
+      goalId: goal?.id || null,
+      balance: Number(nextBalance),
+      queuedAt: new Date().toISOString(),
+    };
+    if (!navigator.onLine) {
+      const queue = enqueueLeisureMutation(mutation);
+      setPendingSyncCount(queue.length);
+      return false;
+    }
     const { error } = await supabase
       .from('leisure_expenses')
-      .upsert(remoteEntryPayload(row), { onConflict: 'id' });
+      .upsert(mutation.payload, { onConflict: 'id' });
     if (error) {
+      if (isRetryableSyncError(error)) {
+        const queue = enqueueLeisureMutation(mutation);
+        setPendingSyncCount(queue.length);
+      }
       setStatus('Dépense conservée sur cet appareil, mais synchronisation impossible : ' + error.message);
       return false;
     }
     return true;
   };
 
-  const deleteSharedEntry = async (id) => {
+  const deleteSharedEntry = async (id, nextBalance) => {
     if (!USE_REMOTE_LEISURE) return true;
+    const mutation = {
+      recordId: id,
+      expenseId: id,
+      action: 'delete',
+      goalId: goal?.id || null,
+      balance: Number(nextBalance),
+      queuedAt: new Date().toISOString(),
+    };
+    if (!navigator.onLine) {
+      const queue = enqueueLeisureMutation(mutation);
+      setPendingSyncCount(queue.length);
+      return false;
+    }
     const { error } = await supabase
       .from('leisure_expenses')
       .delete()
       .eq('household_id', householdId)
       .eq('id', id);
     if (error) {
+      if (isRetryableSyncError(error)) {
+        const queue = enqueueLeisureMutation(mutation);
+        setPendingSyncCount(queue.length);
+      }
       setStatus('Suppression locale effectuée, mais synchronisation impossible : ' + error.message);
       return false;
     }
@@ -258,7 +346,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         balanceAfter: nextBalance,
       } : row);
       persistEntries(next);
-      await saveSharedEntry(next.find((row) => row.id === editingId));
+      await saveSharedEntry(next.find((row) => row.id === editingId), nextBalance);
       await updateBalance(nextBalance);
       setManualBalance(String(nextBalance.toFixed(2)).replace('.', ','));
       setEditingId(null);
@@ -283,7 +371,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       balanceAfter: balance - amount,
     };
     persistEntries([row, ...entries]);
-    await saveSharedEntry(row);
+    await saveSharedEntry(row, balance - amount);
     await updateBalance(balance - amount);
     setManualBalance(String((balance - amount).toFixed(2)).replace('.', ','));
     setDraft(makeDraft());
@@ -298,14 +386,26 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       setStatus('Indique un solde Beobank valide.');
       return;
     }
+    if (!navigator.onLine && goal?.id) {
+      const queue = enqueueLeisureMutation({
+        recordId: 'balance-' + goal.id,
+        action: 'balance',
+        goalId: goal.id,
+        balance: value,
+        queuedAt: new Date().toISOString(),
+      });
+      setPendingSyncCount(queue.length);
+    }
     await updateBalance(value);
-    setStatus('Solde Beobank mis à jour et synchronisé avec Épargne Vacances/Loisirs.');
+    setStatus(navigator.onLine
+      ? 'Solde Beobank mis à jour et synchronisé avec Épargne Vacances/Loisirs.'
+      : 'Solde Beobank conservé sur cet appareil · synchronisation en attente.');
   };
 
   const removeEntry = async (row) => {
     if (!window.confirm(`Supprimer la dépense « ${row.vendor} » ? Le montant sera recrédité.`)) return;
     persistEntries(entries.filter((item) => item.id !== row.id));
-    await deleteSharedEntry(row.id);
+    await deleteSharedEntry(row.id, balance + Number(row.amount || 0));
     await updateBalance(balance + Number(row.amount || 0));
     setManualBalance(String((balance + Number(row.amount || 0)).toFixed(2)).replace('.', ','));
     if (editingId === row.id) cancelEdit();
@@ -318,6 +418,12 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         <button type="button" className="leisure-back" onClick={onBack}><ArrowLeft size={18} /> Mon Foyer</button>
         <span>Loisirs / Vacances</span>
       </div>
+
+      {pendingSyncCount > 0 && (
+        <p className="leisure-sync-pending" role="status">
+          {pendingSyncCount} modification(s) Loisirs en attente · envoi automatique au retour d’Internet
+        </p>
+      )}
 
       <section className="leisure-hero">
         <div>
