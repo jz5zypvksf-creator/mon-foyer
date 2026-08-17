@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import AppWithReconciliation from './AppWithReconciliation.jsx';
 import './styles.css';
+import './CareCards.css';
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
