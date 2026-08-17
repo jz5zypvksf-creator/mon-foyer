@@ -3,6 +3,7 @@ import { ArrowLeft, CalendarDays, Hotel, MapPin, Pencil, Plane, ReceiptText, Sav
 import BeobankStatementImport from './BeobankStatementImport.jsx';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import { isRetryableSyncError } from './lib/syncOutbox.js';
+import { leisureSyncFailureMessage } from './lib/leisureSyncStatus.js';
 import {
   enqueueLeisureMutation,
   readLeisureOutbox,
@@ -179,7 +180,10 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
           .from('leisure_expenses')
           .upsert(localEntries.map(remoteEntryPayload), { onConflict: 'id' });
         if (migrationError) {
-          if (!cancelled) setStatus('Synchronisation Loisirs impossible : ' + migrationError.message);
+          if (!cancelled) setStatus(leisureSyncFailureMessage(
+            migrationError,
+            'Synchronisation Loisirs impossible',
+          ));
           return;
         }
       }
@@ -194,7 +198,10 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
 
       if (cancelled) return;
       if (error) {
-        setStatus('Chargement des dépenses Loisirs impossible : ' + error.message);
+        setStatus(leisureSyncFailureMessage(
+          error,
+          'Chargement des dépenses Loisirs impossible',
+        ));
         return;
       }
       const sharedEntries = (rows || []).map(normalizeRemoteEntry);
