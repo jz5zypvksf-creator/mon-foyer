@@ -5,6 +5,7 @@ import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import './LeisureVacations.css';
 
 const STORAGE_KEY = 'mon-foyer-leisure-v1';
+const MIGRATION_KEY = 'mon-foyer-leisure-supabase-migrated-v1';
 const USE_REMOTE_LEISURE = Boolean(isSupabaseConfigured && supabase && householdId);
 const CATEGORIES = [
   { value: 'restaurant', label: 'Restaurant', icon: Utensils },
@@ -127,7 +128,8 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
 
     const loadSharedEntries = async () => {
       const localEntries = loadEntries();
-      if (localEntries.length > 0) {
+      const migrationRequired = localStorage.getItem(MIGRATION_KEY) !== 'done';
+      if (migrationRequired && localEntries.length > 0) {
         const { error: migrationError } = await supabase
           .from('leisure_expenses')
           .upsert(localEntries.map(remoteEntryPayload), { onConflict: 'id' });
@@ -136,6 +138,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
           return;
         }
       }
+      if (migrationRequired) localStorage.setItem(MIGRATION_KEY, 'done');
 
       const { data: rows, error } = await supabase
         .from('leisure_expenses')
@@ -152,7 +155,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       const sharedEntries = (rows || []).map(normalizeRemoteEntry);
       setEntries(sharedEntries);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sharedEntries));
-      if (localEntries.length > 0 && sharedEntries.length > 0) {
+      if (migrationRequired && localEntries.length > 0 && sharedEntries.length > 0) {
         setStatus(localEntries.length + ' dépense(s) locale(s) synchronisée(s) avec les autres appareils.');
       }
     };
