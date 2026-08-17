@@ -20,7 +20,9 @@ test('une suppression hors connexion remplace l’envoi en attente', () => {
   assert.deepEqual(queue, [{ recordId: 'a', action: 'delete' }]);
 });
 
-test('les erreurs réseau sont réessayables', () => {
+test('les erreurs réseau ordinateur et téléphone sont réessayables', () => {
   assert.equal(isRetryableSyncError({ message: 'Failed to fetch' }), true);
+  assert.equal(isRetryableSyncError({ message: 'Load failed' }), true);
+  assert.equal(isRetryableSyncError({ message: 'Network request timed out' }), true);
   assert.equal(isRetryableSyncError({ message: 'duplicate key value' }), false);
 });
