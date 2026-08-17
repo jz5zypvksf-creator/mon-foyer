@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
+import DataBackupRecovery from './DataBackupRecovery.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
 import {
   enqueueOperationMutation,
@@ -2956,6 +2957,8 @@ export default function App() {
               </p>
               {migrationStatus && <p className="hint">{migrationStatus}</p>}
             </section>
+
+            <DataBackupRecovery />
 
             <section className="panel">
               <div className="section-title">
