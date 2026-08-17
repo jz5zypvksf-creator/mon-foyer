@@ -1923,7 +1923,39 @@ export default function App() {
       if (!recurringError) migratedRecurringExpenses += 1;
     }
 
-    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais et ${migratedRecurringExpenses} frais fixe(s) récurrent(s) envoyé(s) vers Supabase. Les éléments déjà présents ont été conservés sans doublon.`);
+    let migratedLeisureExpenses = 0;
+    try {
+      const localLeisureExpenses = JSON.parse(localStorage.getItem('mon-foyer-leisure-v1') || '[]');
+      if (Array.isArray(localLeisureExpenses) && localLeisureExpenses.length > 0) {
+        const leisurePayload = localLeisureExpenses.map((row) => ({
+          id: row.id,
+          household_id: householdId,
+          date: row.date,
+          amount: Number(row.amount || 0),
+          vendor: row.vendor || '',
+          place: row.place || '',
+          category: row.category || 'other',
+          note: row.note || '',
+          balance_after: row.balanceAfter == null ? null : Number(row.balanceAfter),
+          created_at: row.createdAt || new Date().toISOString(),
+          updated_at: row.updatedAt || row.createdAt || new Date().toISOString(),
+        }));
+        const { error: leisureError } = await supabase
+          .from('leisure_expenses')
+          .upsert(leisurePayload, { onConflict: 'id' });
+        if (leisureError) {
+          setMigrationStatus(`Migration dépenses Loisirs impossible: ${leisureError.message}`);
+          return;
+        }
+        migratedLeisureExpenses = localLeisureExpenses.length;
+        localStorage.setItem('mon-foyer-leisure-supabase-migrated-v1', 'done');
+      }
+    } catch {
+      setMigrationStatus('Migration dépenses Loisirs impossible: données locales illisibles.');
+      return;
+    }
+
+    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais, ${migratedRecurringExpenses} frais fixe(s) récurrent(s) et ${migratedLeisureExpenses} dépense(s) Loisirs envoyé(s) vers Supabase. Les éléments déjà présents ont été conservés sans doublon.`);
   };
 
   useEffect(() => {
