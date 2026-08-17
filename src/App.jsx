@@ -2827,8 +2827,12 @@ export default function App() {
                 Recharger depuis Supabase
               </button>
               <button className="secondary-button" type="button" onClick={migrateLocalData}>
-                Envoyer les données locales vers Supabase
+                Récupérer d’anciennes données locales
               </button>
+              <p className="hint">
+                À utiliser uniquement pour transférer d’anciennes données restées sur cet appareil.
+                Les nouvelles saisies sont enregistrées automatiquement dans Supabase.
+              </p>
               {migrationStatus && <p className="hint">{migrationStatus}</p>}
             </section>
 
