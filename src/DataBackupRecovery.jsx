@@ -1,9 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
-import { DatabaseBackup, Download, FileCheck2, RotateCcw, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, DatabaseBackup, Download, FileCheck2, RotateCcw, Upload } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import {
   BACKUP_TABLES,
+  LAST_BACKUP_STORAGE_KEY,
+  LAST_BELFIUS_AUDIT_STORAGE_KEY,
   backupCounts,
+  backupReminder,
   createBackupEnvelope,
   parseBackup,
   rowsForCurrentHousehold,
@@ -65,6 +68,11 @@ export default function DataBackupRecovery() {
   const [candidate, setCandidate] = useState(null);
   const [status, setStatus] = useState('');
   const [statusKind, setStatusKind] = useState('');
+  const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem(LAST_BACKUP_STORAGE_KEY) || '');
+  const reminder = backupReminder(
+    lastBackupAt,
+    localStorage.getItem(LAST_BELFIUS_AUDIT_STORAGE_KEY) || '',
+  );
 
   const candidateTotal = useMemo(() => (
     candidate
@@ -79,7 +87,8 @@ export default function DataBackupRecovery() {
     try {
       const envelope = await collectCurrentBackup();
       downloadEnvelope(envelope);
-      localStorage.setItem('mon-foyer-last-backup-at', envelope.payload.createdAt);
+      localStorage.setItem(LAST_BACKUP_STORAGE_KEY, envelope.payload.createdAt);
+      setLastBackupAt(envelope.payload.createdAt);
       const total = Object.values(backupCounts(envelope.payload.tables))
         .reduce((sum, count) => sum + count, 0);
       setStatus(total + ' élément(s) sauvegardé(s). Conservez le fichier dans un endroit sûr.');
@@ -141,6 +150,8 @@ export default function DataBackupRecovery() {
         // Le téléchargement reste la protection principale si le stockage local est plein.
       }
       downloadEnvelope(safetyBackup, 'mon-foyer-avant-restauration');
+      localStorage.setItem(LAST_BACKUP_STORAGE_KEY, safetyBackup.payload.createdAt);
+      setLastBackupAt(safetyBackup.payload.createdAt);
 
       let restored = 0;
       for (const table of BACKUP_TABLES) {
@@ -186,6 +197,20 @@ export default function DataBackupRecovery() {
         La sauvegarde contient les données financières, Loisirs, messages et dernier audit Belfius.
         Elle ne contient aucun mot de passe ni donnée de Chronologie biblique.
       </p>
+
+      <div className={'backup-reminder is-' + reminder.kind} role="status">
+        {reminder.kind === 'current' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+        <div>
+          <strong>
+            {reminder.kind === 'current' ? 'Sauvegarde à jour' : reminder.kind === 'due' ? 'Sauvegarde conseillée' : 'Sauvegarde à effectuer'}
+          </strong>
+          <span>
+            {lastBackupAt ? `Dernière sauvegarde : ${dateLabel(lastBackupAt)}. ` : ''}
+            {reminder.reason}
+          </span>
+          <small>Rythme conseillé : une fois par semaine et une archive à conserver chaque mois.</small>
+        </div>
+      </div>
 
       <div className="backup-actions">
         <button

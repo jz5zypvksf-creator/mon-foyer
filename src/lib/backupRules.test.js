@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BACKUP_TABLES,
+  backupReminder,
   createBackupEnvelope,
   parseBackup,
   rowsForCurrentHousehold,
@@ -22,6 +23,23 @@ test('une sauvegarde intacte est acceptée et comptée', async () => {
 
   assert.equal(parsed.counts.operations, 1);
   assert.equal(parsed.counts.leisure_expenses, 0);
+});
+
+test('le rappel de sauvegarde évolue après 7 et 30 jours', () => {
+  const now = new Date('2026-08-31T12:00:00.000Z');
+  assert.equal(backupReminder('2026-08-27T12:00:00.000Z', '', now).kind, 'current');
+  assert.equal(backupReminder('2026-08-20T12:00:00.000Z', '', now).kind, 'due');
+  assert.equal(backupReminder('2026-07-01T12:00:00.000Z', '', now).kind, 'overdue');
+});
+
+test('un audit Belfius postérieur recommande une nouvelle sauvegarde', () => {
+  const reminder = backupReminder(
+    '2026-08-17T08:00:00.000Z',
+    '2026-08-17T10:00:00.000Z',
+    new Date('2026-08-17T12:00:00.000Z'),
+  );
+  assert.equal(reminder.kind, 'due');
+  assert.match(reminder.reason, /audit Belfius/);
 });
 
 test('une sauvegarde altérée est refusée', async () => {
