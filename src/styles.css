@@ -1743,3 +1743,21 @@ input, select, textarea {
 .belfius-real-balance-details { display: grid; gap: 4px; padding: 0 11px 10px; font-size: .75rem; }
 .belfius-real-balance-details strong { margin-top: 3px; font-size: .78rem; }
 @media(max-width:600px){ .audit-review-choice{align-items:flex-start;flex-direction:column}.audit-none{justify-self:start} }
+
+
+/* V32 RC2.5 — navigation ordinateur sur une seule ligne */
+@media (min-width: 520px) {
+  .bottom-nav {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    padding-top: 6px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  .nav-item {
+    min-height: 52px;
+  }
+
+  .app-shell {
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+}
