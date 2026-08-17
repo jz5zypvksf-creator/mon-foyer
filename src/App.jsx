@@ -1787,7 +1787,7 @@ export default function App() {
         .eq('household_id', householdId),
       supabase
         .from('recurring_fixed_expenses')
-        .select('label, amount, day, person, category')
+        .select('label, amount, day, person, category, frequency, start_date')
         .eq('household_id', householdId),
     ]);
 
@@ -1913,15 +1913,17 @@ export default function App() {
       }
     }
 
-    if (missingRecurringExpenses.length > 0) {
-      const { error: recurringError } = await supabase.from('recurring_fixed_expenses').insert(missingRecurringExpenses);
-      if (recurringError) {
+    let migratedRecurringExpenses = 0;
+    for (const recurringExpense of missingRecurringExpenses) {
+      const { error: recurringError } = await supabase.from('recurring_fixed_expenses').insert(recurringExpense);
+      if (recurringError && recurringError.code !== '23505') {
         setMigrationStatus(`Migration frais fixes récurrents impossible: ${recurringError.message}`);
         return;
       }
+      if (!recurringError) migratedRecurringExpenses += 1;
     }
 
-    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais et ${missingRecurringExpenses.length} frais fixe(s) récurrent(s) envoyé(s) vers Supabase.`);
+    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais et ${migratedRecurringExpenses} frais fixe(s) récurrent(s) envoyé(s) vers Supabase. Les éléments déjà présents ont été conservés sans doublon.`);
   };
 
   useEffect(() => {
