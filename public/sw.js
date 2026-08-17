@@ -28,7 +28,8 @@ self.addEventListener('message', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => cache.keys())
       .then((requests) => {
-        event.source?.postMessage({
+        const reply = event.ports?.[0] || event.source;
+        reply?.postMessage({
           type: 'OFFLINE_READY',
           ready: PRECACHE_ASSETS.every((path) => requests.some((request) => {
             const url = new URL(request.url);
