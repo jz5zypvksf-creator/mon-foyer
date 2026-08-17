@@ -748,6 +748,11 @@ export default function BelfiusAudit({
     (sum, row) => sum + (row.type === 'income' ? Number(row.amount || 0) : -Number(row.amount || 0)),
     0,
   );
+  const expectedBankBalance = audit ? Number(audit.balance || 0) + pendingAmount : 0;
+  const unexplainedAmount = [
+    ...monthMissing,
+    ...(result?.review || []).map((item) => item.bank),
+  ].reduce((sum, row) => sum + Number(row?.amount || 0), 0);
 
   useEffect(() => {
     if (!audit || typeof onAuditSnapshot !== 'function') return;
@@ -810,9 +815,10 @@ export default function BelfiusAudit({
           </div>
 
           <div className="audit-summary-grid">
-            <div><span>Solde Belfius réel</span><strong>{money(audit.balance)}</strong></div>
-            <div><span>Solde Mon Foyer</span><strong>{money(appBelfiusBalance)}</strong></div>
-            <div><span>Écart</span><strong className={Math.abs(difference) < 0.01 ? 'positive' : 'negative'}>{money(difference)}</strong></div>
+            <div><span>Solde bancaire relevé</span><strong>{money(audit.balance)}</strong></div>
+            <div><span>Opérations enregistrées en attente</span><strong className={pendingAmount < 0 ? 'negative' : 'positive'}>{money(pendingAmount)}</strong></div>
+            <div><span>Solde bancaire attendu</span><strong>{money(expectedBankBalance)}</strong></div>
+            <div><span>Écart inexpliqué</span><strong className={Math.abs(unexplainedAmount) < 0.01 ? 'positive' : 'negative'}>{money(unexplainedAmount)}</strong></div>
             <div><span>Opérations du mois</span><strong>{result.bankRows.length}</strong></div>
             <div className="audit-kpi safe"><span><i className="audit-dot" />Correspondances sûres</span><strong>{result.matched.length}</strong></div>
             <div className="audit-kpi review"><span><i className="audit-dot" />À confirmer</span><strong>{result.review.length}</strong></div>
