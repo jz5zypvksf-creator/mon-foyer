@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';
+import { calculateBankAuditSummary } from './lib/budgetMetrics.js';
 
 const money = (value) => new Intl.NumberFormat('fr-BE', {
   style: 'currency', currency: 'EUR',
@@ -744,15 +745,16 @@ export default function BelfiusAudit({
   const canSynchronize = false; // RC2.4.6 : le CSV reste une référence de contrôle, jamais une écriture silencieuse.
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
   const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
-  const pendingAmount = actionableExtra.reduce(
-    (sum, row) => sum + (row.type === 'income' ? Number(row.amount || 0) : -Number(row.amount || 0)),
-    0,
-  );
-  const expectedBankBalance = audit ? Number(audit.balance || 0) + pendingAmount : 0;
-  const unexplainedAmount = [
-    ...monthMissing,
-    ...(result?.review || []).map((item) => item.bank),
-  ].reduce((sum, row) => sum + Number(row?.amount || 0), 0);
+  const {
+    pendingAmount,
+    expectedBankBalance,
+    unexplainedAmount,
+  } = calculateBankAuditSummary({
+    bankBalance: audit?.balance,
+    pendingRows: actionableExtra,
+    missingBankRows: monthMissing,
+    reviewRows: result?.review || [],
+  });
 
   useEffect(() => {
     if (!audit || typeof onAuditSnapshot !== 'function') return;
