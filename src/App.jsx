@@ -449,12 +449,27 @@ export default function App() {
   const [historyPaymentMethod, setHistoryPaymentMethod] = useState('all');
   const [showReviewOnly, setShowReviewOnly] = useState(false);
   const [syncStatus, setSyncStatus] = useState(USE_REMOTE_BUDGET ? 'Synchronisation...' : 'Mode local');
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [operationStatus, setOperationStatus] = useState('');
   const [migrationStatus, setMigrationStatus] = useState('');
   const [recurringStatus, setRecurringStatus] = useState('');
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const activeViewRef = useRef(activeView);
+
+  useEffect(() => {
+    const updateConnectionState = () => {
+      const online = navigator.onLine;
+      setIsOnline(online);
+      if (!online) setSyncStatus('Hors connexion');
+    };
+    window.addEventListener('online', updateConnectionState);
+    window.addEventListener('offline', updateConnectionState);
+    return () => {
+      window.removeEventListener('online', updateConnectionState);
+      window.removeEventListener('offline', updateConnectionState);
+    };
+  }, []);
 
   useEffect(() => {
     const removeObsoleteBelfiusShortcut = () => {
@@ -919,10 +934,27 @@ export default function App() {
           });
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setSyncStatus('Synchronisé avec Supabase');
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setSyncStatus('Synchronisation interrompue');
+        }
+      });
+
+    const refreshWhenActive = () => {
+      if (!navigator.onLine || document.visibilityState === 'hidden') return;
+      setSyncStatus('Synchronisation...');
+      loadBudget();
+    };
+    window.addEventListener('online', refreshWhenActive);
+    window.addEventListener('focus', refreshWhenActive);
+    document.addEventListener('visibilitychange', refreshWhenActive);
 
     return () => {
       ignore = true;
+      window.removeEventListener('online', refreshWhenActive);
+      window.removeEventListener('focus', refreshWhenActive);
+      document.removeEventListener('visibilitychange', refreshWhenActive);
       supabase.removeChannel(channel);
     };
   }, [session]);
@@ -2067,6 +2099,15 @@ export default function App() {
           <input type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
         </label>
       </header>
+
+      <div
+        className={`sync-indicator ${!isOnline ? 'offline' : /impossible|interrompue|refusée|erreur/i.test(syncStatus) ? 'error' : /\.\.\.|envoi|migration|rechargement/i.test(syncStatus) ? 'syncing' : 'synced'}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="sync-indicator-dot" aria-hidden="true" />
+        <span>{isOnline ? syncStatus : 'Hors connexion · synchronisation suspendue'}</span>
+      </div>
 
       {messageNotice && activeView !== 'messages' && (
         <button type="button" className="message-notice" onClick={() => setActiveView('messages')}>
