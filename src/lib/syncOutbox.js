@@ -35,6 +35,7 @@ export function isRetryableSyncError(error) {
     && globalThis.navigator.onLine === false;
   return isOffline
     || message.includes('failed to fetch')
+    || message.includes('load failed')
     || message.includes('network')
     || message.includes('timeout');
 }
