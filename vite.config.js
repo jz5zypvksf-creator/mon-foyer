@@ -189,8 +189,13 @@ function careHotfixIntegration() {
 
       if (isApp) {
         const reimbursementButton = '<button type="button" className="secondary-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>';
-        const detailButton = '<button type="button" className="secondary-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
-        if (!patched.includes('>Voir le détail</button>')) patched = patched.replaceAll(reimbursementButton, detailButton + reimbursementButton);
+        const compactReimbursementButton = '<button type="button" className="secondary-button care-recovery-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>';
+        const detailButton = '<button type="button" className="secondary-button care-recovery-button" onClick={() => { setHistoryPerson(item.person); setHistoryType(\'all\'); setHistoryCategory(\'all\'); setHistoryPaymentMethod(\'all\'); setHistorySearch(\'\'); setShowReviewOnly(false); setActiveView(\'history\'); }}>Voir le détail</button>';
+        if (!patched.includes('>Voir le détail</button>')) patched = patched.replaceAll(reimbursementButton, detailButton + compactReimbursementButton);
+        patched = patched.replaceAll(reimbursementButton, compactReimbursementButton);
+        patched = patched.replaceAll('className="secondary-button" onClick={() => viewCareHistory(item.person)}', 'className="secondary-button care-recovery-button" onClick={() => viewCareHistory(item.person)}');
+        patched = patched.replaceAll('<div key={item.person} className="forecast-card">', '<div key={item.person} className="forecast-card care-recovery-card">');
+        patched = patched.replaceAll('<div><strong className={item.balance > 0 ? \'expense\' : \'income\'}>{formatCurrency(item.balance)}</strong>', '<div className="care-recovery-actions"><strong className={item.balance > 0 ? \'expense\' : \'income\'}>{formatCurrency(item.balance)}</strong>');
 
         // Aujourd'hui = exécuté dans Mon Foyer. Les opérations programmées commencent demain.
         patched = patched.replace(
