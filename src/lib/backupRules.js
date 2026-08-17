@@ -1,5 +1,7 @@
 export const BACKUP_FORMAT = 'mon-foyer-backup';
 export const BACKUP_VERSION = 1;
+export const LAST_BACKUP_STORAGE_KEY = 'mon-foyer-last-backup-at';
+export const LAST_BELFIUS_AUDIT_STORAGE_KEY = 'mon-foyer-last-belfius-audit-at';
 
 export const BACKUP_TABLES = [
   { name: 'categories', label: 'Types de frais', onConflict: 'household_id,category_id' },
@@ -33,6 +35,28 @@ export function backupCounts(tables = {}) {
   return Object.fromEntries(
     BACKUP_TABLES.map(({ name }) => [name, Array.isArray(tables[name]) ? tables[name].length : 0]),
   );
+}
+
+export function backupReminder(lastBackupAt, lastAuditAt = '', now = new Date()) {
+  const lastBackup = Date.parse(lastBackupAt || '');
+  const lastAudit = Date.parse(lastAuditAt || '');
+  const current = now instanceof Date ? now.getTime() : Date.parse(now);
+
+  if (!Number.isFinite(lastBackup)) {
+    return { kind: 'overdue', days: null, reason: 'Aucune sauvegarde récente n’est enregistrée sur cet appareil.' };
+  }
+
+  const days = Math.max(0, Math.floor((current - lastBackup) / 86_400_000));
+  if (Number.isFinite(lastAudit) && lastAudit > lastBackup) {
+    return { kind: 'due', days, reason: 'Un nouvel audit Belfius a été réalisé depuis la dernière sauvegarde.' };
+  }
+  if (days >= 30) {
+    return { kind: 'overdue', days, reason: 'La dernière sauvegarde date de 30 jours ou plus.' };
+  }
+  if (days > 7) {
+    return { kind: 'due', days, reason: 'Une sauvegarde hebdomadaire est recommandée.' };
+  }
+  return { kind: 'current', days, reason: 'La sauvegarde est à jour.' };
 }
 
 export function rowsForCurrentHousehold(rows, currentHouseholdId) {
