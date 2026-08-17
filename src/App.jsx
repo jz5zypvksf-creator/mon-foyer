@@ -800,12 +800,13 @@ export default function App() {
     let ignore = false;
 
     async function loadBudget() {
-      const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
+      const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult, snapshotResult] = await Promise.all([
         selectOperations(),
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
         supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file').eq('household_id', householdId).maybeSingle(),
       ]);
 
       if (ignore) return;
@@ -841,6 +842,19 @@ export default function App() {
         categories: categoriesResult.error ? [] : categoriesResult.data || [],
         recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
       }));
+      if (!snapshotResult.error && snapshotResult.data) {
+        setBelfiusSnapshot({
+          balance: Number(snapshotResult.data.balance || 0),
+          balanceDate: snapshotResult.data.balance_date || '',
+          importedAt: snapshotResult.data.imported_at || '',
+          pendingAmount: Number(snapshotResult.data.pending_amount || 0),
+          remaining: Number(snapshotResult.data.remaining || 0),
+          confirmations: Number(snapshotResult.data.confirmations || 0),
+          anomalies: Number(snapshotResult.data.anomalies || 0),
+          clean: Boolean(snapshotResult.data.clean),
+          sourceFile: snapshotResult.data.source_file || '',
+        });
+      }
       setSyncStatus('Synchronise avec Supabase');
     }
 
@@ -1625,6 +1639,36 @@ export default function App() {
     localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
   };
 
+  const persistBelfiusSnapshot = async (snapshot) => {
+    const normalized = {
+      balance: Number(snapshot.balance || 0),
+      balanceDate: snapshot.balanceDate || '',
+      importedAt: snapshot.importedAt || new Date().toISOString(),
+      pendingAmount: Number(snapshot.pendingAmount || 0),
+      remaining: Number(snapshot.remaining || 0),
+      confirmations: Number(snapshot.confirmations || 0),
+      anomalies: Number(snapshot.anomalies || 0),
+      clean: Boolean(snapshot.clean),
+      sourceFile: snapshot.sourceFile || '',
+    };
+    setBelfiusSnapshot(normalized);
+    if (!USE_REMOTE_BUDGET) return;
+    const { error } = await supabase.from('bank_snapshots').upsert({
+      household_id: householdId,
+      balance: normalized.balance,
+      balance_date: normalized.balanceDate,
+      imported_at: normalized.importedAt,
+      pending_amount: normalized.pendingAmount,
+      remaining: normalized.remaining,
+      confirmations: normalized.confirmations,
+      anomalies: normalized.anomalies,
+      clean: normalized.clean,
+      source_file: normalized.sourceFile || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'household_id' });
+    if (error) setSyncStatus('Erreur de mémorisation du solde Belfius: ' + error.message);
+  };
+
   const synchronizeBelfiusBalance = async ({ balance, balanceDate, month }) => {
     const currentBalance = calculatePaymentBalances(data.operations)['Compte Belfius'] || 0;
     const delta = Number(balance) - Number(currentBalance);
@@ -1743,7 +1787,7 @@ export default function App() {
         .eq('household_id', householdId),
       supabase
         .from('recurring_fixed_expenses')
-        .select('label, amount, day, person, category')
+        .select('label, amount, day, person, category, frequency, start_date')
         .eq('household_id', householdId),
     ]);
 
@@ -1869,15 +1913,49 @@ export default function App() {
       }
     }
 
-    if (missingRecurringExpenses.length > 0) {
-      const { error: recurringError } = await supabase.from('recurring_fixed_expenses').insert(missingRecurringExpenses);
-      if (recurringError) {
+    let migratedRecurringExpenses = 0;
+    for (const recurringExpense of missingRecurringExpenses) {
+      const { error: recurringError } = await supabase.from('recurring_fixed_expenses').insert(recurringExpense);
+      if (recurringError && recurringError.code !== '23505') {
         setMigrationStatus(`Migration frais fixes récurrents impossible: ${recurringError.message}`);
         return;
       }
+      if (!recurringError) migratedRecurringExpenses += 1;
     }
 
-    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais et ${missingRecurringExpenses.length} frais fixe(s) récurrent(s) envoyé(s) vers Supabase.`);
+    let migratedLeisureExpenses = 0;
+    try {
+      const localLeisureExpenses = JSON.parse(localStorage.getItem('mon-foyer-leisure-v1') || '[]');
+      if (Array.isArray(localLeisureExpenses) && localLeisureExpenses.length > 0) {
+        const leisurePayload = localLeisureExpenses.map((row) => ({
+          id: row.id,
+          household_id: householdId,
+          date: row.date,
+          amount: Number(row.amount || 0),
+          vendor: row.vendor || '',
+          place: row.place || '',
+          category: row.category || 'other',
+          note: row.note || '',
+          balance_after: row.balanceAfter == null ? null : Number(row.balanceAfter),
+          created_at: row.createdAt || new Date().toISOString(),
+          updated_at: row.updatedAt || row.createdAt || new Date().toISOString(),
+        }));
+        const { error: leisureError } = await supabase
+          .from('leisure_expenses')
+          .upsert(leisurePayload, { onConflict: 'id' });
+        if (leisureError) {
+          setMigrationStatus(`Migration dépenses Loisirs impossible: ${leisureError.message}`);
+          return;
+        }
+        migratedLeisureExpenses = localLeisureExpenses.length;
+        localStorage.setItem('mon-foyer-leisure-supabase-migrated-v1', 'done');
+      }
+    } catch {
+      setMigrationStatus('Migration dépenses Loisirs impossible: données locales illisibles.');
+      return;
+    }
+
+    setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais, ${migratedRecurringExpenses} frais fixe(s) récurrent(s) et ${migratedLeisureExpenses} dépense(s) Loisirs envoyé(s) vers Supabase. Les éléments déjà présents ont été conservés sans doublon.`);
   };
 
   useEffect(() => {
@@ -2013,6 +2091,22 @@ export default function App() {
                       </em>
                     </div>
                   ))}
+                  {belfiusSnapshot && (
+                    <>
+                      <div>
+                        <span>En attente Belfius</span>
+                        <em className={Number(belfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatCurrency(Number(belfiusSnapshot.pendingAmount || 0))}
+                        </em>
+                      </div>
+                      <div>
+                        <span>Solde Belfius attendu</span>
+                        <em className={Number(belfiusSnapshot.balance || 0) + Number(belfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatCurrency(Number(belfiusSnapshot.balance || 0) + Number(belfiusSnapshot.pendingAmount || 0))}
+                        </em>
+                      </div>
+                    </>
+                  )}
                 </div>
                 {belfiusSnapshot && (
                   <details className={`belfius-real-balance ${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}`}>
@@ -2547,7 +2641,7 @@ export default function App() {
               recurringExpenses={data.recurringFixedExpenses || []}
               onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
               onSavingsDetected={handleBankSavingsDetected}
-              onAuditSnapshot={setBelfiusSnapshot}
+              onAuditSnapshot={persistBelfiusSnapshot}
               onEditAppOperation={editOperation}
               onAddBankOperation={addBankOperationFromAudit}
             />

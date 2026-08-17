@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, Hotel, MapPin, Pencil, Plane, ReceiptText, Save, Utensils, X } from 'lucide-react';
 import BeobankStatementImport from './BeobankStatementImport.jsx';
+import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import './LeisureVacations.css';
 
 const STORAGE_KEY = 'mon-foyer-leisure-v1';
+const MIGRATION_KEY = 'mon-foyer-leisure-supabase-migrated-v1';
+const USE_REMOTE_LEISURE = Boolean(isSupabaseConfigured && supabase && householdId);
 const CATEGORIES = [
   { value: 'restaurant', label: 'Restaurant', icon: Utensils },
   { value: 'hotel', label: 'Hôtel', icon: Hotel },
@@ -39,6 +42,37 @@ function loadEntries() {
 
 function makeDraft() {
   return { date: today(), amount: '', vendor: '', place: '', category: 'restaurant', note: '' };
+}
+
+function normalizeRemoteEntry(row) {
+  return {
+    id: row.id,
+    date: row.date,
+    amount: Number(row.amount || 0),
+    vendor: row.vendor || '',
+    place: row.place || '',
+    category: row.category || 'other',
+    note: row.note || '',
+    balanceAfter: row.balance_after == null ? null : Number(row.balance_after),
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+  };
+}
+
+function remoteEntryPayload(row) {
+  return {
+    id: row.id,
+    household_id: householdId,
+    date: row.date,
+    amount: Number(row.amount || 0),
+    vendor: row.vendor || '',
+    place: row.place || '',
+    category: row.category || 'other',
+    note: row.note || '',
+    balance_after: row.balanceAfter == null ? null : Number(row.balanceAfter),
+    created_at: row.createdAt || new Date().toISOString(),
+    updated_at: row.updatedAt || row.createdAt || new Date().toISOString(),
+  };
 }
 
 export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
@@ -88,9 +122,86 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     setManualBalance(String(Number(goal?.saved || 0).toFixed(2)).replace('.', ','));
   }, [goal?.id, goal?.saved]);
 
+  useEffect(() => {
+    if (!USE_REMOTE_LEISURE) return undefined;
+    let cancelled = false;
+
+    const loadSharedEntries = async () => {
+      const localEntries = loadEntries();
+      const migrationRequired = localStorage.getItem(MIGRATION_KEY) !== 'done';
+      if (migrationRequired && localEntries.length > 0) {
+        const { error: migrationError } = await supabase
+          .from('leisure_expenses')
+          .upsert(localEntries.map(remoteEntryPayload), { onConflict: 'id' });
+        if (migrationError) {
+          if (!cancelled) setStatus('Synchronisation Loisirs impossible : ' + migrationError.message);
+          return;
+        }
+      }
+      if (migrationRequired) localStorage.setItem(MIGRATION_KEY, 'done');
+
+      const { data: rows, error } = await supabase
+        .from('leisure_expenses')
+        .select('id, date, amount, vendor, place, category, note, balance_after, created_at, updated_at')
+        .eq('household_id', householdId)
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+      if (error) {
+        setStatus('Chargement des dépenses Loisirs impossible : ' + error.message);
+        return;
+      }
+      const sharedEntries = (rows || []).map(normalizeRemoteEntry);
+      setEntries(sharedEntries);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sharedEntries));
+      if (migrationRequired && localEntries.length > 0 && sharedEntries.length > 0) {
+        setStatus(localEntries.length + ' dépense(s) locale(s) synchronisée(s) avec les autres appareils.');
+      }
+    };
+
+    loadSharedEntries();
+
+    const channel = supabase
+      .channel('leisure-expenses-' + householdId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leisure_expenses', filter: 'household_id=eq.' + householdId }, loadSharedEntries)
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   const persistEntries = (next) => {
     setEntries(next);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const saveSharedEntry = async (row) => {
+    if (!USE_REMOTE_LEISURE) return true;
+    const { error } = await supabase
+      .from('leisure_expenses')
+      .upsert(remoteEntryPayload(row), { onConflict: 'id' });
+    if (error) {
+      setStatus('Dépense conservée sur cet appareil, mais synchronisation impossible : ' + error.message);
+      return false;
+    }
+    return true;
+  };
+
+  const deleteSharedEntry = async (id) => {
+    if (!USE_REMOTE_LEISURE) return true;
+    const { error } = await supabase
+      .from('leisure_expenses')
+      .delete()
+      .eq('household_id', householdId)
+      .eq('id', id);
+    if (error) {
+      setStatus('Suppression locale effectuée, mais synchronisation impossible : ' + error.message);
+      return false;
+    }
+    return true;
   };
 
   const updateBalance = async (nextBalance) => {
@@ -147,6 +258,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         balanceAfter: nextBalance,
       } : row);
       persistEntries(next);
+      await saveSharedEntry(next.find((row) => row.id === editingId));
       await updateBalance(nextBalance);
       setManualBalance(String(nextBalance.toFixed(2)).replace('.', ','));
       setEditingId(null);
@@ -171,6 +283,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       balanceAfter: balance - amount,
     };
     persistEntries([row, ...entries]);
+    await saveSharedEntry(row);
     await updateBalance(balance - amount);
     setManualBalance(String((balance - amount).toFixed(2)).replace('.', ','));
     setDraft(makeDraft());
@@ -192,6 +305,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   const removeEntry = async (row) => {
     if (!window.confirm(`Supprimer la dépense « ${row.vendor} » ? Le montant sera recrédité.`)) return;
     persistEntries(entries.filter((item) => item.id !== row.id));
+    await deleteSharedEntry(row.id);
     await updateBalance(balance + Number(row.amount || 0));
     setManualBalance(String((balance + Number(row.amount || 0)).toFixed(2)).replace('.', ','));
     if (editingId === row.id) cancelEdit();

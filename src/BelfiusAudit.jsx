@@ -744,6 +744,10 @@ export default function BelfiusAudit({
   const canSynchronize = false; // RC2.4.6 : le CSV reste une référence de contrôle, jamais une écriture silencieuse.
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
   const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
+  const pendingAmount = actionableExtra.reduce(
+    (sum, row) => sum + (row.type === 'income' ? Number(row.amount || 0) : -Number(row.amount || 0)),
+    0,
+  );
 
   useEffect(() => {
     if (!audit || typeof onAuditSnapshot !== 'function') return;
@@ -751,12 +755,14 @@ export default function BelfiusAudit({
       balance: Number(audit.balance || 0),
       balanceDate: audit.balanceDate || '',
       importedAt: audit.importedAt || '',
+      pendingAmount,
       remaining: remainingToTreat,
       confirmations: result?.review.length || 0,
       anomalies: monthMissing.length + actionableExtra.length,
       clean: auditIsClean && Math.abs(difference) < 0.01,
+      sourceFile: audit.fileName || 'CSV Belfius',
     });
-  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, difference, monthMissing.length, actionableExtra.length, remainingToTreat, result?.review.length]);
+  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, difference, monthMissing.length, actionableExtra.length, pendingAmount, remainingToTreat, result?.review.length]);
 
   useEffect(() => {
     if (!canSynchronize || !audit) return;

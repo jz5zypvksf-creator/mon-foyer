@@ -301,7 +301,7 @@ function leisureVacationsIntegration() {
       );
       patched = patched.replace(
         '<span>Disponible pour les paiements</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
-        '<span>Solde budgétaire du mois</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
+        '<span>Solde budgétaire actuel</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
       );
       patched = patched.replace(
         '<span>Disponible actuel : {formatCurrency(availableForPayments)}</span>',
