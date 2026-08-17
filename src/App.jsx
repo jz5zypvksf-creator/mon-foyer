@@ -2266,24 +2266,25 @@ export default function App() {
                 <div className="hero-balance-grid">
                   {PAYMENT_METHODS.map((method) => (
                     <div key={method}>
-                      <span>{method}</span>
-                      <em className={paymentBalances[method] >= 0 ? 'positive' : 'negative'}>
-                        {formatCurrency(paymentBalances[method])}
-                      </em>
+                      <span>{method === 'Compte Belfius' ? 'Solde Belfius actuel' : method}</span>
+                      {(() => {
+                        const displayedBalance = method === 'Compte Belfius' && liveBelfiusSnapshot
+                          ? Number(liveBelfiusSnapshot.expectedBalance || 0)
+                          : Number(paymentBalances[method] || 0);
+                        return (
+                          <em className={displayedBalance >= 0 ? 'positive' : 'negative'}>
+                            {formatCurrency(displayedBalance)}
+                          </em>
+                        );
+                      })()}
                     </div>
                   ))}
                   {liveBelfiusSnapshot && (
                     <>
                       <div>
-                        <span>En attente Belfius</span>
+                        <span>Mouvements depuis le relevé</span>
                         <em className={Number(liveBelfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
                           {formatCurrency(Number(liveBelfiusSnapshot.pendingAmount || 0))}
-                        </em>
-                      </div>
-                      <div>
-                        <span>Solde Belfius attendu</span>
-                        <em className={Number(liveBelfiusSnapshot.expectedBalance || 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatCurrency(Number(liveBelfiusSnapshot.expectedBalance || 0))}
                         </em>
                       </div>
                     </>
@@ -2292,11 +2293,11 @@ export default function App() {
                 {belfiusSnapshot && (
                   <details className={`belfius-real-balance ${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}`}>
                     <summary>
-                      <span>Solde Belfius réel</span>
+                      <span>Dernier solde du relevé CSV</span>
                       <strong>{formatCurrency(belfiusSnapshot.balance)}</strong>
                     </summary>
                     <div className="belfius-real-balance-details">
-                      <span>Relevé : {belfiusSnapshot.balanceDate || 'dernier CSV importé'}</span>
+                      <span>Date du relevé : {belfiusSnapshot.balanceDate || 'dernier CSV importé'}</span>
                       <span>Solde Mon Foyer : {formatCurrency(paymentBalances['Compte Belfius'] || 0)}</span>
                       <span>Écart : {formatCurrency((paymentBalances['Compte Belfius'] || 0) - Number(belfiusSnapshot.balance || 0))}</span>
                       <span>{belfiusSnapshot.remaining || 0} opération(s) à traiter</span>
