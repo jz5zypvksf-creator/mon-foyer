@@ -39,6 +39,12 @@ import {
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
+import {
+  enqueueOperationMutation,
+  isRetryableSyncError,
+  readOperationOutbox,
+  writeOperationOutbox,
+} from './lib/syncOutbox.js';
 
 const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -450,6 +456,7 @@ export default function App() {
   const [showReviewOnly, setShowReviewOnly] = useState(false);
   const [syncStatus, setSyncStatus] = useState(USE_REMOTE_BUDGET ? 'Synchronisation...' : 'Mode local');
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [pendingSyncCount, setPendingSyncCount] = useState(() => readOperationOutbox().length);
   const [operationStatus, setOperationStatus] = useState('');
   const [migrationStatus, setMigrationStatus] = useState('');
   const [recurringStatus, setRecurringStatus] = useState('');
@@ -873,7 +880,33 @@ export default function App() {
       setSyncStatus('Synchronise avec Supabase');
     }
 
-    loadBudget();
+    async function flushPendingOperations() {
+      const queue = readOperationOutbox();
+      setPendingSyncCount(queue.length);
+      if (!queue.length || !navigator.onLine) return queue.length === 0;
+
+      setSyncStatus(`Envoi de ${queue.length} modification(s)...`);
+      const remaining = [];
+      for (const mutation of queue) {
+        const { error } = mutation.action === 'delete'
+          ? await supabase.from('operations').delete().eq('id', mutation.recordId).eq('household_id', householdId)
+          : await supabase.from('operations').upsert(mutation.payload, { onConflict: 'id' });
+        if (error) remaining.push(mutation);
+      }
+
+      writeOperationOutbox(remaining);
+      setPendingSyncCount(remaining.length);
+      setSyncStatus(remaining.length
+        ? `${remaining.length} modification(s) toujours en attente`
+        : 'Synchronisé avec Supabase');
+      return remaining.length === 0;
+    }
+
+    async function initializeBudget() {
+      await flushPendingOperations();
+      await loadBudget();
+    }
+    initializeBudget();
 
     const channel = supabase
       .channel('budget-live')
@@ -941,10 +974,11 @@ export default function App() {
         }
       });
 
-    const refreshWhenActive = () => {
+    const refreshWhenActive = async () => {
       if (!navigator.onLine || document.visibilityState === 'hidden') return;
       setSyncStatus('Synchronisation...');
-      loadBudget();
+      await flushPendingOperations();
+      await loadBudget();
     };
     window.addEventListener('online', refreshWhenActive);
     window.addEventListener('focus', refreshWhenActive);
@@ -1087,6 +1121,7 @@ export default function App() {
 
     if (USE_REMOTE_BUDGET) {
       const payload = {
+        id: operation.id,
         household_id: householdId,
         date: operation.date,
         person: operation.person,
@@ -1097,26 +1132,49 @@ export default function App() {
         amount: operation.amount,
         payment_method: operation.paymentMethod,
       };
+      const mutation = {
+        recordId: operation.id,
+        action: 'upsert',
+        payload,
+        queuedAt: new Date().toISOString(),
+      };
+      const canQueueOperation = draft.recurrence === 'once' && !savingsSourceGoal;
 
-      const { data: savedOperation, error } = editingId
-        ? await supabase
-          .from('operations')
-          .update(payload)
-          .eq('id', editingId)
-          .select(OPERATION_COLUMNS)
-          .single()
-        : await supabase
-          .from('operations')
-          .insert(payload)
-          .select(OPERATION_COLUMNS)
-          .single();
+      if (!navigator.onLine) {
+        if (!canQueueOperation) {
+          setOperationStatus('Cette opération liée à une récurrence ou à l’épargne nécessite une connexion Internet.');
+          return;
+        }
+        const queue = enqueueOperationMutation(mutation);
+        setPendingSyncCount(queue.length);
+        setOperationStatus('Opération conservée sur cet appareil · envoi automatique dès le retour d’Internet.');
+      } else {
+        const { data: savedOperation, error } = editingId
+          ? await supabase
+            .from('operations')
+            .update(payload)
+            .eq('id', editingId)
+            .select(OPERATION_COLUMNS)
+            .single()
+          : await supabase
+            .from('operations')
+            .insert(payload)
+            .select(OPERATION_COLUMNS)
+            .single();
 
-      if (error) {
-        setOperationStatus(formatSupabaseOperationError(error));
-        return;
+        if (error) {
+          if (!canQueueOperation || !isRetryableSyncError(error)) {
+            setOperationStatus(formatSupabaseOperationError(error));
+            return;
+          }
+          const queue = enqueueOperationMutation(mutation);
+          setPendingSyncCount(queue.length);
+          setOperationStatus('Connexion interrompue · opération conservée pour un nouvel envoi automatique.');
+        } else {
+          operation.id = savedOperation.id;
+          setOperationStatus('Opération envoyée vers Supabase.');
+        }
       }
-      operation.id = savedOperation.id;
-      setOperationStatus('Opération envoyée vers Supabase.');
     } else if (isSupabaseConfigured) {
       setOperationStatus('Mode local: redémarre Vite pour relire le fichier .env.');
       return;
@@ -1243,10 +1301,28 @@ export default function App() {
     if (!window.confirm('Supprimer cette opération ?')) return;
 
     if (USE_REMOTE_BUDGET) {
-      const { error } = await supabase.from('operations').delete().eq('id', id).eq('household_id', householdId);
-      if (error) {
-        setSyncStatus(`Suppression impossible: ${error.message}`);
-        return;
+      if (!navigator.onLine) {
+        const queue = enqueueOperationMutation({
+          recordId: id,
+          action: 'delete',
+          queuedAt: new Date().toISOString(),
+        });
+        setPendingSyncCount(queue.length);
+        setSyncStatus('Suppression conservée · envoi automatique dès le retour d’Internet');
+      } else {
+        const { error } = await supabase.from('operations').delete().eq('id', id).eq('household_id', householdId);
+        if (error) {
+          if (!isRetryableSyncError(error)) {
+            setSyncStatus(`Suppression impossible: ${error.message}`);
+            return;
+          }
+          const queue = enqueueOperationMutation({
+            recordId: id,
+            action: 'delete',
+            queuedAt: new Date().toISOString(),
+          });
+          setPendingSyncCount(queue.length);
+        }
       }
     }
     saveData({ ...data, operations: data.operations.filter((operation) => operation.id !== id) });
@@ -2106,7 +2182,11 @@ export default function App() {
         aria-live="polite"
       >
         <span className="sync-indicator-dot" aria-hidden="true" />
-        <span>{isOnline ? syncStatus : 'Hors connexion · synchronisation suspendue'}</span>
+        <span>
+          {pendingSyncCount > 0
+            ? `${pendingSyncCount} modification(s) en attente · ${isOnline ? syncStatus : 'hors connexion'}`
+            : isOnline ? syncStatus : 'Hors connexion · synchronisation suspendue'}
+        </span>
       </div>
 
       {messageNotice && activeView !== 'messages' && (
