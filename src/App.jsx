@@ -463,6 +463,7 @@ export default function App() {
   const [recurringStatus, setRecurringStatus] = useState('');
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [remoteBudgetLoaded, setRemoteBudgetLoaded] = useState(!USE_REMOTE_BUDGET);
   const activeViewRef = useRef(activeView);
 
   useEffect(() => {
@@ -510,7 +511,7 @@ export default function App() {
   useEffect(() => {
     const existingBuckets = new Set((data.savingsGoals || []).map(savingsBucketForDisplay));
     const missing = REQUIRED_SAVINGS_GOALS.filter((goal) => !existingBuckets.has(goal.bucket));
-    if (!missing.length) return;
+    if (!missing.length || (USE_REMOTE_BUDGET && (!session || !remoteBudgetLoaded))) return;
     let cancelled = false;
     const ensure = async () => {
       if (USE_REMOTE_BUDGET) {
@@ -535,7 +536,7 @@ export default function App() {
     };
     ensure();
     return () => { cancelled = true; };
-  }, [data.savingsGoals.length, session]);
+  }, [data.savingsGoals.length, remoteBudgetLoaded, session]);
 
   const monthOperations = useMemo(
     () => data.operations.filter((operation) => operation.date.startsWith(selectedMonth)),
@@ -865,7 +866,11 @@ export default function App() {
         categories: categoriesResult.error ? [] : categoriesResult.data || [],
         recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
       }));
+      setRemoteBudgetLoaded(true);
       if (!snapshotResult.error && snapshotResult.data) {
+        if (snapshotResult.data.imported_at) {
+          localStorage.setItem('mon-foyer-last-belfius-audit-at', snapshotResult.data.imported_at);
+        }
         setBelfiusSnapshot({
           balance: Number(snapshotResult.data.balance || 0),
           balanceDate: snapshotResult.data.balance_date || '',
@@ -1761,6 +1766,7 @@ export default function App() {
       sourceFile: snapshot.sourceFile || '',
     };
     setBelfiusSnapshot(normalized);
+    localStorage.setItem('mon-foyer-last-belfius-audit-at', normalized.importedAt);
     if (!USE_REMOTE_BUDGET) return;
     const { error } = await supabase.from('bank_snapshots').upsert({
       household_id: householdId,
