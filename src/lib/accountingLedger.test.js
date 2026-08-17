@@ -5,6 +5,7 @@ import {
   calculateLiveBankSnapshot,
   calculatePaymentMethodBalances,
   capturePaymentOperationState,
+  matchesRecordedSavingsDeposit,
 } from './accountingLedger.js';
 
 const closeTo = (actual, expected) => {
@@ -72,4 +73,17 @@ test('un transfert modifié puis supprimé ajuste exactement l’épargne', () =
   closeTo(afterCreate[0].saved, 400);
   closeTo(afterEdit[0].saved, 420);
   closeTo(afterDelete[0].saved, 500);
+});
+
+test('un versement Belfius crédite l’épargne et débite Belfius une seule fois', () => {
+  const goals = [{ id: 'urgence', saved: 0 }];
+  const transfer = {
+    id: 'deposit', date: '2026-08-17', type: 'savings_transfer', amount: 50,
+    paymentMethod: 'Compte Belfius', savingsGoalId: 'urgence', savingsDirection: 'in',
+  };
+  closeTo(applySavingsOperationChange(goals, null, transfer)[0].saved, 50);
+  closeTo(calculatePaymentMethodBalances([transfer], ['Compte Belfius'])['Compte Belfius'], -50);
+  assert.equal(matchesRecordedSavingsDeposit(transfer, {
+    date: '2026-08-17', amount: -50, bucket: 'urgence',
+  }, 'urgence'), true);
 });

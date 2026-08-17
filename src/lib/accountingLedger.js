@@ -87,3 +87,10 @@ export function applySavingsOperationChange(goals = [], previousOperation, nextO
     return delta ? { ...goal, saved: Number(goal.saved || 0) + delta } : goal;
   });
 }
+
+export function matchesRecordedSavingsDeposit(operation, transfer, goalBucket = '') {
+  const direction = operation?.savingsDirection || operation?.savings_direction || '';
+  if (direction !== 'in' || !goalBucket || goalBucket !== transfer?.bucket) return false;
+  if (String(operation?.date || '') !== String(transfer?.date || '')) return false;
+  return Math.abs(amount(operation?.amount) - Math.abs(amount(transfer?.amount))) < 0.005;
+}

@@ -53,6 +53,7 @@ import {
   calculateLiveBankSnapshot,
   calculatePaymentMethodBalances,
   capturePaymentOperationState,
+  matchesRecordedSavingsDeposit,
 } from './lib/accountingLedger.js';
 
 const FOOD_BUDGET = 500;
@@ -1100,7 +1101,9 @@ export default function App() {
 
     setOperationStatus('');
     const savingsSourceGoal = draft.type === 'income' && draft.savingsSource ? data.savingsGoals.find((goal) => goal.id === draft.savingsSource) : null;
+    const savingsTargetGoal = draft.type === 'savings_transfer' && draft.savingsGoalId ? data.savingsGoals.find((goal) => goal.id === draft.savingsGoalId) : null;
     if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatCurrency(savingsSourceGoal.saved) + '.'); return; }
+    if (draft.type === 'savings_transfer' && !savingsTargetGoal) { setOperationStatus('Choisis le poste d’épargne à créditer.'); return; }
 
     if (draft.recurrence !== 'once' && draft.type !== 'income' && !draft.recurringId) {
       const recurringCandidate = {
@@ -1132,13 +1135,17 @@ export default function App() {
     const operation = {
       ...draft,
       amount,
-      label: savingsSourceGoal ? `Transfert depuis épargne — ${savingsSourceGoal.label} · ${draft.label.trim()}` : draft.label.trim(),
+      label: savingsSourceGoal
+        ? `Transfert depuis épargne — ${savingsSourceGoal.label} · ${draft.label.trim()}`
+        : savingsTargetGoal
+          ? `Transfert vers épargne — ${savingsTargetGoal.label} · ${draft.label.trim()}`
+          : draft.label.trim(),
       // Le bénéficiaire / point de vente est utile pour tous les débits, y compris les frais fixes.
-      store: draft.type === 'income' ? '' : draft.store,
-      category: draft.type === 'income' ? 'revenus' : draft.category,
-      paymentMethod: draft.paymentMethod || 'Compte Belfius',
-      savingsGoalId: savingsSourceGoal?.id || '',
-      savingsDirection: savingsSourceGoal ? 'out' : '',
+      store: draft.type === 'income' || draft.type === 'savings_transfer' ? '' : draft.store,
+      category: draft.type === 'income' ? 'revenus' : draft.type === 'savings_transfer' ? 'divers' : draft.category,
+      paymentMethod: draft.type === 'savings_transfer' ? 'Compte Belfius' : draft.paymentMethod || 'Compte Belfius',
+      savingsGoalId: savingsSourceGoal?.id || savingsTargetGoal?.id || '',
+      savingsDirection: savingsSourceGoal ? 'out' : savingsTargetGoal ? 'in' : '',
       id: editingId || crypto.randomUUID(),
     };
     delete operation.recurrence;
@@ -1737,7 +1744,17 @@ export default function App() {
     const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
     if (!freshTransfers.length) return;
 
-    const increments = freshTransfers.reduce((map, transfer) => {
+    const confirmedManualTransfers = freshTransfers.filter((transfer) => data.operations.some((operation) => {
+      const goalId = operation.savingsGoalId || operation.savings_goal_id;
+      const goal = data.savingsGoals.find((candidate) => candidate.id === goalId);
+      return matchesRecordedSavingsDeposit(operation, transfer, savingsBucketForGoal(goal));
+    }));
+    const confirmedFingerprints = new Set(confirmedManualTransfers.map((transfer) => transfer.fingerprint));
+    const transfersToApply = freshTransfers.filter((transfer) => !confirmedFingerprints.has(transfer.fingerprint));
+
+    // Un versement saisi manuellement a déjà crédité l'épargne. Le CSV le confirme,
+    // mais ne doit jamais provoquer un second crédit du même montant.
+    const increments = transfersToApply.reduce((map, transfer) => {
       map[transfer.bucket] = (map[transfer.bucket] || 0) + Math.abs(Number(transfer.amount) || 0);
       return map;
     }, {});
@@ -2551,6 +2568,17 @@ export default function App() {
                     {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}
                   </select>
                   {draft.savingsSource && <span className="hint">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
+                </label>
+              )}
+
+              {draft.type === 'savings_transfer' && (
+                <label>
+                  Poste d’épargne à créditer
+                  <select value={draft.savingsGoalId || ''} onChange={(event) => setDraft({ ...draft, savingsGoalId: event.target.value })}>
+                    <option value="">Choisir un poste d’épargne</option>
+                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>{goal.label} · {formatCurrency(goal.saved || 0)}</option>))}
+                  </select>
+                  <span className="hint">Transfert interne : diminue Belfius et augmente ce poste d’épargne. Il n’est pas compté comme une dépense du foyer.</span>
                 </label>
               )}
 

@@ -84,12 +84,13 @@ function finalRc246Integration() {
         patched = patched.replace('<span>Revenus</span>\n                  <strong className="income">{formatCurrency(historyTotals.income)}</strong>', '<span>Revenus budgétaires</span>\n                  <strong className="income">{formatCurrency(historyTotals.income)}</strong>');
         patched = patched.replace("  const availableAfterPlannedExpenses = availableForPayments - totalRemainingToCover;", "  const availableAfterPlannedExpenses = availableForPayments - totalRemainingToCover;\n  const forecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: belfiusSnapshot?.balance ?? null, remainingToCover: totalRemainingToCover });\n  const careSummary = useMemo(() => careBalances(data.operations), [data.operations]);");
         patched = patched.replace("  const editingOperation = useMemo(() => {", "  const startCareReimbursement = (person) => { setDraft({ ...makeEmptyOperation(), type: 'reimbursement', category: 'divers', person, paymentMethod: 'Espèces', store: '', label: `Remboursement ${person}` }); setEditingId(null); setOperationStatus('Remboursement : choisis Compte Belfius s’il est bancaire ou Espèces s’il est remis en cash.'); setActiveView('add'); };\n\n  const editingOperation = useMemo(() => {");
-        patched = patched.replace("      store: draft.type === 'income' ? '' : draft.store,\n      category: draft.type === 'income' ? 'revenus' : draft.category,", "      store: (draft.type === 'income' || draft.type === 'reimbursement') ? '' : draft.store,\n      category: draft.type === 'income' ? 'revenus' : draft.type === 'reimbursement' ? 'divers' : draft.category,");
+        patched = patched.replace("      store: draft.type === 'income' || draft.type === 'savings_transfer' ? '' : draft.store,\n      category: draft.type === 'income' ? 'revenus' : draft.type === 'savings_transfer' ? 'divers' : draft.category,", "      store: (draft.type === 'income' || draft.type === 'reimbursement' || draft.type === 'savings_transfer') ? '' : draft.store,\n      category: draft.type === 'income' ? 'revenus' : (draft.type === 'reimbursement' || draft.type === 'savings_transfer') ? 'divers' : draft.category,");
         patched = patched.replace("    if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {", "    if (operation.type !== 'income' && operation.type !== 'reimbursement' && !canPaymentMethodGoNegative(operation.paymentMethod)) {");
         patched = patched.replace("                  <option value=\"income\">Revenus</option>", "                  <option value=\"income\">Revenus</option>\n                  <option value=\"reimbursement\">Remboursement</option>");
         patched = patched.replace("                <select value={draft.paymentMethod} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>\n                  {PAYMENT_METHODS.map((method) => {", "                <select value={draft.paymentMethod} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>\n                  {(draft.type === 'reimbursement' ? [...PAYMENT_METHODS, 'Espèces'] : PAYMENT_METHODS).map((method) => {");
         patched = patched.replace("                  Personne\n                  <select value={draft.person}", "                  {draft.type === 'reimbursement' ? 'Source / Personne' : 'Personne'}\n                  <select value={draft.person}");
         patched = patched.replaceAll("{draft.type !== 'income' && (", "{draft.type !== 'income' && draft.type !== 'reimbursement' && (");
+        patched = patched.replaceAll("{draft.type !== 'income' && draft.type !== 'reimbursement' && (", "{!['income', 'reimbursement', 'savings_transfer'].includes(draft.type) && (");
         patched = patched.replace("                    <option value=\"variable\">Dépenses variables</option>", "                    <option value=\"variable\">Dépenses variables</option>\n                    <option value=\"reimbursement\">Remboursements</option>");
         patched = patched.replace("  const sign = operation.type === 'income' ? '+' : '-';", "  const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';");
         patched = patched.replace("      <strong className={operation.type === 'income' ? 'amount income' : 'amount'}>", "      <strong className={(operation.type === 'income' || operation.type === 'reimbursement') ? 'amount income' : 'amount'}>");
@@ -442,16 +443,22 @@ const iconMap = {`,
       // techniquement enregistré comme un revenu interne afin de créditer le compte courant.
       patched = patched.replace(
         'value={draft.type}\n                  onChange={(event) => {\n                    const type = event.target.value;',
-        "value={draft.type === 'income' && draft.savingsSource ? 'transfer' : draft.type}\n                  onChange={(event) => {\n                    const selectedType = event.target.value;\n                    const type = selectedType === 'transfer' ? 'income' : selectedType;\n                    const savingsSource = selectedType === 'transfer'\n                      ? (draft.savingsSource || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'income' ? '' : draft.savingsSource;",
+        "value={draft.type === 'income' && draft.savingsSource ? 'transfer' : draft.type === 'savings_transfer' ? 'transfer_to' : draft.type}\n                  onChange={(event) => {\n                    const selectedType = event.target.value;\n                    const type = selectedType === 'transfer' ? 'income' : selectedType === 'transfer_to' ? 'savings_transfer' : selectedType;\n                    const savingsSource = selectedType === 'transfer'\n                      ? (draft.savingsSource || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'income' ? '' : draft.savingsSource;\n                    const savingsGoalId = selectedType === 'transfer_to'\n                      ? (draft.savingsGoalId || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'transfer' ? '' : draft.savingsGoalId;",
       );
       patched = patched.replace(
         '                      type,\n                      category: nextCategory,',
-        '                      type,\n                      category: nextCategory,\n                      savingsSource,',
+        '                      type,\n                      category: nextCategory,\n                      savingsSource,\n                      savingsGoalId,',
       );
       if (!patched.includes('<option value="transfer">Transfert depuis l’épargne</option>')) {
         patched = patched.replace(
           '<option value="income">Revenus</option>',
           '<option value="income">Revenus</option>\n                  <option value="transfer">Transfert depuis l’épargne</option>',
+        );
+      }
+      if (!patched.includes('<option value="transfer_to">Transfert vers l’épargne</option>')) {
+        patched = patched.replace(
+          '<option value="transfer">Transfert depuis l’épargne</option>',
+          '<option value="transfer">Transfert depuis l’épargne</option>\n                  <option value="transfer_to">Transfert vers l’épargne</option>',
         );
       }
 
@@ -474,19 +481,20 @@ const iconMap = {`,
       );
       patched = patched.replace(
         '<select value={draft.paymentMethod} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>',
-        "<select value={draft.paymentMethod} disabled={Boolean(draft.savingsSource)} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>",
+        "<select value={draft.paymentMethod} disabled={Boolean(draft.savingsSource) || draft.type === 'savings_transfer'} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>",
       );
       patched = patched.replace(
-        '                      savingsSource,\n                    });',
-        "                      savingsSource,\n                      paymentMethod: selectedType === 'transfer' ? 'Compte Belfius' : draft.paymentMethod,\n                    });",
+        '                      savingsSource,\n                      savingsGoalId,\n                    });',
+        "                      savingsSource,\n                      savingsGoalId,\n                      paymentMethod: selectedType === 'transfer' || selectedType === 'transfer_to' ? 'Compte Belfius' : draft.paymentMethod,\n                    });",
       );
 
       if (!patched.includes('function transferSavingsGoals(goals = [])')
         || !patched.includes('transferSavingsGoals(data.savingsGoals)')
         || !patched.includes("selectedType === 'transfer'")
         || !patched.includes('<option value="transfer">Transfert depuis l’épargne</option>')
+        || !patched.includes('<option value="transfer_to">Transfert vers l’épargne</option>')
         || !patched.includes("'Compte épargne source'")
-        || !patched.includes("disabled={Boolean(draft.savingsSource)}")) {
+        || !patched.includes("disabled={Boolean(draft.savingsSource) || draft.type === 'savings_transfer'}")) {
         throw new Error('Intégration Transfert depuis épargne incomplète');
       }
 
