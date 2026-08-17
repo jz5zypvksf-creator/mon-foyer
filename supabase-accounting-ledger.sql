@@ -35,10 +35,6 @@ create index if not exists operations_savings_goal_id_idx
 create unique index if not exists savings_goals_household_normalized_label_uidx
   on public.savings_goals (household_id, lower(trim(label)));
 
--- Verrou définitif contre les créations concurrentes d'un même objectif.
-create unique index if not exists savings_goals_household_normalized_label_uidx
-  on public.savings_goals (household_id, lower(trim(label)));
-
 create or replace function public.apply_operation_savings_effect()
 returns trigger
 language plpgsql
