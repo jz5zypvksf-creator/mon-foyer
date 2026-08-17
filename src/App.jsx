@@ -48,6 +48,12 @@ import {
   writeOperationOutbox,
 } from './lib/syncOutbox.js';
 import { analyzeBudget } from './lib/budgetAnalysisRules.js';
+import {
+  applySavingsOperationChange,
+  calculateLiveBankSnapshot,
+  calculatePaymentMethodBalances,
+  capturePaymentOperationState,
+} from './lib/accountingLedger.js';
 
 const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -63,7 +69,7 @@ const RECURRENCE_OPTIONS = [
   { value: 'annual', label: 'Annuelle', months: 12 },
 ];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
-const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method';
+const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, savings_goal_id, savings_direction, created_at';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
 
@@ -236,6 +242,9 @@ function normalizeOperation(operation) {
     amount: Number(operation.amount),
     store: operation.store || '',
     paymentMethod: operation.payment_method || operation.paymentMethod || 'Compte Belfius',
+    savingsGoalId: operation.savings_goal_id || operation.savingsGoalId || '',
+    savingsDirection: operation.savings_direction || operation.savingsDirection || '',
+    createdAt: operation.created_at || operation.createdAt || '',
   };
 }
 
@@ -244,17 +253,7 @@ function canPaymentMethodGoNegative(method) {
 }
 
 function calculatePaymentBalances(operations) {
-  const balances = Object.fromEntries(PAYMENT_METHODS.map((method) => [method, 0]));
-
-  operations.forEach((operation) => {
-    const method = operation.paymentMethod || 'Compte Belfius';
-    if (!PAYMENT_METHODS.includes(method)) return;
-
-    const amount = Number(operation.amount) || 0;
-    balances[method] += operation.type === 'income' ? amount : -amount;
-  });
-
-  return balances;
+  return calculatePaymentMethodBalances(operations, PAYMENT_METHODS);
 }
 
 function isMissingPaymentColumn(error) {
@@ -302,6 +301,8 @@ function makeEmptyOperation() {
     freeCommunication: '',
     freeCommunicationMode: 'contains',
     savingsSource: '',
+    savingsGoalId: '',
+    savingsDirection: '',
   };
 }
 
@@ -585,6 +586,11 @@ export default function App() {
     return calculatePaymentBalances(operationsUpToCutoff);
   }, [balanceCutoff, data.operations]);
 
+  const liveBelfiusSnapshot = useMemo(
+    () => calculateLiveBankSnapshot(belfiusSnapshot, data.operations, today),
+    [belfiusSnapshot, data.operations, today],
+  );
+
   const availableForPayments = useMemo(
     () => PAYMENT_METHODS.reduce((sum, method) => sum + (paymentBalances[method] || 0), 0),
     [paymentBalances],
@@ -855,7 +861,7 @@ export default function App() {
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
         supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
-        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file').eq('household_id', householdId).maybeSingle(),
+        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state').eq('household_id', householdId).maybeSingle(),
       ]);
 
       if (ignore) return;
@@ -906,6 +912,7 @@ export default function App() {
           anomalies: Number(snapshotResult.data.anomalies || 0),
           clean: Boolean(snapshotResult.data.clean),
           sourceFile: snapshotResult.data.source_file || '',
+          operationState: snapshotResult.data.operation_state || {},
         });
       }
       setSyncStatus('Synchronise avec Supabase');
@@ -1130,6 +1137,8 @@ export default function App() {
       store: draft.type === 'income' ? '' : draft.store,
       category: draft.type === 'income' ? 'revenus' : draft.category,
       paymentMethod: draft.paymentMethod || 'Compte Belfius',
+      savingsGoalId: savingsSourceGoal?.id || '',
+      savingsDirection: savingsSourceGoal ? 'out' : '',
       id: editingId || crypto.randomUUID(),
     };
     delete operation.recurrence;
@@ -1162,6 +1171,8 @@ export default function App() {
         label: operation.label,
         amount: operation.amount,
         payment_method: operation.paymentMethod,
+        savings_goal_id: operation.savingsGoalId || null,
+        savings_direction: operation.savingsDirection || null,
       };
       const mutation = {
         recordId: operation.id,
@@ -1202,7 +1213,7 @@ export default function App() {
           setPendingSyncCount(queue.length);
           setOperationStatus('Connexion interrompue · opération conservée pour un nouvel envoi automatique.');
         } else {
-          operation.id = savedOperation.id;
+          Object.assign(operation, normalizeOperation(savedOperation));
           setOperationStatus('Opération envoyée vers Supabase.');
         }
       }
@@ -1240,15 +1251,7 @@ export default function App() {
       }
     }
 
-    let savingsGoals = data.savingsGoals;
-    if (!editingId && savingsSourceGoal) {
-      const nextSaved = Number(savingsSourceGoal.saved || 0) - amount;
-      savingsGoals = data.savingsGoals.map((goal) => goal.id === savingsSourceGoal.id ? { ...goal, saved: nextSaved } : goal);
-      if (USE_REMOTE_BUDGET) {
-        const { error: savingsError } = await supabase.from('savings_goals').update({ saved: nextSaved }).eq('id', savingsSourceGoal.id).eq('household_id', householdId);
-        if (savingsError) { setOperationStatus('Transfert enregistré mais mise à jour de l’épargne impossible : ' + savingsError.message); return; }
-      }
-    }
+    const savingsGoals = applySavingsOperationChange(data.savingsGoals, editingOperation, operation);
     saveData({ ...data, operations, recurringFixedExpenses, savingsGoals });
     setDraft(makeEmptyOperation());
     setEditingId(null);
@@ -1266,6 +1269,7 @@ export default function App() {
       structuredCommunication: recurringExpense?.structuredCommunication || recurringExpense?.structured_communication || '',
       freeCommunication: recurringExpense?.freeCommunication || recurringExpense?.free_communication || '',
       freeCommunicationMode: recurringExpense?.freeCommunicationMode || recurringExpense?.free_communication_mode || 'contains',
+      savingsSource: operation.savingsDirection === 'out' ? operation.savingsGoalId : '',
     });
     setEditingId(operation.id);
     setActiveView('add');
@@ -1356,7 +1360,12 @@ export default function App() {
         }
       }
     }
-    saveData({ ...data, operations: data.operations.filter((operation) => operation.id !== id) });
+    const deletedOperation = data.operations.find((operation) => operation.id === id);
+    saveData({
+      ...data,
+      operations: data.operations.filter((operation) => operation.id !== id),
+      savingsGoals: applySavingsOperationChange(data.savingsGoals, deletedOperation, null),
+    });
   };
 
   const addStore = async () => {
@@ -1789,6 +1798,7 @@ export default function App() {
       anomalies: Number(snapshot.anomalies || 0),
       clean: Boolean(snapshot.clean),
       sourceFile: snapshot.sourceFile || '',
+      operationState: capturePaymentOperationState(data.operations, 'Compte Belfius', today),
     };
     setBelfiusSnapshot(normalized);
     localStorage.setItem('mon-foyer-last-belfius-audit-at', normalized.importedAt);
@@ -1804,6 +1814,7 @@ export default function App() {
       anomalies: normalized.anomalies,
       clean: normalized.clean,
       source_file: normalized.sourceFile || null,
+      operation_state: normalized.operationState,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'household_id' });
     if (error) setSyncStatus('Erreur de mémorisation du solde Belfius: ' + error.message);
@@ -2244,18 +2255,18 @@ export default function App() {
                       </em>
                     </div>
                   ))}
-                  {belfiusSnapshot && (
+                  {liveBelfiusSnapshot && (
                     <>
                       <div>
                         <span>En attente Belfius</span>
-                        <em className={Number(belfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatCurrency(Number(belfiusSnapshot.pendingAmount || 0))}
+                        <em className={Number(liveBelfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatCurrency(Number(liveBelfiusSnapshot.pendingAmount || 0))}
                         </em>
                       </div>
                       <div>
                         <span>Solde Belfius attendu</span>
-                        <em className={Number(belfiusSnapshot.balance || 0) + Number(belfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatCurrency(Number(belfiusSnapshot.balance || 0) + Number(belfiusSnapshot.pendingAmount || 0))}
+                        <em className={Number(liveBelfiusSnapshot.expectedBalance || 0) >= 0 ? 'positive' : 'negative'}>
+                          {formatCurrency(Number(liveBelfiusSnapshot.expectedBalance || 0))}
                         </em>
                       </div>
                     </>

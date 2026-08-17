@@ -211,12 +211,11 @@ function careHotfixIntegration() {
           "    balanceCutoff,\n    data.recurringFixedExpenses,\n    monthOperations,\n    selectedMonth,\n    today,\n  ]);",
         );
 
-        // Prévision Belfius : le relevé bancaire peut être plus ancien que l'historique Mon Foyer.
-        // On repart du solde réel du relevé, puis on rejoue les mouvements Belfius déjà exécutés
-        // entre la date du relevé et aujourd'hui (ex. PSA Finance), avant de retrancher le futur.
+        // Prévision Belfius : le registre vivant rejoue toute création, modification ou
+        // suppression intervenue depuis le dernier audit, y compris le même jour.
         patched = patched.replace(
           "  const forecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: belfiusSnapshot?.balance ?? null, remainingToCover: totalRemainingToCover });",
-          "  const snapshotDateMatch = String(belfiusSnapshot?.balanceDate || '').match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})/);\n  const snapshotDateIso = snapshotDateMatch ? `${snapshotDateMatch[3]}-${snapshotDateMatch[2]}-${snapshotDateMatch[1]}` : '';\n  const belfiusCatchUpNet = snapshotDateIso ? effectiveMonthOperations.filter((operation) => (operation.paymentMethod || 'Compte Belfius') === 'Compte Belfius' && operation.date > snapshotDateIso && operation.date <= today).reduce((sum, operation) => { const amount = Number(operation.amount || 0); return sum + ((operation.type === 'income' || operation.type === 'reimbursement') ? amount : -amount); }, 0) : 0;\n  const rawForecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: belfiusSnapshot?.balance ?? null, remainingToCover: totalRemainingToCover });\n  const forecastPair = { ...rawForecastPair, belfiusForecast: rawForecastPair.belfiusForecast == null ? null : rawForecastPair.belfiusForecast + belfiusCatchUpNet };",
+          "  const forecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: liveBelfiusSnapshot?.expectedBalance ?? null, remainingToCover: totalRemainingToCover });",
         );
 
         patched = patched.replace(
@@ -229,7 +228,7 @@ function careHotfixIntegration() {
         );
 
         if (!patched.includes('const scheduleCutoff = selectedMonth === today.slice(0, 7)')
-          || !patched.includes('const belfiusCatchUpNet = snapshotDateIso ? effectiveMonthOperations.filter')) {
+          || !patched.includes('realBelfiusBalance: liveBelfiusSnapshot?.expectedBalance ?? null')) {
           throw new Error('Correctif prévisionnel Belfius incomplet');
         }
       }
