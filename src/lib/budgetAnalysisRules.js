@@ -16,7 +16,13 @@ function previousMonth(month) {
 }
 
 function isSalary(operation) {
-  return String(operation?.label || '').toLowerCase().includes('salaire');
+  return operation?.incomeKind === 'salary'
+    || operation?.income_kind === 'salary'
+    || String(operation?.label || '').toLowerCase().includes('salaire');
+}
+
+function assignedBudgetMonth(operation) {
+  return operation?.budgetMonth || operation?.budget_month || '';
 }
 
 function summarizeBudgetMonth(operations, month, throughDate = '', useOpeningBalance = false) {
@@ -30,14 +36,19 @@ function summarizeBudgetMonth(operations, month, throughDate = '', useOpeningBal
     // Les salaires reçus en fin de mois financent le mois suivant. Ils sont donc
     // exclus de leur mois bancaire et rattachés une seule fois au mois budgétaire suivant.
     if (operation.type === 'income') {
-      if (!useOpeningBalance && date.startsWith(salaryMonth) && isSalary(operation)) summary.income += value;
-      if (date.startsWith(month) && !isSalary(operation) && isWithinCutoff) summary.income += value;
+      const assignedMonth = assignedBudgetMonth(operation);
+      if (!useOpeningBalance && assignedMonth === month) summary.income += value;
+      else if (!useOpeningBalance && !assignedMonth && date.startsWith(salaryMonth) && isSalary(operation)) summary.income += value;
+      else if (date.startsWith(month) && !isSalary(operation) && isWithinCutoff) summary.income += value;
+
+      if (assignedMonth === month) summary.assignedIncome += value;
+      else if (!assignedMonth && ((date.startsWith(salaryMonth) && isSalary(operation)) || (date.startsWith(month) && !isSalary(operation)))) summary.assignedIncome += value;
     }
     if (date.startsWith(month) && isWithinCutoff) {
       if (operation.type === 'fixed' || operation.type === 'variable') summary.expenses += value;
     }
     return summary;
-  }, { month, income: 0, expenses: 0, surplus: 0 });
+  }, { month, income: 0, assignedIncome: 0, expenses: 0, surplus: 0 });
 }
 
 function completedMonthsWithData(operations, selectedMonth, todayMonth) {

@@ -7,7 +7,18 @@ alter table public.bank_snapshots
 
 alter table public.operations
   add column if not exists savings_goal_id uuid references public.savings_goals(id) on delete restrict,
-  add column if not exists savings_direction text;
+  add column if not exists savings_direction text,
+  add column if not exists budget_month text,
+  add column if not exists income_kind text,
+  add column if not exists income_source text;
+
+alter table public.operations
+  drop constraint if exists operations_budget_month_format,
+  add constraint operations_budget_month_format
+    check (budget_month is null or budget_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+  drop constraint if exists operations_income_kind_values,
+  add constraint operations_income_kind_values
+    check (income_kind is null or income_kind in ('salary', 'complementary', 'other'));
 
 alter table public.operations
   drop constraint if exists operations_savings_direction_check;

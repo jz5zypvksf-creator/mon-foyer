@@ -70,7 +70,7 @@ const RECURRENCE_OPTIONS = [
   { value: 'annual', label: 'Annuelle', months: 12 },
 ];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
-const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, savings_goal_id, savings_direction, created_at';
+const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, savings_goal_id, savings_direction, budget_month, income_kind, income_source, created_at';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
 
@@ -245,6 +245,9 @@ function normalizeOperation(operation) {
     paymentMethod: operation.payment_method || operation.paymentMethod || 'Compte Belfius',
     savingsGoalId: operation.savings_goal_id || operation.savingsGoalId || '',
     savingsDirection: operation.savings_direction || operation.savingsDirection || '',
+    budgetMonth: operation.budget_month || operation.budgetMonth || inferredBudgetMonth(operation),
+    incomeKind: operation.income_kind || operation.incomeKind || (String(operation.label || '').toLowerCase().includes('salaire') ? 'salary' : 'other'),
+    incomeSource: operation.income_source || operation.incomeSource || '',
     createdAt: operation.created_at || operation.createdAt || '',
   };
 }
@@ -284,6 +287,19 @@ function currentDate() {
   return `${year}-${month}-${day}`;
 }
 
+function nextMonthKey(dateValue) {
+  const [year, month] = String(dateValue || '').slice(0, 7).split('-').map(Number);
+  if (!year || !month) return currentMonth();
+  return new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 7);
+}
+
+function inferredBudgetMonth(operation) {
+  const date = String(operation?.date || '');
+  const salary = operation?.income_kind === 'salary' || operation?.incomeKind === 'salary'
+    || String(operation?.label || '').toLowerCase().includes('salaire');
+  return salary && Number(date.slice(8, 10)) >= 24 ? nextMonthKey(date) : date.slice(0, 7);
+}
+
 function makeEmptyOperation() {
   return {
     id: '',
@@ -304,6 +320,9 @@ function makeEmptyOperation() {
     savingsSource: '',
     savingsGoalId: '',
     savingsDirection: '',
+    budgetMonth: currentMonth(),
+    incomeKind: 'other',
+    incomeSource: '',
   };
 }
 
@@ -1196,7 +1215,10 @@ export default function App() {
         amount: operation.amount,
         payment_method: operation.paymentMethod,
         savings_goal_id: operation.savingsGoalId || null,
-        savings_direction: operation.savingsDirection || null,
+      savings_direction: operation.savingsDirection || null,
+        budget_month: operation.type === 'income' ? (operation.budgetMonth || operation.date.slice(0, 7)) : null,
+        income_kind: operation.type === 'income' ? (operation.incomeKind || 'other') : null,
+        income_source: operation.type === 'income' ? (operation.incomeSource || null) : null,
       };
       const mutation = {
         recordId: operation.id,
@@ -2531,9 +2553,10 @@ export default function App() {
               <label>
                 Type
                 <select
-                  value={draft.type}
+                  value={draft.type === 'income' && draft.incomeKind === 'salary' ? 'salary' : draft.type}
                   onChange={(event) => {
-                    const type = event.target.value;
+                    const selectedType = event.target.value;
+                    const type = selectedType === 'salary' ? 'income' : selectedType;
                     const nextCategory = type === 'income'
                       ? 'revenus'
                       : draft.category === 'revenus'
@@ -2543,10 +2566,13 @@ export default function App() {
                       ...draft,
                       type,
                       category: nextCategory,
+                      incomeKind: selectedType === 'salary' ? 'salary' : selectedType === 'income' ? 'other' : draft.incomeKind,
+                      budgetMonth: selectedType === 'salary' ? nextMonthKey(draft.date) : draft.budgetMonth,
                     });
                   }}
                 >
-                  <option value="income">Revenus</option>
+                  <option value="salary">Salaire</option>
+                  <option value="income">Autre revenu</option>
                   <option value="fixed">Frais fixes</option>
                   <option value="variable">Dépenses variables</option>
                 </select>
@@ -2564,7 +2590,11 @@ export default function App() {
                 </label>
                 <label>
                   Date
-                  <input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} />
+                  <input type="date" value={draft.date} onChange={(event) => setDraft({
+                    ...draft,
+                    date: event.target.value,
+                    budgetMonth: draft.incomeKind === 'salary' ? nextMonthKey(event.target.value) : draft.budgetMonth,
+                  })} />
                 </label>
               </div>
 
@@ -2587,14 +2617,28 @@ export default function App() {
               </label>
 
               {draft.type === 'income' && (
-                <label>
-                  Source du revenu
-                  <select value={draft.savingsSource || ''} onChange={(event) => setDraft({ ...draft, savingsSource: event.target.value })}>
-                    <option value="">Revenu du foyer</option>
-                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}
-                  </select>
-                  {draft.savingsSource && <span className="hint">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
-                </label>
+                <>
+                  <label>
+                    Source du revenu
+                    <select value={draft.savingsSource || ''} onChange={(event) => setDraft({ ...draft, savingsSource: event.target.value })}>
+                      <option value="">Revenu du foyer</option>
+                      {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}
+                    </select>
+                    {draft.savingsSource && <span className="hint">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
+                  </label>
+                  {!draft.savingsSource && (
+                    <div className="form-row">
+                      <label>
+                        {draft.incomeKind === 'salary' ? 'Employeur' : 'Organisme payeur'}
+                        <input value={draft.incomeSource || ''} onChange={(event) => setDraft({ ...draft, incomeSource: event.target.value })} placeholder={draft.incomeKind === 'salary' ? 'Ex. ETHIAS, REXEL Belgium' : 'Ex. ONEM'} />
+                      </label>
+                      <label>
+                        Mois budgétaire concerné
+                        <input type="month" value={draft.budgetMonth || draft.date.slice(0, 7)} onChange={(event) => setDraft({ ...draft, budgetMonth: event.target.value })} />
+                      </label>
+                    </div>
+                  )}
+                </>
               )}
 
               {draft.type === 'savings_transfer' && (

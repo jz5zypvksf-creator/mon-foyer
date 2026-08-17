@@ -18,8 +18,15 @@ export function isSalaryIncome(operation) {
 }
 
 export function budgetIncomeOperationsForMonth(operations = [], monthKey = '') {
+  const explicitlyAssigned = operations.filter((operation) => operation.type === 'income'
+    && (operation.budgetMonth || operation.budget_month) === monthKey
+    && !String(operation.label || '').toLowerCase().includes('transfert depuis épargne'));
+  const explicitlyAssignedIds = new Set(explicitlyAssigned.map((operation) => operation.id));
   const previous = previousMonthKey(monthKey);
-  const currentIncome = operations.filter((operation) => operation.type === 'income' && String(operation.date || '').startsWith(monthKey) && !String(operation.label || '').toLowerCase().includes('transfert depuis épargne'));
+  const currentIncome = operations.filter((operation) => operation.type === 'income'
+    && !(operation.budgetMonth || operation.budget_month)
+    && String(operation.date || '').startsWith(monthKey)
+    && !String(operation.label || '').toLowerCase().includes('transfert depuis épargne'));
   const currentSalaryPersons = new Set(currentIncome.filter(isSalaryIncome).map((operation) => operation.person || 'Foyer'));
 
   const carriedSalaries = operations.filter((operation) => {
@@ -29,7 +36,7 @@ export function budgetIncomeOperationsForMonth(operations = [], monthKey = '') {
     return !currentSalaryPersons.has(operation.person || 'Foyer');
   });
 
-  return [...currentIncome, ...carriedSalaries];
+  return [...explicitlyAssigned, ...currentIncome, ...carriedSalaries.filter((operation) => !explicitlyAssignedIds.has(operation.id))];
 }
 
 export function budgetIncomeTotalForMonth(operations = [], monthKey = '') {

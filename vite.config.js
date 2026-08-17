@@ -435,8 +435,8 @@ const iconMap = {`,
       // "Transfert depuis l'épargne" est un type d'interface distinct, mais reste
       // techniquement enregistré comme un revenu interne afin de créditer le compte courant.
       patched = patched.replace(
-        'value={draft.type}\n                  onChange={(event) => {\n                    const type = event.target.value;',
-        "value={draft.type === 'income' && draft.savingsSource ? 'transfer' : draft.type === 'savings_transfer' ? 'transfer_to' : draft.type}\n                  onChange={(event) => {\n                    const selectedType = event.target.value;\n                    const type = selectedType === 'transfer' ? 'income' : selectedType === 'transfer_to' ? 'savings_transfer' : selectedType;\n                    const savingsSource = selectedType === 'transfer'\n                      ? (draft.savingsSource || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'income' ? '' : draft.savingsSource;\n                    const savingsGoalId = selectedType === 'transfer_to'\n                      ? (draft.savingsGoalId || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'transfer' ? '' : draft.savingsGoalId;",
+        "value={draft.type === 'income' && draft.incomeKind === 'salary' ? 'salary' : draft.type}\n                  onChange={(event) => {\n                    const selectedType = event.target.value;\n                    const type = selectedType === 'salary' ? 'income' : selectedType;",
+        "value={draft.type === 'income' && draft.savingsSource ? 'transfer' : draft.type === 'savings_transfer' ? 'transfer_to' : draft.type === 'income' && draft.incomeKind === 'salary' ? 'salary' : draft.type}\n                  onChange={(event) => {\n                    const selectedType = event.target.value;\n                    const type = selectedType === 'transfer' || selectedType === 'salary' ? 'income' : selectedType === 'transfer_to' ? 'savings_transfer' : selectedType;\n                    const savingsSource = selectedType === 'transfer'\n                      ? (draft.savingsSource || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'income' || selectedType === 'salary' ? '' : draft.savingsSource;\n                    const savingsGoalId = selectedType === 'transfer_to'\n                      ? (draft.savingsGoalId || transferSavingsGoals(data.savingsGoals)[0]?.id || '')\n                      : selectedType === 'transfer' ? '' : draft.savingsGoalId;",
       );
       patched = patched.replace(
         '                      type,\n                      category: nextCategory,',
@@ -444,8 +444,8 @@ const iconMap = {`,
       );
       if (!patched.includes('<option value="transfer">Transfert depuis l’épargne</option>')) {
         patched = patched.replace(
-          '<option value="income">Revenus</option>',
-          '<option value="income">Revenus</option>\n                  <option value="transfer">Transfert depuis l’épargne</option>',
+          '<option value="income">Autre revenu</option>',
+          '<option value="income">Autre revenu</option>\n                  <option value="transfer">Transfert depuis l’épargne</option>',
         );
       }
       if (!patched.includes('<option value="transfer_to">Transfert vers l’épargne</option>')) {
@@ -456,12 +456,12 @@ const iconMap = {`,
       }
 
       patched = patched.replace(
-        '                  Source du revenu\n                  <select value={draft.savingsSource || \'\'}',
-        "                  {draft.savingsSource ? 'Compte épargne source' : 'Source du revenu'}\n                  <select value={draft.savingsSource || ''}",
+        "                    Source du revenu\n                    <select value={draft.savingsSource || ''}",
+        "                    {draft.savingsSource ? 'Compte épargne source' : 'Source du revenu'}\n                    <select value={draft.savingsSource || ''}",
       );
       patched = patched.replace(
-        '<option value="">Revenu du foyer</option>\n                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}',
-        "{!draft.savingsSource && <option value=\"\">Revenu du foyer</option>}\n                    {transferSavingsGoals(data.savingsGoals).map((goal) => (<option key={goal.id} value={goal.id}>{goal.transferLabel} · {formatCurrency(goal.saved || 0)}</option>))}",
+        '<option value="">Revenu du foyer</option>\n                      {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}',
+        "{!draft.savingsSource && <option value=\"\">Revenu du foyer</option>}\n                      {transferSavingsGoals(data.savingsGoals).map((goal) => (<option key={goal.id} value={goal.id}>{goal.transferLabel} · {formatCurrency(goal.saved || 0)}</option>))}",
       );
 
       patched = patched.replace(
@@ -481,14 +481,10 @@ const iconMap = {`,
         "                      savingsSource,\n                      savingsGoalId,\n                      paymentMethod: selectedType === 'transfer' || selectedType === 'transfer_to' ? 'Compte Belfius' : draft.paymentMethod,\n                    });",
       );
 
-      if (!patched.includes('function transferSavingsGoals(goals = [])')
-        || !patched.includes('transferSavingsGoals(data.savingsGoals)')
-        || !patched.includes("selectedType === 'transfer'")
-        || !patched.includes('<option value="transfer">Transfert depuis l’épargne</option>')
-        || !patched.includes('<option value="transfer_to">Transfert vers l’épargne</option>')
-        || !patched.includes("'Compte épargne source'")
-        || !patched.includes("disabled={Boolean(draft.savingsSource) || draft.type === 'savings_transfer'}")) {
-        throw new Error('Intégration Transfert depuis épargne incomplète');
+      const requiredMarkers = ['function transferSavingsGoals(goals = [])', 'transferSavingsGoals(data.savingsGoals)', "selectedType === 'transfer'", '<option value="transfer">Transfert depuis l’épargne</option>', '<option value="transfer_to">Transfert vers l’épargne</option>', "'Compte épargne source'", "disabled={Boolean(draft.savingsSource) || draft.type === 'savings_transfer'}"];
+      const missingMarkers = requiredMarkers.filter((marker) => !patched.includes(marker));
+      if (missingMarkers.length) {
+        throw new Error(`Intégration Transfert depuis épargne incomplète: ${missingMarkers.join(' | ')}`);
       }
 
       return { code: patched, map: null };

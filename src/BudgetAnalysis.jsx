@@ -31,6 +31,7 @@ export default function BudgetAnalysis({ analysis }) {
       <div className="budget-analysis-facts">
         <div><span>Disponible au début du mois</span><strong>{money(analysis.current.openingBalance)}</strong></div>
         <div><span>Revenus encaissés dans le mois</span><strong>{money(analysis.current.income)}</strong></div>
+        <div><span>Revenus affectés au mois</span><strong>{money(analysis.current.assignedIncome)}</strong></div>
         <div><span>Ressources budgétaires cumulées</span><strong>{money(analysis.current.resources)}</strong></div>
         <div><span>Dépenses exécutées</span><strong>{money(analysis.current.expenses)}</strong></div>
         <div><span>Dépenses programmées</span><strong>{money(analysis.scheduledExpenseTotal)}</strong></div>
@@ -51,7 +52,7 @@ export default function BudgetAnalysis({ analysis }) {
         <summary>Comment l’analyse est-elle calculée ?</summary>
         <p>
           Le disponible du début du mois est reconstitué depuis le solde Belfius du CSV, complété par les chèques repas. Il comprend donc déjà les salaires
-          reçus en fin de mois précédent. Les autres revenus restent affectés à leur date d’encaissement.
+          reçus en fin de mois précédent. Le champ « mois budgétaire concerné » rattache les salaires, employeurs et revenus complémentaires (par exemple l’ONEM) au bon mois sans modifier leur date bancaire.
           Les ajustements Belfius et transferts depuis l’épargne sont exclus des revenus. Le prévisionnel déduit les dépenses exécutées et programmées,
           mais pas le budget nourriture restant, qui demeure indicatif.
           La suggestion du fonds d’urgence exige trois mois terminés positifs. Elle retient le plus petit montant entre 10 % du revenu mensuel moyen

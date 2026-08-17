@@ -57,6 +57,23 @@ test('le solde CSV d’ouverture remplace les salaires antérieurs sans double c
   assert.ok(Math.abs(analysis.forecastBalance - (-102.12)) < 0.005);
 });
 
+test('les employeurs et le complément ONEM sont affectés explicitement au mois budgétaire', () => {
+  const analysis = analyzeBudget({
+    operations: [
+      { id: 'esther', date: '2026-07-30', type: 'income', amount: 2328.05, label: 'Salaire Esther', incomeKind: 'salary', incomeSource: 'REXEL BELGIUM SA/NV', budgetMonth: '2026-08' },
+      { id: 'alain', date: '2026-07-31', type: 'income', amount: 1892.68, label: 'Salaire Alain', incomeKind: 'salary', incomeSource: 'ETHIAS', budgetMonth: '2026-08' },
+      { id: 'onem', date: '2026-08-04', type: 'income', amount: 419.07, label: 'Revenu supplémentaire Alain', incomeKind: 'complementary', incomeSource: 'ONEM', budgetMonth: '2026-08' },
+      { id: 'other', date: '2026-08-06', type: 'income', amount: 476.40, label: 'Autres revenus', incomeKind: 'other', budgetMonth: '2026-08' },
+      { date: '2026-08-17', type: 'variable', amount: 4961.27, label: 'Dépenses exécutées' },
+    ],
+    selectedMonth: '2026-08', currentDate: '2026-08-17', openingBalance: 4111.97,
+    scheduledExpenseTotal: 148.29,
+  });
+  assert.ok(Math.abs(analysis.current.assignedIncome - 5116.20) < 0.005);
+  assert.ok(Math.abs(analysis.current.income - 895.47) < 0.005);
+  assert.ok(Math.abs(analysis.forecastBalance - (-102.12)) < 0.005);
+});
+
 test('la suggestion du fonds d’urgence utilise trois mois terminés', () => {
   const analysis = analyzeBudget({
     operations: [
