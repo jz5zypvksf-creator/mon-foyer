@@ -593,8 +593,13 @@ export default function App() {
   );
 
   const availableForPayments = useMemo(
-    () => PAYMENT_METHODS.reduce((sum, method) => sum + (paymentBalances[method] || 0), 0),
-    [paymentBalances],
+    () => PAYMENT_METHODS.reduce((sum, method) => {
+      if (method === 'Compte Belfius' && liveBelfiusSnapshot) {
+        return sum + Number(liveBelfiusSnapshot.expectedBalance || 0);
+      }
+      return sum + Number(paymentBalances[method] || 0);
+    }, 0),
+    [liveBelfiusSnapshot, paymentBalances],
   );
 
   const scheduledExpenses = useMemo(() => {
@@ -2275,7 +2280,7 @@ export default function App() {
           <section className="view">
             <div className="hero-panel">
               <div>
-                <span>Disponible pour les paiements</span>
+                <span>Disponible total actuel</span>
                 <strong>{formatCurrency(availableForPayments)}</strong>
                 <div className="hero-balance-grid">
                   {PAYMENT_METHODS.map((method) => (

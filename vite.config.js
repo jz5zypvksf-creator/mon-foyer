@@ -275,13 +275,8 @@ function leisureVacationsIntegration() {
         "        operation.date > today\n        && !existingFixedSignatures.has(fixedExpenseSignature(operation))",
       );
 
-      // Lecture budgétaire mensuelle : le grand solde est Revenus budgétaires du mois
-      // moins dépenses exécutées du mois. Le report historique des moyens de paiement
-      // reste visible séparément mais n'altère plus le résultat du mois.
-      patched = patched.replace(
-        "  const availableForPayments = useMemo(\n    () => PAYMENT_METHODS.reduce((sum, method) => sum + (paymentBalances[method] || 0), 0),\n    [paymentBalances],\n  );",
-        "  const availableForPayments = totals.balance;",
-      );
+      // Le grand solde est la liquidité réellement disponible : Belfius vivant
+      // plus les deux comptes de chèques repas. Le prévisionnel reste séparé.
 
       // Le badge Belfius reflète le solde vivant : dernier CSV + mouvements enregistrés
       // depuis ce relevé. Le solde CSV figé reste affiché séparément sous ce badge.
@@ -302,15 +297,15 @@ function leisureVacationsIntegration() {
       );
       patched = patched.replace(
         '<span>Disponible pour les paiements</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
-        '<span>Solde budgétaire actuel</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
+        '<span>Disponible total actuel</span>\n                <strong>{formatCurrency(availableForPayments)}</strong>',
       );
       patched = patched.replace(
         '<span>Disponible actuel : {formatCurrency(availableForPayments)}</span>',
-        '<span>Solde budgétaire actuel : {formatCurrency(availableForPayments)}</span>',
+        '<span>Disponible total actuel : {formatCurrency(availableForPayments)}</span>',
       );
       patched = patched.replace(
         '<div><span>Disponible actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>',
-        '<div><span>Solde budgétaire actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>',
+        '<div><span>Disponible total actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>',
       );
 
       // Totaux lisibles en un coup d'œil.
@@ -379,7 +374,8 @@ function leisureVacationsIntegration() {
         || !patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")
         || !patched.includes('Total : {formatCurrency(careTotalToRecover)}')
         || !patched.includes('Contrôle de la balance Belfius')
-        || !patched.includes('const availableForPayments = totals.balance;')
+        || !patched.includes("method === 'Compte Belfius' && liveBelfiusSnapshot")
+        || !patched.includes('Disponible total actuel')
         || !patched.includes("method === 'Compte Belfius' && liveBelfiusSnapshot")
         || !patched.includes('Dernier solde du relevé CSV')
         || !patched.includes('const totalRemainingToCover = scheduledExpenseTotal;')
