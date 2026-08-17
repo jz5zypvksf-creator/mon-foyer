@@ -39,6 +39,24 @@ test('août reçoit les salaires de fin juillet sans compter les dépenses futur
   assert.ok(Math.abs(analysis.forecastBalance - 6.64) < 0.005);
 });
 
+test('le solde CSV d’ouverture remplace les salaires antérieurs sans double comptage', () => {
+  const analysis = analyzeBudget({
+    operations: [
+      { date: '2026-07-01', type: 'income', amount: 2204.20, label: 'Salaire Alain' },
+      { date: '2026-07-30', type: 'income', amount: 2328.05, label: 'Salaire Esther' },
+      { date: '2026-07-31', type: 'income', amount: 1892.68, label: 'Salaire Alain' },
+      { date: '2026-08-04', type: 'income', amount: 895.47, label: 'Revenus août' },
+      { date: '2026-08-17', type: 'variable', amount: 4961.27, label: 'Dépenses exécutées' },
+    ],
+    selectedMonth: '2026-08', currentDate: '2026-08-17', openingBalance: 4111.97,
+    scheduledExpenseTotal: 148.29,
+  });
+  assert.ok(Math.abs(analysis.current.income - 895.47) < 0.005);
+  assert.ok(Math.abs(analysis.current.resources - 5007.44) < 0.005);
+  assert.ok(Math.abs(analysis.current.surplus - 46.17) < 0.005);
+  assert.ok(Math.abs(analysis.forecastBalance - (-102.12)) < 0.005);
+});
+
 test('la suggestion du fonds d’urgence utilise trois mois terminés', () => {
   const analysis = analyzeBudget({
     operations: [

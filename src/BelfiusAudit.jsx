@@ -176,6 +176,16 @@ function parseBelfius(text) {
   };
 }
 
+function calculateCsvMonthOpening(audit) {
+  const month = parseBalanceMonth(audit?.balanceDate);
+  const cutoff = parseBalanceDate(audit?.balanceDate);
+  if (!month || !cutoff) return { month: '', balance: null };
+  const monthMovement = (audit.rows || [])
+    .filter((row) => String(row.date || '').startsWith(month) && row.date <= cutoff)
+    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  return { month, balance: Number(audit.balance || 0) - monthMovement };
+}
+
 function detectSavingsTransfers(rows) {
   const totals = {};
   const transfers = [];
@@ -742,6 +752,7 @@ export default function BelfiusAudit({
     && result.review.length === 0,
   );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
+  const csvMonthOpening = calculateCsvMonthOpening(audit);
   const canSynchronize = false; // RC2.4.6 : le CSV reste une référence de contrôle, jamais une écriture silencieuse.
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
   const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
@@ -768,8 +779,10 @@ export default function BelfiusAudit({
       anomalies: monthMissing.length + actionableExtra.length,
       clean: auditIsClean && Math.abs(difference) < 0.01,
       sourceFile: audit.fileName || 'CSV Belfius',
+      openingMonth: csvMonthOpening.month,
+      openingBalance: csvMonthOpening.balance,
     });
-  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, difference, monthMissing.length, actionableExtra.length, pendingAmount, remainingToTreat, result?.review.length]);
+  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, csvMonthOpening.balance, csvMonthOpening.month, difference, monthMissing.length, actionableExtra.length, pendingAmount, remainingToTreat, result?.review.length]);
 
   useEffect(() => {
     if (!canSynchronize || !audit) return;

@@ -19,7 +19,7 @@ function isSalary(operation) {
   return String(operation?.label || '').toLowerCase().includes('salaire');
 }
 
-function summarizeBudgetMonth(operations, month, throughDate = '') {
+function summarizeBudgetMonth(operations, month, throughDate = '', useOpeningBalance = false) {
   const salaryMonth = previousMonth(month);
   return operations.reduce((summary, operation) => {
     if (isExcludedFromBudget(operation)) return summary;
@@ -30,7 +30,7 @@ function summarizeBudgetMonth(operations, month, throughDate = '') {
     // Les salaires reçus en fin de mois financent le mois suivant. Ils sont donc
     // exclus de leur mois bancaire et rattachés une seule fois au mois budgétaire suivant.
     if (operation.type === 'income') {
-      if (date.startsWith(salaryMonth) && isSalary(operation)) summary.income += value;
+      if (!useOpeningBalance && date.startsWith(salaryMonth) && isSalary(operation)) summary.income += value;
       if (date.startsWith(month) && !isSalary(operation) && isWithinCutoff) summary.income += value;
     }
     if (date.startsWith(month) && isWithinCutoff) {
@@ -56,6 +56,7 @@ function roundDownFive(value) {
 export function analyzeBudget({
   operations = [], selectedMonth, currentDate,
   scheduledExpenseTotal = 0, remainingFoodBudget = 0, emergencyFundSaved = 0,
+  openingBalance = null,
 } = {}) {
   const todayMonth = String(currentDate || '').slice(0, 7);
   const completedMonths = completedMonthsWithData(operations, selectedMonth, todayMonth);
@@ -64,8 +65,11 @@ export function analyzeBudget({
     return { ...summary, surplus: summary.income - summary.expenses };
   });
   const currentCutoff = selectedMonth === todayMonth ? String(currentDate || '') : '';
-  const current = summarizeBudgetMonth(operations, selectedMonth, currentCutoff);
-  current.surplus = current.income - current.expenses;
+  const hasOpeningBalance = openingBalance !== null && Number.isFinite(Number(openingBalance));
+  const current = summarizeBudgetMonth(operations, selectedMonth, currentCutoff, hasOpeningBalance);
+  current.openingBalance = hasOpeningBalance ? amount(openingBalance) : 0;
+  current.resources = current.openingBalance + current.income;
+  current.surplus = current.resources - current.expenses;
 
   const calculatedForecastBalance = current.surplus - amount(scheduledExpenseTotal);
 

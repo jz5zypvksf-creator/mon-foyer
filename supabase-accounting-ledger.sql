@@ -1,6 +1,8 @@
 -- Registre comptable unifié : état du dernier audit Belfius et lien avec l'épargne.
 alter table public.bank_snapshots
-  add column if not exists operation_state jsonb not null default '{}'::jsonb;
+  add column if not exists operation_state jsonb not null default '{}'::jsonb,
+  add column if not exists opening_month text,
+  add column if not exists opening_balance numeric;
 
 alter table public.operations
   add column if not exists savings_goal_id uuid references public.savings_goals(id) on delete restrict,
