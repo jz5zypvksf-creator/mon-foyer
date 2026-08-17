@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
+import BudgetAnalysis from './BudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
 import {
@@ -46,6 +47,7 @@ import {
   readOperationOutbox,
   writeOperationOutbox,
 } from './lib/syncOutbox.js';
+import { analyzeBudget } from './lib/budgetAnalysisRules.js';
 
 const FOOD_BUDGET = 500;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -650,6 +652,29 @@ export default function App() {
       : availableAfterPlannedExpenses >= 500
         ? { key: 'excellent', label: 'Excédent confortable' }
         : { key: 'comfortable', label: 'Situation confortable' };
+
+  const emergencyFundSaved = useMemo(() => {
+    const goals = (data.savingsGoals || []).filter((goal) => savingsBucketForDisplay(goal) === 'urgence');
+    return goals.reduce((highest, goal) => Math.max(highest, Number(goal.saved || 0)), 0);
+  }, [data.savingsGoals]);
+
+  const budgetAnalysis = useMemo(() => analyzeBudget({
+    operations: data.operations,
+    selectedMonth,
+    currentDate: today,
+    forecastBalance: availableAfterPlannedExpenses,
+    scheduledExpenseTotal,
+    remainingFoodBudget,
+    emergencyFundSaved,
+  }), [
+    availableAfterPlannedExpenses,
+    data.operations,
+    emergencyFundSaved,
+    remainingFoodBudget,
+    scheduledExpenseTotal,
+    selectedMonth,
+    today,
+  ]);
 
   const editingOperation = useMemo(() => {
     return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
@@ -2254,6 +2279,8 @@ export default function App() {
               </div>
               <PiggyBank size={42} />
             </div>
+
+            <BudgetAnalysis analysis={budgetAnalysis} />
 
             <div className="stats-grid">
               <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />

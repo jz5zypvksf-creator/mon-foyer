@@ -1,0 +1,21 @@
+.budget-analysis{border-top:4px solid #2f7d57}
+.budget-analysis.status-danger{border-top-color:#b42318}
+.budget-analysis.status-warning{border-top-color:#b26000}
+.budget-analysis .section-title h2{display:inline-flex;align-items:center;gap:8px}
+.budget-analysis-verdict{display:flex;align-items:flex-start;gap:10px;margin-top:12px;padding:14px;border-radius:14px;background:#edf8f1;color:#176044}
+.status-warning .budget-analysis-verdict{background:#fff7e7;color:#8a5a00}
+.status-danger .budget-analysis-verdict{background:#fff0ef;color:#9e332c}
+.budget-analysis-verdict div,.emergency-advice div{display:grid;gap:3px}
+.budget-analysis-verdict span,.emergency-advice span{color:inherit}
+.budget-analysis-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+.budget-analysis-facts div{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:12px;background:#f4f7f6;color:#52697a}
+.budget-analysis-facts strong{color:#153f67}
+.budget-analysis-observation{margin:0 0 12px;color:#52697a;line-height:1.5}
+.emergency-advice{display:flex;align-items:flex-start;gap:10px;padding:14px;border:1px solid #b9d3e5;border-radius:14px;background:#eef6fb;color:#24577f}
+.emergency-advice.is-recommended{border-color:#b9ddc8;background:#edf8f1;color:#176044}
+.emergency-advice.is-not-recommended{border-color:#e7c77e;background:#fff7e7;color:#8a5a00}
+.emergency-advice b{margin-top:3px}
+.budget-analysis-method{margin-top:12px;padding-top:10px;border-top:1px solid #dbe5e2;color:#52697a}
+.budget-analysis-method summary{cursor:pointer;font-weight:800;color:#24577f}
+.budget-analysis-method p{margin:8px 0 0;line-height:1.5}
+@media(max-width:640px){.budget-analysis-facts{grid-template-columns:1fr}}

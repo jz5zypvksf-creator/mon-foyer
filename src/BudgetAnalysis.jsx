@@ -1,0 +1,58 @@
+import { BarChart3, Lightbulb, ShieldPlus } from 'lucide-react';
+import './BudgetAnalysis.css';
+
+const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
+const monthLabel = (month) => new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric' })
+  .format(new Date(`${month}-01T12:00:00`));
+
+function trendText(trend) {
+  if (!trend) return 'Une comparaison apparaîtra dès que deux mois terminés contiendront des données.';
+  const direction = trend.difference > 0 ? 'augmenté' : trend.difference < 0 ? 'diminué' : 'été identiques';
+  const amount = money(Math.abs(trend.difference));
+  const percent = trend.percent === null ? '' : ` (${Math.abs(trend.percent).toFixed(1).replace('.', ',')} %)`;
+  return `Les dépenses ont ${direction} de ${amount}${percent} entre ${monthLabel(trend.previousMonth)} et ${monthLabel(trend.latestMonth)}.`;
+}
+
+export default function BudgetAnalysis({ analysis }) {
+  const { emergency } = analysis;
+  return (
+    <section className={`panel budget-analysis status-${analysis.status.key}`}>
+      <div className="section-title">
+        <h2><BarChart3 size={21} /> Analyse de votre budget</h2>
+        <span>{analysis.isCurrentMonth ? 'Mois en cours' : 'Mois terminé'}</span>
+      </div>
+      <div className="budget-analysis-verdict">
+        <Lightbulb size={22} />
+        <div>
+          <strong>{analysis.status.label}</strong>
+          <span>Solde prévisionnel : {money(analysis.forecastBalance)} après les montants restant à couvrir.</span>
+        </div>
+      </div>
+      <div className="budget-analysis-facts">
+        <div><span>Revenus enregistrés</span><strong>{money(analysis.current.income)}</strong></div>
+        <div><span>Dépenses enregistrées</span><strong>{money(analysis.current.expenses)}</strong></div>
+        <div><span>Dépenses programmées</span><strong>{money(analysis.scheduledExpenseTotal)}</strong></div>
+        <div><span>Nourriture encore prévue</span><strong>{money(analysis.remainingFoodBudget)}</strong></div>
+      </div>
+      <p className="budget-analysis-observation">{trendText(analysis.trend)}</p>
+      <div className={`emergency-advice is-${emergency.key}`}>
+        <ShieldPlus size={23} />
+        <div>
+          <strong>Fonds d’urgence : {money(emergency.saved)}</strong>
+          <span>{emergency.reason}</span>
+          {emergency.monthlySuggestion !== null ? (
+            <b>Suggestion mensuelle de départ : {money(emergency.monthlySuggestion)}</b>
+          ) : null}
+        </div>
+      </div>
+      <details className="budget-analysis-method">
+        <summary>Comment l’analyse est-elle calculée ?</summary>
+        <p>
+          L’analyse utilise uniquement les opérations enregistrées. Les ajustements Belfius et transferts depuis l’épargne sont exclus des revenus.
+          La suggestion du fonds d’urgence exige trois mois terminés positifs. Elle retient le plus petit montant entre 10 % du revenu mensuel moyen
+          et 25 % de la plus petite marge mensuelle, puis arrondit vers le bas par tranche de 5 €.
+        </p>
+      </details>
+    </section>
+  );
+}
