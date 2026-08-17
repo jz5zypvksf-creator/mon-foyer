@@ -678,8 +678,8 @@ export default function App() {
     scheduledExpenseTotal,
     remainingFoodBudget,
     emergencyFundSaved,
-    openingBalance: belfiusSnapshot?.openingMonth === selectedMonth
-      ? Number(belfiusSnapshot.openingBalance || 0)
+    openingBalance: belfiusSnapshot?.openingBalances?.[selectedMonth] != null || belfiusSnapshot?.openingMonth === selectedMonth
+      ? Number(belfiusSnapshot?.openingBalances?.[selectedMonth] ?? belfiusSnapshot.openingBalance ?? 0)
         + PAYMENT_METHODS.filter((method) => method !== 'Compte Belfius')
           .reduce((sum, method) => sum + Number(previousMonthBalances[method] || 0), 0)
       : null,
@@ -693,6 +693,7 @@ export default function App() {
     today,
     belfiusSnapshot?.openingBalance,
     belfiusSnapshot?.openingMonth,
+    belfiusSnapshot?.openingBalances,
     previousMonthBalances,
   ]);
 
@@ -875,7 +876,7 @@ export default function App() {
         supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
         supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
-        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state, opening_month, opening_balance').eq('household_id', householdId).maybeSingle(),
+        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state, opening_month, opening_balance, opening_balances').eq('household_id', householdId).maybeSingle(),
       ]);
 
       if (ignore) return;
@@ -929,6 +930,7 @@ export default function App() {
           operationState: snapshotResult.data.operation_state || {},
           openingMonth: snapshotResult.data.opening_month || '',
           openingBalance: snapshotResult.data.opening_balance == null ? null : Number(snapshotResult.data.opening_balance),
+          openingBalances: snapshotResult.data.opening_balances || {},
         });
       }
       setSyncStatus('Synchronise avec Supabase');
@@ -1833,6 +1835,9 @@ export default function App() {
       operationState: capturePaymentOperationState(data.operations, 'Compte Belfius', today),
       openingMonth: snapshot.openingMonth || '',
       openingBalance: snapshot.openingBalance == null ? null : Number(snapshot.openingBalance),
+      openingBalances: snapshot.openingMonth && snapshot.openingBalance != null
+        ? { ...(belfiusSnapshot?.openingBalances || {}), [snapshot.openingMonth]: Number(snapshot.openingBalance) }
+        : (belfiusSnapshot?.openingBalances || {}),
     };
     setBelfiusSnapshot(normalized);
     localStorage.setItem('mon-foyer-last-belfius-audit-at', normalized.importedAt);
@@ -1851,6 +1856,7 @@ export default function App() {
       operation_state: normalized.operationState,
       opening_month: normalized.openingMonth || null,
       opening_balance: normalized.openingBalance,
+      opening_balances: normalized.openingBalances,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'household_id' });
     if (error) setSyncStatus('Erreur de mémorisation du solde Belfius: ' + error.message);

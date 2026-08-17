@@ -2,7 +2,8 @@
 alter table public.bank_snapshots
   add column if not exists operation_state jsonb not null default '{}'::jsonb,
   add column if not exists opening_month text,
-  add column if not exists opening_balance numeric;
+  add column if not exists opening_balance numeric,
+  add column if not exists opening_balances jsonb not null default '{}'::jsonb;
 
 alter table public.operations
   add column if not exists savings_goal_id uuid references public.savings_goals(id) on delete restrict,
