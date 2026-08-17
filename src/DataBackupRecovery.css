@@ -16,6 +16,22 @@
 .backup-file-input{
   display:none;
 }
+.backup-reminder{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  margin-top:14px;
+  padding:12px;
+  border:1px solid #b9ddc8;
+  border-radius:14px;
+  background:#edf8f1;
+  color:#176044;
+}
+.backup-reminder div{display:grid;gap:3px}
+.backup-reminder span,.backup-reminder small{color:inherit}
+.backup-reminder small{font-weight:700;opacity:.82}
+.backup-reminder.is-due{border-color:#e7c77e;background:#fff7e7;color:#8a5a00}
+.backup-reminder.is-overdue{border-color:#e4a39d;background:#fff0ef;color:#9e332c}
 .backup-preview{
   margin-top:14px;
   padding:14px;
