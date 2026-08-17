@@ -20,7 +20,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Installer
-        run: npm install
+        run: npm ci
       - name: Tester
         run: npm test
       - name: Construire
