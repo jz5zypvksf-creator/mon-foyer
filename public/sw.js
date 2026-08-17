@@ -1,49 +1,13 @@
 const CACHE_PREFIX = 'mon-foyer-';
-const CACHE_NAME = CACHE_PREFIX + 'v33-offline-shell';
-const CORE_ASSETS = ['/', '/index.html', '/manifest.json', '/icon.svg'];
-
-function sameOriginPath(value) {
-  try {
-    const url = new URL(value, self.location.origin);
-    if (url.origin !== self.location.origin) return null;
-    return url.pathname + url.search;
-  } catch {
-    return null;
-  }
-}
-
-function assetPathsFromHtml(html) {
-  const paths = new Set();
-  const pattern = /<(?:script|link)\b[^>]*(?:src|href)=["']([^"']+)["'][^>]*>/gi;
-  for (const match of html.matchAll(pattern)) {
-    const path = sameOriginPath(match[1]);
-    if (path && !path.startsWith('/manifest')) paths.add(path);
-  }
-  return [...paths];
-}
-
-async function fetchAndCacheAppShell() {
-  const cache = await caches.open(CACHE_NAME);
-  const indexResponse = await fetch('/index.html', { cache: 'reload' });
-  if (!indexResponse.ok) throw new Error('Impossible de préparer le mode hors connexion.');
-
-  const html = await indexResponse.clone().text();
-  await Promise.all([
-    cache.put('/index.html', indexResponse.clone()),
-    cache.put('/', indexResponse.clone()),
-    ...CORE_ASSETS.slice(2).map(async (path) => {
-      const response = await fetch(path, { cache: 'reload' });
-      if (response.ok) await cache.put(path, response);
-    }),
-    ...assetPathsFromHtml(html).map(async (path) => {
-      const response = await fetch(path, { cache: 'reload' });
-      if (response.ok) await cache.put(path, response);
-    }),
-  ]);
-}
+const CACHE_NAME = CACHE_PREFIX + 'v34-ios-ready';
+const PRECACHE_ASSETS = ['/']; // __PRECACHE_ASSETS__
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(fetchAndCacheAppShell().then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_ASSETS))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -55,6 +19,24 @@ self.addEventListener('activate', (event) => {
           .map((key) => caches.delete(key)),
       ))
       .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'CHECK_OFFLINE_READY') return;
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.keys())
+      .then((requests) => {
+        event.source?.postMessage({
+          type: 'OFFLINE_READY',
+          ready: PRECACHE_ASSETS.every((path) => requests.some((request) => {
+            const url = new URL(request.url);
+            return url.pathname + url.search === path;
+          })),
+          cachedAssets: requests.length,
+        });
+      }),
   );
 });
 
@@ -86,15 +68,14 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then(async (response) => {
+    caches.match(request).then((cached) => (
+      cached || fetch(request).then(async (response) => {
         if (response.ok) {
           const cache = await caches.open(CACHE_NAME);
           await cache.put(request, response.clone());
         }
         return response;
-      });
-    }),
+      })
+    )),
   );
 });
