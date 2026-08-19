@@ -2573,6 +2573,7 @@ export default function App() {
                 >
                   <option value="salary">Salaire</option>
                   <option value="income">Autre revenu</option>
+                  <option value="reimbursement">Remboursement</option>
                   <option value="fixed">Frais fixes</option>
                   <option value="variable">Dépenses variables</option>
                 </select>
