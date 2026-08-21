@@ -48,6 +48,7 @@ import {
   writeOperationOutbox,
 } from './lib/syncOutbox.js';
 import { analyzeBudget } from './lib/budgetAnalysisRules.js';
+import { belongsToHouseholdFoodBudget } from './lib/foodBudgetRules.js';
 import {
   applySavingsOperationChange,
   calculateLiveBankSnapshot,
@@ -395,7 +396,7 @@ function calculateTotals(operations) {
     if (operation.type === 'income') base.income += amount;
     if (operation.type === 'fixed') base.fixed += amount;
     if (operation.type === 'variable') base.variable += amount;
-    if (operation.category === 'nourriture' && operation.person !== 'Nonna') base.food += amount;
+    if (belongsToHouseholdFoodBudget(operation)) base.food += amount;
   });
   return { ...base, balance: base.income - base.fixed - base.variable };
 }
@@ -668,7 +669,7 @@ export default function App() {
 
   const scheduledFoodTotal = useMemo(
     () => scheduledExpenses
-      .filter((operation) => operation.category === 'nourriture' && operation.person !== 'Nonna')
+      .filter(belongsToHouseholdFoodBudget)
       .reduce((sum, operation) => sum + Number(operation.amount || 0), 0),
     [scheduledExpenses],
   );
