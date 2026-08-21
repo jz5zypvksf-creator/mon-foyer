@@ -339,6 +339,17 @@ h2 {
   background: var(--danger);
 }
 
+.food-budget-panel .section-title h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.food-budget-panel .section-title h2 svg {
+  color: var(--green);
+  flex: 0 0 auto;
+}
+
 .hint {
   margin-top: 10px;
   line-height: 1.45;
