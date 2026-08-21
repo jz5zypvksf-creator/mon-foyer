@@ -2356,6 +2356,19 @@ export default function App() {
               <PiggyBank size={42} />
             </div>
 
+            <section className="panel food-budget-panel">
+              <div className="section-title">
+                <h2><ShoppingBasket size={20} /> Budget nourriture</h2>
+                <span>{formatCurrency(totals.food)} / {formatCurrency(FOOD_BUDGET)}</span>
+              </div>
+              <div className="progress-track">
+                <div className={foodOverBudget ? 'progress-fill danger' : 'progress-fill'} style={{ width: `${foodRatio}%` }} />
+              </div>
+              <p className={foodOverBudget ? 'hint status-error' : 'hint'}>
+                {foodOverBudget ? `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'idéal` : `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles`}
+              </p>
+            </section>
+
             <BudgetAnalysis analysis={budgetAnalysis} />
 
             <div className="stats-grid">
@@ -2464,19 +2477,6 @@ export default function App() {
                   );
                 })}
               </div>
-            </section>
-
-            <section className="panel">
-              <div className="section-title">
-                <h2>Budget nourriture</h2>
-                <span>{formatCurrency(totals.food)} / {formatCurrency(FOOD_BUDGET)}</span>
-              </div>
-              <div className="progress-track">
-                <div className={foodOverBudget ? 'progress-fill danger' : 'progress-fill'} style={{ width: `${foodRatio}%` }} />
-              </div>
-              <p className={foodOverBudget ? 'hint status-error' : 'hint'}>
-                {foodOverBudget ? `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'idéal` : `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles`}
-              </p>
             </section>
 
             <ExpenseChart categories={categoryTotals} />
