@@ -80,6 +80,7 @@ import {
   MASTERCARD_PAYMENT_METHOD,
   mastercardSettlementDate,
 } from './lib/cardPaymentRules.js';
+import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -1450,6 +1451,7 @@ export default function App() {
     const amount = Math.abs(Number(bankRow?.amount || 0));
     const bankCommunication = String(bankRow?.communication || bankRow?.details || '');
     const normalizedBankCommunication = bankCommunication.toLowerCase();
+    const isMastercardStatement = isMastercardStatementCommunication(`${label} ${bankCommunication}`);
     const bankDigits = bankCommunication.replace(/\D/g, '');
 
     // RC2.4.4 : si Belfius correspond déjà à un frais récurrent connu, le crayon
@@ -1479,12 +1481,12 @@ export default function App() {
     setDraft({
       ...makeEmptyOperation(),
       date: bankRow?.date || currentDate(),
-      type: Number(bankRow?.amount || 0) > 0 ? 'income' : recurringCandidate ? 'fixed' : 'variable',
+      type: Number(bankRow?.amount || 0) > 0 ? 'income' : isMastercardStatement ? 'card_settlement' : recurringCandidate ? 'fixed' : 'variable',
       category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : (bankRow?.learnedSuggestion?.category || category),
       store: bankRow?.learnedSuggestion?.store || label,
       paymentMethod: 'Compte Belfius',
       person: bankRow?.learnedSuggestion?.person || 'Foyer',
-      label: recurringCandidate?.label || bankRow?.learnedSuggestion?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
+      label: isMastercardStatement ? 'Règlement Mastercard' : recurringCandidate?.label || bankRow?.learnedSuggestion?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
       amount,
       recurrence: recurringCandidate?.frequency || 'once',
       recurringDay: recurringCandidate?.day || Number(String(bankRow?.date || currentDate()).slice(8, 10)),
@@ -1493,7 +1495,9 @@ export default function App() {
       freeCommunication: recurringCandidate?.freeCommunication || recurringCandidate?.free_communication || '',
       freeCommunicationMode: recurringCandidate?.freeCommunicationMode || recurringCandidate?.free_communication_mode || 'contains',
     });
-    setOperationStatus(recurringCandidate
+    setOperationStatus(isMastercardStatement
+      ? 'Décompte Mastercard reconnu par sa référence Belfius : vérifie le montant puis enregistre le règlement.'
+      : recurringCandidate
       ? 'Frais récurrent Belfius reconnu : vérifie les données puis enregistre cette opération.'
       : 'Opération Belfius préremplie : complète ou corrige les informations avant enregistrement.');
     setEditingId(null);

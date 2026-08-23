@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';
 import { calculateBankAuditSummary } from './lib/budgetMetrics.js';
+import {
+  isMastercardSettlementOperation,
+  isMastercardStatementRow,
+  mastercardStatementMatchEvidence,
+} from './lib/mastercardStatementRules.js';
 
 const money = (value) => new Intl.NumberFormat('fr-BE', {
   style: 'currency', currency: 'EUR',
@@ -346,6 +351,16 @@ function suggestionForBankRow(bankRow, learnedRules) {
 }
 
 function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
+  const isStatement = isMastercardStatementRow(bankRow);
+  const isSettlement = isMastercardSettlementOperation(appRow);
+  if (isStatement || isSettlement) {
+    if (!isStatement || !isSettlement) return null;
+    return mastercardStatementMatchEvidence(bankRow, appRow, {
+      amountTolerance: AMOUNT_TOLERANCE,
+      dateToleranceDays: DATE_TOLERANCE_DAYS,
+    });
+  }
+
   const amountDelta = Math.abs(Math.abs(Number(appRow.amount) || 0) - Math.abs(bankRow.amount));
   const dayDelta = dateDistance(bankRow.date, appRow.date);
   const directionMatches = (bankRow.amount > 0) === (appRow.type === 'income');
@@ -429,6 +444,7 @@ function findSubsetByAmount(candidates, target, amountSelector, maxCandidates = 
 
 function possibleSplit(bankRow, indexedAppRows, recurringExpenses) {
   if (bankRow.amount >= 0) return null;
+  if (isMastercardStatementRow(bankRow)) return null;
   const candidates = indexedAppRows
     .filter(({ row }) => row.type !== 'income')
     .filter(({ row }) => dateDistance(row.date, bankRow.date) <= DATE_TOLERANCE_DAYS)
@@ -487,6 +503,7 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
   const directionIsIncome = appRow.type === 'income';
   const target = Math.abs(Number(appRow.amount) || 0);
   const compatible = indexedBankRows
+    .filter(({ row }) => !isMastercardStatementRow(row))
     .filter(({ row }) => ((row.amount > 0) === directionIsIncome))
     .filter(({ row }) => dateDistance(row.date, appRow.date) <= DATE_TOLERANCE_DAYS)
     .map((candidate) => ({
@@ -740,6 +757,7 @@ export default function BelfiusAudit({
 
   const safeMonth = result?.auditMonth || selectedMonth || '';
   const monthMissing = (result?.missing || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
+  const missingMastercardStatements = monthMissing.filter(isMastercardStatementRow);
   const monthExtra = (result?.extra || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const cutoffDate = parseBalanceDate(audit?.balanceDate);
   const futureExtra = monthExtra.filter((row) => cutoffDate && String(row.date || '') > cutoffDate);
@@ -914,6 +932,16 @@ export default function BelfiusAudit({
           )}
 
           {monthMissing.length > 0 && (
+            <>
+              {missingMastercardStatements.length > 0 && (
+                <div className="audit-verdict warning">
+                  <AlertTriangle size={24} />
+                  <div>
+                    <strong>Règlement Mastercard non rapproché</strong>
+                    <span>La référence mensuelle « RELEVE MASTERCARD » est présente dans Belfius, mais le règlement correspondant est absent ou son montant diffère dans Mon Foyer.</span>
+                  </div>
+                </div>
+              )}
             <details className="audit-details status-danger" open>
               <summary><span className="audit-dot" />Opérations Belfius absentes ({monthMissing.length})</summary>
               {monthMissing.map((row) => (
@@ -930,6 +958,7 @@ export default function BelfiusAudit({
                 </article>
               ))}
             </details>
+            </>
           )}
 
           {futureExtra.length > 0 && (
