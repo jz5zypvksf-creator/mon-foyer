@@ -339,6 +339,39 @@ h2 {
   background: var(--danger);
 }
 
+.progress-fill.food-progress-safe {
+  background: #3e9b68;
+}
+
+.progress-fill.food-progress-warning {
+  background: #e3912f;
+}
+
+.progress-fill.food-progress-danger {
+  background: #c44f49;
+}
+
+.progress-fill.food-progress-exceeded {
+  background: #1e2529;
+}
+
+.food-budget-status.safe {
+  color: #2f7d57;
+}
+
+.food-budget-status.warning {
+  color: #a85c00;
+}
+
+.food-budget-status.danger {
+  color: #b33f3a;
+}
+
+.food-budget-status.exceeded {
+  color: #1e2529;
+  font-weight: 850;
+}
+
 .food-budget-panel .section-title h2 {
   display: inline-flex;
   align-items: center;

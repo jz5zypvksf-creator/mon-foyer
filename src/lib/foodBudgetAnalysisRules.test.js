@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeFoodBudgetPace, recommendFoodBudget } from './foodBudgetAnalysisRules.js';
+import {
+  analyzeFoodBudgetPace,
+  foodBudgetProgressStatus,
+  recommendFoodBudget,
+} from './foodBudgetAnalysisRules.js';
+
+test('la couleur du budget nourriture suit des seuils proportionnels', () => {
+  assert.equal(foodBudgetProgressStatus(399.99, 500), 'safe');
+  assert.equal(foodBudgetProgressStatus(400, 500), 'warning');
+  assert.equal(foodBudgetProgressStatus(475, 500), 'danger');
+  assert.equal(foodBudgetProgressStatus(500, 500), 'danger');
+  assert.equal(foodBudgetProgressStatus(500.01, 500), 'exceeded');
+  assert.equal(foodBudgetProgressStatus(480, 600), 'warning');
+});
 
 test('le rythme alimentaire compare le budget journalier aux jours écoulés', () => {
   const analysis = analyzeFoodBudgetPace({
@@ -54,4 +67,3 @@ test('la recommandation après trois mois est prudente et exclut Papa', () => {
   assert.equal(recommendation.adjustment, 25);
   assert.equal(recommendation.effectiveMonth, '2026-09');
 });
-

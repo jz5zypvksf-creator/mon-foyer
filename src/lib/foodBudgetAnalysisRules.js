@@ -20,6 +20,16 @@ export function nextMonthKey(monthKey) {
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+export function foodBudgetProgressStatus(spent, budget) {
+  const safeBudget = Number(budget) || 0;
+  const safeSpent = Math.max(Number(spent) || 0, 0);
+  if (safeBudget <= 0 || safeSpent > safeBudget) return 'exceeded';
+  const ratio = safeSpent / safeBudget;
+  if (ratio >= 0.95) return 'danger';
+  if (ratio >= 0.8) return 'warning';
+  return 'safe';
+}
+
 export function analyzeFoodBudgetPace({ monthKey, budget, spent, currentDate }) {
   const totalDays = daysInMonth(monthKey);
   const currentMonth = String(currentDate || '').slice(0, 7);
@@ -108,4 +118,3 @@ export function recommendFoodBudget({
     effectiveMonth: nextMonthKey(currentMonth),
   };
 }
-
