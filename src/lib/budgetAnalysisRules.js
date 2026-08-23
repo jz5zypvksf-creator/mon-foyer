@@ -5,9 +5,17 @@ function amount(value) {
 
 function isExcludedFromBudget(operation) {
   const label = String(operation?.label || '').trim().toLowerCase();
-  return label.startsWith('ajustement belfius')
+  return label.startsWith('ajustement belfius');
+}
+
+function isSavingsFunding(operation) {
+  const label = String(operation?.label || '').trim().toLowerCase();
+  return operation?.type === 'income' && (
+    operation?.savingsDirection === 'out'
+    || operation?.savings_direction === 'out'
     || label.startsWith('transfert depuis épargne')
-    || label.startsWith('transfert depuis epargne');
+    || label.startsWith('transfert depuis epargne')
+  );
 }
 
 function previousMonth(month) {
@@ -25,6 +33,10 @@ function assignedBudgetMonth(operation) {
   return operation?.budgetMonth || operation?.budget_month || '';
 }
 
+function expenseBudgetMonth(operation) {
+  return assignedBudgetMonth(operation) || String(operation?.date || '').slice(0, 7);
+}
+
 function summarizeBudgetMonth(operations, month, throughDate = '', useOpeningBalance = false) {
   const salaryMonth = previousMonth(month);
   return operations.reduce((summary, operation) => {
@@ -35,7 +47,9 @@ function summarizeBudgetMonth(operations, month, throughDate = '', useOpeningBal
 
     // Les salaires reçus en fin de mois financent le mois suivant. Ils sont donc
     // exclus de leur mois bancaire et rattachés une seule fois au mois budgétaire suivant.
-    if (operation.type === 'income') {
+    if (isSavingsFunding(operation) && expenseBudgetMonth(operation) === month && isWithinCutoff) {
+      summary.savingsFunding += value;
+    } else if (operation.type === 'income') {
       const assignedMonth = assignedBudgetMonth(operation);
       if (!useOpeningBalance && assignedMonth === month) summary.income += value;
       else if (!useOpeningBalance && !assignedMonth && date.startsWith(salaryMonth) && isSalary(operation)) summary.income += value;
@@ -44,17 +58,17 @@ function summarizeBudgetMonth(operations, month, throughDate = '', useOpeningBal
       if (assignedMonth === month) summary.assignedIncome += value;
       else if (!assignedMonth && ((date.startsWith(salaryMonth) && isSalary(operation)) || (date.startsWith(month) && !isSalary(operation)))) summary.assignedIncome += value;
     }
-    if (date.startsWith(month) && isWithinCutoff) {
+    if (expenseBudgetMonth(operation) === month && isWithinCutoff) {
       if (operation.type === 'fixed' || operation.type === 'variable') summary.expenses += value;
     }
     return summary;
-  }, { month, income: 0, assignedIncome: 0, expenses: 0, surplus: 0 });
+  }, { month, income: 0, assignedIncome: 0, savingsFunding: 0, expenses: 0, surplus: 0 });
 }
 
 function completedMonthsWithData(operations, selectedMonth, todayMonth) {
   const cutoff = selectedMonth < todayMonth ? selectedMonth : previousMonth(todayMonth);
   return [...new Set(operations
-    .map((operation) => String(operation?.date || '').slice(0, 7))
+    .map((operation) => expenseBudgetMonth(operation))
     .filter((month) => /^\d{4}-\d{2}$/.test(month) && month <= cutoff))]
     .sort()
     .slice(-3);
@@ -79,7 +93,7 @@ export function analyzeBudget({
   const hasOpeningBalance = openingBalance !== null && Number.isFinite(Number(openingBalance));
   const current = summarizeBudgetMonth(operations, selectedMonth, currentCutoff, hasOpeningBalance);
   current.openingBalance = hasOpeningBalance ? amount(openingBalance) : 0;
-  current.resources = current.openingBalance + current.income;
+  current.resources = current.openingBalance + current.income + current.savingsFunding;
   current.surplus = current.resources - current.expenses;
 
   const calculatedForecastBalance = current.surplus - amount(scheduledExpenseTotal);

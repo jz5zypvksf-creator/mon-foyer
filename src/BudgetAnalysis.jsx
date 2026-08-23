@@ -32,6 +32,7 @@ export default function BudgetAnalysis({ analysis }) {
         <div><span>Disponible au début du mois</span><strong>{money(analysis.current.openingBalance)}</strong></div>
         <div><span>Revenus encaissés dans le mois</span><strong>{money(analysis.current.income)}</strong></div>
         <div><span>Revenus affectés au mois</span><strong>{money(analysis.current.assignedIncome)}</strong></div>
+        <div><span>Transferts depuis l’épargne</span><strong>{money(analysis.current.savingsFunding)}</strong></div>
         <div><span>Ressources budgétaires cumulées</span><strong>{money(analysis.current.resources)}</strong></div>
         <div><span>Dépenses exécutées</span><strong>{money(analysis.current.expenses)}</strong></div>
         <div><span>Dépenses programmées</span><strong>{money(analysis.scheduledExpenseTotal)}</strong></div>
