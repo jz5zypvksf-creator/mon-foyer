@@ -39,7 +39,6 @@ import {
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
-import FoodBudgetAnalysis from './FoodBudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
@@ -51,11 +50,6 @@ import {
 } from './lib/syncOutbox.js';
 import { analyzeBudget } from './lib/budgetAnalysisRules.js';
 import { belongsToHouseholdFoodBudget } from './lib/foodBudgetRules.js';
-import {
-  analyzeFoodBudgetPace,
-  foodBudgetProgressStatus,
-  recommendFoodBudget,
-} from './lib/foodBudgetAnalysisRules.js';
 import {
   DEFAULT_CARE_PEOPLE,
   DEFAULT_FOOD_BUDGET,
@@ -74,12 +68,18 @@ import {
   capturePaymentOperationState,
   matchesRecordedSavingsDeposit,
 } from './lib/accountingLedger.js';
+import {
+  isMastercardPaymentMethod,
+  MASTERCARD_MASKED_NUMBER,
+  MASTERCARD_PAYMENT_METHOD,
+  mastercardSettlementDate,
+} from './lib/cardPaymentRules.js';
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
-const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
+const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther', MASTERCARD_PAYMENT_METHOD];
 const RECURRENCE_OPTIONS = [
   { value: 'once', label: 'Une seule fois', months: 0 },
   { value: 'monthly', label: 'Mensuelle', months: 1 },
@@ -87,8 +87,8 @@ const RECURRENCE_OPTIONS = [
   { value: 'semiannual', label: 'Semestrielle', months: 6 },
   { value: 'annual', label: 'Annuelle', months: 12 },
 ];
-const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius'];
-const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, savings_goal_id, savings_direction, budget_month, income_kind, income_source, created_at';
+const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius', MASTERCARD_PAYMENT_METHOD];
+const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, settles_payment_method, settlement_date, savings_goal_id, savings_direction, budget_month, income_kind, income_source, created_at';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
 
@@ -262,6 +262,8 @@ function normalizeOperation(operation) {
     amount: Number(operation.amount),
     store: operation.store || '',
     paymentMethod: operation.payment_method || operation.paymentMethod || 'Compte Belfius',
+    settlesPaymentMethod: operation.settles_payment_method || operation.settlesPaymentMethod || '',
+    settlementDate: operation.settlement_date || operation.settlementDate || '',
     savingsGoalId: operation.savings_goal_id || operation.savingsGoalId || '',
     savingsDirection: operation.savings_direction || operation.savingsDirection || '',
     budgetMonth: operation.budget_month || operation.budgetMonth || inferredBudgetMonth(operation),
@@ -342,6 +344,8 @@ function makeEmptyOperation() {
     budgetMonth: currentMonth(),
     incomeKind: 'other',
     incomeSource: '',
+    settlesPaymentMethod: '',
+    settlementDate: '',
   };
 }
 
@@ -357,6 +361,7 @@ function makeEmptyRecurringFixedExpense() {
     structuredCommunication: '',
     freeCommunication: '',
     freeCommunicationMode: 'contains',
+    paymentMethod: 'Compte Belfius',
   };
 }
 
@@ -386,6 +391,7 @@ function fixedExpenseSignature(operation) {
     operation.date,
     operation.person,
     operation.category,
+    operation.paymentMethod || operation.payment_method || 'Compte Belfius',
     operation.label.trim().toLowerCase(),
     Number(operation.amount).toFixed(2),
   ].join('|');
@@ -398,6 +404,7 @@ function recurringExpenseSignature(expense) {
     Number(expense.day),
     expense.person,
     expense.category,
+    expense.paymentMethod || expense.payment_method || 'Compte Belfius',
     expense.frequency || 'monthly',
   ].join('|');
 }
@@ -451,6 +458,7 @@ function normalizeRemoteState(remote) {
       structuredCommunication: expense.structured_communication || '',
       freeCommunication: expense.free_communication || '',
       freeCommunicationMode: expense.free_communication_mode || 'contains',
+      paymentMethod: expense.payment_method || expense.paymentMethod || 'Compte Belfius',
     })),
   };
 }
@@ -641,6 +649,15 @@ export default function App() {
     return calculatePaymentBalances(operationsUpToCutoff);
   }, [balanceCutoff, data.operations]);
 
+  const mastercardOutstanding = Math.max(0, -Number(paymentBalances[MASTERCARD_PAYMENT_METHOD] || 0));
+  const mastercardNextDebitDate = useMemo(() => data.operations
+    .filter((operation) => isMastercardPaymentMethod(operation.paymentMethod)
+      && operation.settlementDate
+      && operation.settlementDate >= today
+      && operation.date <= balanceCutoff)
+    .map((operation) => operation.settlementDate)
+    .sort()[0] || '', [balanceCutoff, data.operations, today]);
+
   const liveBelfiusSnapshot = useMemo(
     () => calculateLiveBankSnapshot(belfiusSnapshot, data.operations, today),
     [belfiusSnapshot, data.operations, today],
@@ -675,7 +692,10 @@ export default function App() {
         type: 'fixed',
         category: expense.category,
         store: '',
-        paymentMethod: 'Compte Belfius',
+        paymentMethod: expense.paymentMethod || expense.payment_method || 'Compte Belfius',
+        settlementDate: isMastercardPaymentMethod(expense.paymentMethod || expense.payment_method)
+          ? mastercardSettlementDate(dateInMonth(selectedMonth, expense.day))
+          : '',
         label: expense.label,
         amount: Number(expense.amount) || 0,
         projectedRecurring: true,
@@ -846,20 +866,6 @@ export default function App() {
 
   const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
   const foodOverBudget = totals.food > foodBudget;
-  const foodProgressStatus = foodBudgetProgressStatus(totals.food, foodBudget);
-  const foodBudgetPace = useMemo(() => analyzeFoodBudgetPace({
-    monthKey: selectedMonth,
-    budget: foodBudget,
-    spent: totals.food,
-    currentDate: today,
-  }), [foodBudget, selectedMonth, today, totals.food]);
-  const foodBudgetRecommendation = useMemo(() => recommendFoodBudget({
-    operations: data.operations,
-    budgetSettings,
-    currentBudget: foodBudget,
-    excludedPeople: foodBudgetExcluded,
-    currentDate: today,
-  }), [budgetSettings, data.operations, foodBudget, foodBudgetExcluded, today]);
 
   const annualReview = useMemo(() => {
     const selectedYear = selectedMonth.slice(0, 4);
@@ -944,8 +950,8 @@ export default function App() {
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
-        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
-        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state, opening_month, opening_balance, opening_balances').eq('household_id', householdId).maybeSingle(),
+        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state, opening_month, opening_balance, opening_balances, live_balance, live_balance_date, live_balance_source, live_operation_state').eq('household_id', householdId).maybeSingle(),
         supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
         supabase.from('care_people').select('id, name, tracks_reimbursements, exclude_from_food_budget, active').eq('household_id', householdId).order('created_at', { ascending: true }),
       ]);
@@ -1004,6 +1010,10 @@ export default function App() {
           openingMonth: snapshotResult.data.opening_month || '',
           openingBalance: snapshotResult.data.opening_balance == null ? null : Number(snapshotResult.data.opening_balance),
           openingBalances: snapshotResult.data.opening_balances || {},
+          liveBalance: snapshotResult.data.live_balance == null ? null : Number(snapshotResult.data.live_balance),
+          liveBalanceDate: snapshotResult.data.live_balance_date || '',
+          liveBalanceSource: snapshotResult.data.live_balance_source || '',
+          liveOperationState: snapshotResult.data.live_operation_state || {},
         });
       }
       setSyncStatus('Synchronise avec Supabase');
@@ -1088,7 +1098,7 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_fixed_expenses' }, async () => {
         const { data: rows } = await supabase
           .from('recurring_fixed_expenses')
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
           .eq('household_id', householdId)
           .order('created_at', { ascending: true });
         if (rows) {
@@ -1100,6 +1110,7 @@ export default function App() {
               structuredCommunication: expense.structured_communication || '',
               freeCommunication: expense.free_communication || '',
               freeCommunicationMode: expense.free_communication_mode || 'contains',
+              paymentMethod: expense.payment_method || 'Compte Belfius',
             })),
           });
         }
@@ -1158,6 +1169,7 @@ export default function App() {
       structuredCommunication: operation.structuredCommunication ?? existing?.structuredCommunication ?? existing?.structured_communication ?? '',
       freeCommunication: operation.freeCommunication ?? existing?.freeCommunication ?? existing?.free_communication ?? '',
       freeCommunicationMode: operation.freeCommunicationMode || existing?.freeCommunicationMode || existing?.free_communication_mode || 'contains',
+      paymentMethod: operation.paymentMethod || existing?.paymentMethod || existing?.payment_method || 'Compte Belfius',
     };
 
     if (USE_REMOTE_BUDGET) {
@@ -1173,19 +1185,21 @@ export default function App() {
         structured_communication: recurringExpense.structuredCommunication || null,
         free_communication: recurringExpense.freeCommunication || null,
         free_communication_mode: recurringExpense.freeCommunicationMode || 'contains',
+        payment_method: recurringExpense.paymentMethod,
       };
 
       const query = existing
         ? supabase.from('recurring_fixed_expenses').update(payload).eq('id', existing.id).eq('household_id', householdId)
         : supabase.from('recurring_fixed_expenses').insert(payload);
 
-      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode');
+      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method');
       if (error) throw new Error(formatSupabaseRecurringError(error));
       const saved = savedRows?.[0];
       if (saved) {
         recurringExpense.id = saved.id;
         recurringExpense.amount = Number(saved.amount);
         recurringExpense.day = Number(saved.day);
+        recurringExpense.paymentMethod = saved.payment_method || 'Compte Belfius';
       }
     }
 
@@ -1239,9 +1253,19 @@ export default function App() {
           ? `Transfert vers épargne — ${savingsTargetGoal.label} · ${draft.label.trim()}`
           : draft.label.trim(),
       // Le bénéficiaire / point de vente est utile pour tous les débits, y compris les frais fixes.
-      store: draft.type === 'income' || draft.type === 'savings_transfer' ? '' : draft.store,
-      category: draft.type === 'income' ? 'revenus' : draft.type === 'savings_transfer' ? 'divers' : draft.category,
-      paymentMethod: draft.type === 'savings_transfer' ? 'Compte Belfius' : draft.paymentMethod || 'Compte Belfius',
+      store: draft.type === 'income' || draft.type === 'savings_transfer'
+        ? ''
+        : draft.type === 'card_settlement' ? 'Mastercard' : draft.store,
+      category: draft.type === 'income'
+        ? 'revenus'
+        : ['savings_transfer', 'card_settlement'].includes(draft.type) ? 'divers' : draft.category,
+      paymentMethod: ['savings_transfer', 'card_settlement'].includes(draft.type)
+        ? 'Compte Belfius'
+        : draft.paymentMethod || 'Compte Belfius',
+      settlesPaymentMethod: draft.type === 'card_settlement' ? MASTERCARD_PAYMENT_METHOD : '',
+      settlementDate: isMastercardPaymentMethod(draft.paymentMethod)
+        ? (draft.settlementDate || mastercardSettlementDate(draft.date))
+        : '',
       savingsGoalId: savingsSourceGoal?.id || savingsTargetGoal?.id || '',
       savingsDirection: savingsSourceGoal ? 'out' : savingsTargetGoal ? 'in' : '',
       id: editingId || crypto.randomUUID(),
@@ -1276,6 +1300,8 @@ export default function App() {
         label: operation.label,
         amount: operation.amount,
         payment_method: operation.paymentMethod,
+        settles_payment_method: operation.settlesPaymentMethod || null,
+        settlement_date: operation.settlementDate || null,
         savings_goal_id: operation.savingsGoalId || null,
       savings_direction: operation.savingsDirection || null,
         budget_month: operation.type === 'income' ? (operation.budgetMonth || operation.date.slice(0, 7)) : null,
@@ -1612,6 +1638,7 @@ export default function App() {
       structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',
       freeCommunication: expense.freeCommunication || expense.free_communication || '',
       freeCommunicationMode: expense.freeCommunicationMode || expense.free_communication_mode || 'contains',
+      paymentMethod: expense.paymentMethod || expense.payment_method || 'Compte Belfius',
     });
     setRecurringStatus('Modification du frais récurrent en cours.');
     window.setTimeout(() => {
@@ -1643,6 +1670,7 @@ export default function App() {
       structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),
       freeCommunication: String(recurringDraft.freeCommunication || '').trim(),
       freeCommunicationMode: recurringDraft.freeCommunicationMode || 'contains',
+      paymentMethod: recurringDraft.paymentMethod || 'Compte Belfius',
     };
 
     const identicalRecurring = (data.recurringFixedExpenses || []).find(
@@ -1673,6 +1701,7 @@ export default function App() {
         structured_communication: fixedExpense.structuredCommunication || null,
         free_communication: fixedExpense.freeCommunication || null,
         free_communication_mode: fixedExpense.freeCommunicationMode || 'contains',
+        payment_method: fixedExpense.paymentMethod,
       };
 
       const query = recurringEditingId
@@ -1681,12 +1710,12 @@ export default function App() {
           .update(payload)
           .eq('id', recurringEditingId)
           .eq('household_id', householdId)
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
           .single()
         : supabase
           .from('recurring_fixed_expenses')
           .insert(payload)
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
+          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
           .single();
 
       const { data: savedExpense, error } = await query;
@@ -1708,6 +1737,7 @@ export default function App() {
         structuredCommunication: savedExpense.structured_communication || '',
         freeCommunication: savedExpense.free_communication || '',
         freeCommunicationMode: savedExpense.free_communication_mode || 'contains',
+        paymentMethod: savedExpense.payment_method || 'Compte Belfius',
       };
     }
 
@@ -1770,7 +1800,10 @@ export default function App() {
         type: 'fixed',
         category: expense.category,
         store: '',
-        paymentMethod: 'Compte Belfius',
+        paymentMethod: expense.paymentMethod || expense.payment_method || 'Compte Belfius',
+        settlementDate: isMastercardPaymentMethod(expense.paymentMethod || expense.payment_method)
+          ? mastercardSettlementDate(dateInMonth(selectedMonth, expense.day))
+          : '',
         label: expense.label,
         amount: parseDecimal(expense.amount),
       }))
@@ -1792,6 +1825,7 @@ export default function App() {
         category: operation.category,
         store: null,
         payment_method: operation.paymentMethod || 'Compte Belfius',
+        settlement_date: operation.settlementDate || null,
         label: operation.label,
         amount: operation.amount,
       }));
@@ -1922,6 +1956,10 @@ export default function App() {
       openingBalances: snapshot.openingMonth && snapshot.openingBalance != null
         ? { ...(belfiusSnapshot?.openingBalances || {}), [snapshot.openingMonth]: Number(snapshot.openingBalance) }
         : (belfiusSnapshot?.openingBalances || {}),
+      liveBalance: null,
+      liveBalanceDate: '',
+      liveBalanceSource: '',
+      liveOperationState: {},
     };
     setBelfiusSnapshot(normalized);
     localStorage.setItem('mon-foyer-last-belfius-audit-at', normalized.importedAt);
@@ -1941,6 +1979,10 @@ export default function App() {
       opening_month: normalized.openingMonth || null,
       opening_balance: normalized.openingBalance,
       opening_balances: normalized.openingBalances,
+      live_balance: null,
+      live_balance_date: null,
+      live_balance_source: null,
+      live_operation_state: {},
       updated_at: new Date().toISOString(),
     }, { onConflict: 'household_id' });
     if (error) setSyncStatus('Erreur de mémorisation du solde Belfius: ' + error.message);
@@ -2019,7 +2061,7 @@ export default function App() {
         .order('label', { ascending: true }),
       supabase
         .from('recurring_fixed_expenses')
-        .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
+        .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
       supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
@@ -2099,6 +2141,8 @@ export default function App() {
         category: operation.category,
         store: operation.store || null,
         payment_method: operation.paymentMethod || operation.payment_method || 'Compte Belfius',
+        settles_payment_method: operation.settlesPaymentMethod || operation.settles_payment_method || null,
+        settlement_date: operation.settlementDate || operation.settlement_date || null,
         label: operation.label,
         amount: Number(operation.amount),
       }));
@@ -2377,7 +2421,7 @@ export default function App() {
                 <span>Disponible total actuel</span>
                 <strong>{formatCurrency(availableForPayments)}</strong>
                 <div className="hero-balance-grid">
-                  {PAYMENT_METHODS.map((method) => (
+                  {PAYMENT_METHODS.filter((method) => method !== MASTERCARD_PAYMENT_METHOD).map((method) => (
                     <div key={method}>
                       <span>{method === 'Compte Belfius' ? 'Solde Belfius actuel' : method}</span>
                       {(() => {
@@ -2395,7 +2439,7 @@ export default function App() {
                   {liveBelfiusSnapshot && (
                     <>
                       <div>
-                        <span>Mouvements depuis le relevé</span>
+                        <span>{liveBelfiusSnapshot.balanceSource === 'Application Belfius' ? 'Mouvements depuis le solde certifié' : 'Mouvements depuis le relevé'}</span>
                         <em className={Number(liveBelfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
                           {formatCurrency(Number(liveBelfiusSnapshot.pendingAmount || 0))}
                         </em>
@@ -2418,6 +2462,20 @@ export default function App() {
                     </div>
                   </details>
                 )}
+                <div className="mastercard-summary" aria-label="Suivi Mastercard">
+                  <div>
+                    <span>Encours Mastercard {MASTERCARD_MASKED_NUMBER}</span>
+                    <strong className={mastercardOutstanding > 0 ? 'negative' : 'positive'}>
+                      {formatCurrency(-mastercardOutstanding)}
+                    </strong>
+                  </div>
+                  <span>
+                    {mastercardNextDebitDate
+                      ? `Prélèvement Belfius prévu le ${new Date(`${mastercardNextDebitDate}T12:00:00`).toLocaleDateString('fr-BE')}`
+                      : 'Aucun prélèvement Mastercard en attente'}
+                  </span>
+                  <small>Déjà réservé dans le disponible total · pas encore débité de Belfius.</small>
+                </div>
               </div>
               <PiggyBank size={42} />
             </div>
@@ -2428,14 +2486,12 @@ export default function App() {
                 <span>{formatCurrency(totals.food)} / {formatCurrency(foodBudget)}</span>
               </div>
               <div className="progress-track">
-                <div className={`progress-fill food-progress-${foodProgressStatus}`} style={{ width: `${foodRatio}%` }} />
+                <div className={foodOverBudget ? 'progress-fill danger' : 'progress-fill'} style={{ width: `${foodRatio}%` }} />
               </div>
-              <p className={`hint food-budget-status ${foodProgressStatus}`}>
+              <p className={foodOverBudget ? 'hint status-error' : 'hint'}>
                 {foodOverBudget ? `${formatCurrency(totals.food - foodBudget)} au-dessus de l'idéal` : `${formatCurrency(foodBudget - totals.food)} disponibles`}
               </p>
             </section>
-
-            <FoodBudgetAnalysis pace={foodBudgetPace} recommendation={foodBudgetRecommendation} />
 
             <BudgetAnalysis analysis={budgetAnalysis} />
 
@@ -2634,6 +2690,7 @@ export default function App() {
                       ...draft,
                       type,
                       category: nextCategory,
+                      paymentMethod: selectedType === 'card_settlement' ? 'Compte Belfius' : draft.paymentMethod,
                       incomeKind: selectedType === 'salary' ? 'salary' : selectedType === 'income' ? 'other' : draft.incomeKind,
                       budgetMonth: selectedType === 'salary' ? nextMonthKey(draft.date) : draft.budgetMonth,
                     });
@@ -2642,6 +2699,7 @@ export default function App() {
                   <option value="salary">Salaire</option>
                   <option value="income">Autre revenu</option>
                   <option value="reimbursement">Remboursement</option>
+                  <option value="card_settlement">Règlement Mastercard</option>
                   <option value="fixed">Frais fixes</option>
                   <option value="variable">Dépenses variables</option>
                 </select>
@@ -2684,6 +2742,20 @@ export default function App() {
                   })}
                 </select>
               </label>
+
+              {isMastercardPaymentMethod(draft.paymentMethod) && draft.type !== 'card_settlement' && (
+                <p className="card-payment-hint">
+                  Mastercard {MASTERCARD_MASKED_NUMBER} · prélèvement Belfius prévu le{' '}
+                  <strong>{new Date(`${mastercardSettlementDate(draft.date)}T12:00:00`).toLocaleDateString('fr-BE')}</strong>.
+                  La dépense est immédiatement réservée dans le disponible.
+                </p>
+              )}
+
+              {draft.type === 'card_settlement' && (
+                <p className="card-payment-hint">
+                  Ce mouvement débite Belfius et apure l’encours Mastercard sans créer une seconde dépense budgétaire.
+                </p>
+              )}
 
               {draft.type === 'income' && (
                 <>
@@ -3127,6 +3199,15 @@ export default function App() {
                         ))}
                     </select>
                   </label>
+                  <label>
+                    Moyen de paiement
+                    <select
+                      value={recurringDraft.paymentMethod || 'Compte Belfius'}
+                      onChange={(event) => setRecurringDraft({ ...recurringDraft, paymentMethod: event.target.value })}
+                    >
+                      {PAYMENT_METHODS.map((method) => <option key={method} value={method}>{method}</option>)}
+                    </select>
+                  </label>
                 </div>
                 <button className="primary-button" type="submit">
                   <Plus size={20} />
@@ -3144,7 +3225,7 @@ export default function App() {
                     <article className="recurring-row" key={expense.id}>
                       <div>
                         <strong>{expense.label}</strong>
-                        <span>{formatCurrency(expense.amount)} · jour {expense.day} · {recurrenceLabel(expense.frequency)} · {expense.person} · {category?.label || 'Frais fixe'}</span>
+                        <span>{formatCurrency(expense.amount)} · jour {expense.day} · {recurrenceLabel(expense.frequency)} · {expense.person} · {category?.label || 'Frais fixe'} · {expense.paymentMethod || expense.payment_method || 'Compte Belfius'}</span>
                       </div>
                       <div className="row-actions">
                         <button type="button" onClick={() => editRecurringFixedExpense(expense)} aria-label="Modifier" title="Modifier">
