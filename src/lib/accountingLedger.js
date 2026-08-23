@@ -7,9 +7,21 @@ export const isCreditOperation = (operation) => (
   operation?.type === 'income' || operation?.type === 'reimbursement'
 );
 
+export const isCardSettlement = (operation) => operation?.type === 'card_settlement';
+
 export const signedPaymentAmount = (operation) => {
   const value = amount(operation?.amount);
   return isCreditOperation(operation) ? value : -value;
+};
+
+export const operationPaymentEffects = (operation) => {
+  const method = operation?.paymentMethod || operation?.payment_method || 'Compte Belfius';
+  const effects = { [method]: signedPaymentAmount(operation) };
+  const settledMethod = operation?.settlesPaymentMethod || operation?.settles_payment_method || '';
+  if (isCardSettlement(operation) && settledMethod && settledMethod !== method) {
+    effects[settledMethod] = (effects[settledMethod] || 0) + amount(operation?.amount);
+  }
+  return effects;
 };
 
 export function calculatePaymentMethodBalances(
@@ -20,9 +32,10 @@ export function calculatePaymentMethodBalances(
   const balances = Object.fromEntries(methods.map((method) => [method, 0]));
   operations.forEach((operation) => {
     if (throughDate && String(operation?.date || '') > throughDate) return;
-    const method = operation?.paymentMethod || operation?.payment_method || 'Compte Belfius';
-    if (!Object.hasOwn(balances, method)) return;
-    balances[method] += signedPaymentAmount(operation);
+    Object.entries(operationPaymentEffects(operation)).forEach(([method, effect]) => {
+      if (!Object.hasOwn(balances, method)) return;
+      balances[method] += effect;
+    });
   });
   return balances;
 }
@@ -51,16 +64,22 @@ const stateTotal = (state = {}) => Object.values(state || {})
 
 export function calculateLiveBankSnapshot(snapshot, operations = [], throughDate = '') {
   if (!snapshot) return null;
-  const baseline = snapshot.operationState || snapshot.operation_state || {};
+  const hasManualLiveBalance = snapshot.liveBalance != null || snapshot.live_balance != null;
+  const baseline = hasManualLiveBalance
+    ? (snapshot.liveOperationState || snapshot.live_operation_state || {})
+    : (snapshot.operationState || snapshot.operation_state || {});
   const current = capturePaymentOperationState(operations, 'Compte Belfius', throughDate);
   const movementDelta = stateTotal(current) - stateTotal(baseline);
-  const pendingAmount = amount(snapshot.pendingAmount ?? snapshot.pending_amount) + movementDelta;
-  const balance = amount(snapshot.balance);
+  const pendingAmount = (hasManualLiveBalance ? 0 : amount(snapshot.pendingAmount ?? snapshot.pending_amount)) + movementDelta;
+  const balance = hasManualLiveBalance
+    ? amount(snapshot.liveBalance ?? snapshot.live_balance)
+    : amount(snapshot.balance);
   return {
     ...snapshot,
     pendingAmount,
     expectedBalance: balance + pendingAmount,
     movementDelta,
+    balanceSource: hasManualLiveBalance ? 'Application Belfius' : 'CSV Belfius',
     operationState: baseline,
   };
 }

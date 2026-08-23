@@ -1931,6 +1931,43 @@ input, select, textarea {
 }
 
 
+.mastercard-summary {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  display: grid;
+  gap: 5px;
+}
+
+.mastercard-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.mastercard-summary strong {
+  font-size: 1.05rem !important;
+  white-space: nowrap;
+}
+
+.mastercard-summary small {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.card-payment-hint {
+  margin: -2px 0 8px;
+  padding: 10px 12px;
+  border: 1px solid #b9d7ca;
+  border-radius: 12px;
+  background: #edf8f2;
+  color: #184d3b;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 /* Synchronisation automatique visible */
 .sync-indicator {
   display: inline-flex;

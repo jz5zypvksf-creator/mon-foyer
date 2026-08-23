@@ -6,6 +6,7 @@ import {
   calculatePaymentMethodBalances,
   capturePaymentOperationState,
   matchesRecordedSavingsDeposit,
+  operationPaymentEffects,
 } from './accountingLedger.js';
 
 const closeTo = (actual, expected) => {
@@ -35,6 +36,28 @@ test('un remboursement crédite le moyen de paiement', () => {
   closeTo(balances['Compte Belfius'], 118.78);
 });
 
+test('un règlement Mastercard débite Belfius et apure la carte sans seconde dépense', () => {
+  const mastercard = 'Mastercard Platinum •••• 4397';
+  const operations = [
+    { type: 'fixed', paymentMethod: mastercard, amount: 17.99 },
+    { type: 'variable', paymentMethod: mastercard, amount: 7.99 },
+    {
+      type: 'card_settlement', paymentMethod: 'Compte Belfius',
+      settlesPaymentMethod: mastercard, amount: 25.98,
+    },
+  ];
+  const balances = calculatePaymentMethodBalances(
+    operations,
+    ['Compte Belfius', mastercard],
+  );
+  closeTo(balances['Compte Belfius'], -25.98);
+  closeTo(balances[mastercard], 0);
+  assert.deepEqual(operationPaymentEffects(operations[2]), {
+    'Compte Belfius': -25.98,
+    [mastercard]: 25.98,
+  });
+});
+
 test('le solde Belfius vivant ajoute les mouvements postérieurs au dernier audit', () => {
   const auditedOperations = [
     { id: 'old', date: '2026-08-17', type: 'variable', paymentMethod: 'Compte Belfius', amount: 66.45 },
@@ -61,6 +84,21 @@ test('modifier ou supprimer une dépense recalcule le solde sans double mouvemen
   };
   closeTo(calculateLiveBankSnapshot(snapshot, [{ ...baselineOperation, amount: 25 }], '2026-08-17').expectedBalance, 55);
   closeTo(calculateLiveBankSnapshot(snapshot, [], '2026-08-17').expectedBalance, 80);
+});
+
+test('un solde certifié dans Belfius devient la base vivante sans modifier le dernier CSV', () => {
+  const operation = { id: 'known', date: '2026-08-23', type: 'variable', paymentMethod: 'Compte Belfius', amount: 12.76 };
+  const snapshot = {
+    balance: 56.90,
+    pendingAmount: -110.52,
+    operationState: {},
+    liveBalance: -82.52,
+    liveOperationState: capturePaymentOperationState([operation], 'Compte Belfius', '2026-08-23'),
+  };
+  const live = calculateLiveBankSnapshot(snapshot, [operation], '2026-08-23');
+  closeTo(live.expectedBalance, -82.52);
+  assert.equal(live.balanceSource, 'Application Belfius');
+  closeTo(snapshot.balance, 56.90);
 });
 
 test('un transfert modifié puis supprimé ajuste exactement l’épargne', () => {
