@@ -339,6 +339,39 @@ h2 {
   background: var(--danger);
 }
 
+.progress-fill.food-progress-safe {
+  background: #3e9b68;
+}
+
+.progress-fill.food-progress-warning {
+  background: #e3912f;
+}
+
+.progress-fill.food-progress-danger {
+  background: #c44f49;
+}
+
+.progress-fill.food-progress-exceeded {
+  background: #1e2529;
+}
+
+.food-budget-status.safe {
+  color: #2f7d57;
+}
+
+.food-budget-status.warning {
+  color: #a85c00;
+}
+
+.food-budget-status.danger {
+  color: #b33f3a;
+}
+
+.food-budget-status.exceeded {
+  color: #1e2529;
+  font-weight: 850;
+}
+
 .food-budget-panel .section-title h2 {
   display: inline-flex;
   align-items: center;
@@ -348,6 +381,130 @@ h2 {
 .food-budget-panel .section-title h2 svg {
   color: var(--green);
   flex: 0 0 auto;
+}
+
+.food-budget-analysis {
+  display: grid;
+  gap: 14px;
+}
+
+.food-budget-analysis .section-title {
+  margin-bottom: 0;
+}
+
+.food-budget-analysis .section-title h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.food-analysis-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 15px;
+  background: #eef8f1;
+  color: #2f7d57;
+}
+
+.food-analysis-status div {
+  display: grid;
+  gap: 3px;
+}
+
+.food-analysis-status span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.food-budget-analysis.status-watch .food-analysis-status {
+  background: #fff6e5;
+  color: #986000;
+}
+
+.food-budget-analysis.status-over .food-analysis-status {
+  background: #fff0ed;
+  color: var(--danger);
+}
+
+.food-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.food-analysis-grid > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8faf9;
+}
+
+.food-analysis-grid span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.food-analysis-grid strong {
+  color: var(--blue);
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.food-recommendation {
+  padding: 13px;
+  border: 1px solid #cfe3d6;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #f2f9f4, #fbfdfc);
+}
+
+.food-recommendation-title,
+.food-suggestion-amount {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--blue);
+}
+
+.food-recommendation p {
+  margin: 8px 0;
+  color: #52646f;
+  line-height: 1.45;
+}
+
+.food-suggestion-amount {
+  flex-wrap: wrap;
+  padding: 9px 0;
+}
+
+.food-suggestion-amount strong {
+  font-size: 1.35rem;
+}
+
+.food-suggestion-amount span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: #2f6f50;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.food-recommendation small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+@media (max-width: 380px) {
+  .food-analysis-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .hint {
@@ -1773,6 +1930,7 @@ input, select, textarea {
   }
 }
 
+
 .mastercard-summary {
   margin-top: 12px;
   padding: 12px 14px;
@@ -1809,7 +1967,6 @@ input, select, textarea {
   font-size: 0.84rem;
   line-height: 1.45;
 }
-
 
 /* Synchronisation automatique visible */
 .sync-indicator {
