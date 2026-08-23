@@ -39,6 +39,7 @@ import {
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
+import FoodBudgetAnalysis from './FoodBudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
@@ -50,6 +51,7 @@ import {
 } from './lib/syncOutbox.js';
 import { analyzeBudget } from './lib/budgetAnalysisRules.js';
 import { belongsToHouseholdFoodBudget } from './lib/foodBudgetRules.js';
+import { analyzeFoodBudgetPace, recommendFoodBudget } from './lib/foodBudgetAnalysisRules.js';
 import {
   DEFAULT_CARE_PEOPLE,
   DEFAULT_FOOD_BUDGET,
@@ -840,6 +842,19 @@ export default function App() {
 
   const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
   const foodOverBudget = totals.food > foodBudget;
+  const foodBudgetPace = useMemo(() => analyzeFoodBudgetPace({
+    monthKey: selectedMonth,
+    budget: foodBudget,
+    spent: totals.food,
+    currentDate: today,
+  }), [foodBudget, selectedMonth, today, totals.food]);
+  const foodBudgetRecommendation = useMemo(() => recommendFoodBudget({
+    operations: data.operations,
+    budgetSettings,
+    currentBudget: foodBudget,
+    excludedPeople: foodBudgetExcluded,
+    currentDate: today,
+  }), [budgetSettings, data.operations, foodBudget, foodBudgetExcluded, today]);
 
   const annualReview = useMemo(() => {
     const selectedYear = selectedMonth.slice(0, 4);
@@ -2414,6 +2429,8 @@ export default function App() {
                 {foodOverBudget ? `${formatCurrency(totals.food - foodBudget)} au-dessus de l'idéal` : `${formatCurrency(foodBudget - totals.food)} disponibles`}
               </p>
             </section>
+
+            <FoodBudgetAnalysis pace={foodBudgetPace} recommendation={foodBudgetRecommendation} />
 
             <BudgetAnalysis analysis={budgetAnalysis} />
 
