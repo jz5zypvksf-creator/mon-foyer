@@ -153,3 +153,5 @@ where bucket is null;
 
 grant select, insert, update on public.household_budget_settings to authenticated;
 grant select, insert, update on public.care_people to authenticated;
+revoke all on public.household_budget_settings from anon;
+revoke all on public.care_people from anon;

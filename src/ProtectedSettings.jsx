@@ -11,6 +11,7 @@ import {
   UserRoundCog,
 } from 'lucide-react';
 import { householdId, supabase } from './lib/supabase.js';
+import { normalizeStandingOrderReference, standingOrderAlreadyAssigned } from './lib/configurationRules.js';
 import './ProtectedSettings.css';
 
 const moneyInput = (value) => Number(value || 0).toFixed(2).replace('.', ',');
@@ -25,7 +26,7 @@ function friendlyAuthError(error) {
   return error?.message || 'Identification impossible.';
 }
 
-function SavingsSettingRow({ goal, onSaved }) {
+function SavingsSettingRow({ goal, savingsGoals, onSaved }) {
   const [draft, setDraft] = useState(() => ({
     label: goal.label || '',
     target: moneyInput(goal.target),
@@ -58,6 +59,12 @@ function SavingsSettingRow({ goal, onSaved }) {
     }
     if (day != null && (!Number.isInteger(day) || day < 1 || day > 31)) {
       setStatus('Le jour de l’ordre permanent doit être compris entre 1 et 31.');
+      return;
+    }
+    const originalReference = goal.standing_order_reference || goal.standingOrderReference || '';
+    if (normalizeStandingOrderReference(draft.standingOrderReference) !== normalizeStandingOrderReference(originalReference)
+      && standingOrderAlreadyAssigned(draft.standingOrderReference, savingsGoals, goal.id)) {
+      setStatus('Ce numéro d’OP est déjà relié à un autre compte d’épargne.');
       return;
     }
     setStatus('Enregistrement…');
@@ -147,6 +154,20 @@ export default function ProtectedSettings({
     setFoodBudget(moneyInput(applicable?.food_budget ?? applicable?.foodBudget ?? 500));
   }, [budgetSettings, selectedMonth]);
 
+  useEffect(() => {
+    if (!unlocked) return undefined;
+    const lock = () => setUnlocked(false);
+    const timeoutId = window.setTimeout(lock, 10 * 60 * 1000);
+    const lockWhenHidden = () => {
+      if (document.visibilityState === 'hidden') lock();
+    };
+    document.addEventListener('visibilitychange', lockWhenHidden);
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', lockWhenHidden);
+    };
+  }, [unlocked]);
+
   const unlockWithPassword = async (event) => {
     event.preventDefault();
     if (!session?.user?.email || !password) return;
@@ -218,6 +239,10 @@ export default function ProtectedSettings({
     const day = newSavings.day === '' ? null : Number(newSavings.day);
     if (!label || [saved, target, monthlyAmount].some((value) => !Number.isFinite(value) || value < 0) || (day != null && (day < 1 || day > 31))) {
       setSectionStatus('Vérifie le nouveau compte d’épargne.');
+      return;
+    }
+    if (standingOrderAlreadyAssigned(newSavings.op, savingsGoals)) {
+      setSectionStatus('Ce numéro d’OP est déjà relié à un autre compte d’épargne.');
       return;
     }
     const payload = {
@@ -309,7 +334,7 @@ export default function ProtectedSettings({
           <label>Numéro d’OP<input value={newSavings.op} onChange={(event) => setNewSavings({ ...newSavings, op: event.target.value })} /></label>
           <button className="primary-button" type="button" onClick={addSavingsGoal}><Plus size={18} /> Créer le compte</button>
         </div>
-        {savingsGoals.map((goal) => <SavingsSettingRow key={goal.id} goal={goal} onSaved={replaceSavingsGoal} />)}
+        {savingsGoals.map((goal) => <SavingsSettingRow key={goal.id} goal={goal} savingsGoals={savingsGoals} onSaved={replaceSavingsGoal} />)}
       </div>
       {sectionStatus && <p className="protected-status">{sectionStatus}</p>}
     </section>

@@ -24,6 +24,40 @@ export function activeCarePeople(rows = []) {
   return [...new Set(source.filter(Boolean))];
 }
 
+export function configuredCarePeople(rows = []) {
+  const source = rows.length
+    ? rows.map((row) => String(row.name || '').trim())
+    : DEFAULT_CARE_PEOPLE;
+  return [...new Set(source.filter(Boolean))];
+}
+
+export function reimbursementTrackedPeople(rows = []) {
+  const source = rows.length
+    ? rows.filter((row) => row.tracksReimbursements !== false && row.tracks_reimbursements !== false)
+      .map((row) => String(row.name || '').trim())
+    : DEFAULT_CARE_PEOPLE;
+  return [...new Set(source.filter(Boolean))];
+}
+
+export function foodBudgetExcludedPeople(rows = []) {
+  const source = rows.length
+    ? rows.filter((row) => row.excludeFromFoodBudget !== false && row.exclude_from_food_budget !== false)
+      .map((row) => String(row.name || '').trim())
+    : DEFAULT_CARE_PEOPLE;
+  return [...new Set(source.filter(Boolean))];
+}
+
 export function peopleOptions(carePeople = []) {
   return [...new Set(['Foyer', 'Alain', 'Esther', ...carePeople])];
+}
+
+export function normalizeStandingOrderReference(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+export function standingOrderAlreadyAssigned(reference, goals = [], currentGoalId = null) {
+  const normalized = normalizeStandingOrderReference(reference);
+  if (!normalized) return false;
+  return goals.some((goal) => goal.id !== currentGoalId
+    && normalizeStandingOrderReference(goal.standing_order_reference || goal.standingOrderReference) === normalized);
 }

@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 37369)
+Total output lines: 3500
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
@@ -55,8 +58,11 @@ import {
   DEFAULT_FOOD_BUDGET,
   activeCarePeople,
   annualFoodBudget,
+  configuredCarePeople,
+  foodBudgetExcludedPeople,
   foodBudgetForMonth,
   peopleOptions,
+  reimbursementTrackedPeople,
 } from './lib/configurationRules.js';
 import {
   applySavingsOperationChange,
@@ -582,8 +588,14 @@ export default function App() {
     [data.operations, selectedMonth],
   );
 
-  const reimbursablePeople = useMemo(() => activeCarePeople(carePeople), [carePeople]);
-  const availablePeople = useMemo(() => peopleOptions(reimbursablePeople), [reimbursablePeople]);
+  const activeEntryCarePeople = useMemo(() => activeCarePeople(carePeople), [carePeople]);
+  const reimbursablePeople = useMemo(() => reimbursementTrackedPeople(carePeople), [carePeople]);
+  const foodBudgetExcluded = useMemo(() => foodBudgetExcludedPeople(carePeople), [carePeople]);
+  const availablePeople = useMemo(() => peopleOptions(activeEntryCarePeople), [activeEntryCarePeople]);
+  const historyPeople = useMemo(() => peopleOptions([
+    ...configuredCarePeople(carePeople),
+    ...data.operations.map((operation) => operation.person),
+  ]), [carePeople, data.operations]);
   const foodBudget = useMemo(() => foodBudgetForMonth(budgetSettings, selectedMonth), [budgetSettings, selectedMonth]);
 
   const today = currentDate();
@@ -596,12 +608,12 @@ export default function App() {
   );
 
   const totals = useMemo(() => {
-    return calculateTotals(effectiveMonthOperations, reimbursablePeople);
-  }, [effectiveMonthOperations, reimbursablePeople]);
+    return calculateTotals(effectiveMonthOperations, foodBudgetExcluded);
+  }, [effectiveMonthOperations, foodBudgetExcluded]);
 
   const fullMonthTotals = useMemo(() => {
-    return calculateTotals(monthOperations, reimbursablePeople);
-  }, [monthOperations, reimbursablePeople]);
+    return calculateTotals(monthOperations, foodBudgetExcluded);
+  }, [monthOperations, foodBudgetExcluded]);
 
   const previousMonthBalances = useMemo(() => {
     const firstDayOfSelectedMonth = `${selectedMonth}-01`;
@@ -688,9 +700,9 @@ export default function App() {
 
   const scheduledFoodTotal = useMemo(
     () => scheduledExpenses
-      .filter((operation) => belongsToHouseholdFoodBudget(operation, reimbursablePeople))
+      .filter((operation) => belongsToHouseholdFoodBudget(operation, foodBudgetExcluded))
       .reduce((sum, operation) => sum + Number(operation.amount || 0), 0),
-    [reimbursablePeople, scheduledExpenses],
+    [foodBudgetExcluded, scheduledExpenses],
   );
 
   const remainingFoodBudget = Math.max(foodBudget - totals.food - scheduledFoodTotal, 0);
@@ -822,12 +834,12 @@ export default function App() {
   }, [data.categories, effectiveMonthOperations, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => {
-    const filteredTotals = calculateTotals(filteredMonthOperations, reimbursablePeople);
+    const filteredTotals = calculateTotals(filteredMonthOperations, foodBudgetExcluded);
     return {
       ...filteredTotals,
       expenses: filteredTotals.fixed + filteredTotals.variable,
     };
-  }, [filteredMonthOperations, reimbursablePeople]);
+  }, [filteredMonthOperations, foodBudgetExcluded]);
 
   const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
   const foodOverBudget = totals.food > foodBudget;
@@ -837,14 +849,14 @@ export default function App() {
     const previousYear = String(Number(selectedYear) - 1);
     const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear));
     const previousOperations = data.operations.filter((operation) => operation.date.startsWith(previousYear));
-    const annualTotals = calculateTotals(annualOperations, reimbursablePeople);
-    const previousTotals = calculateTotals(previousOperations, reimbursablePeople);
+    const annualTotals = calculateTotals(annualOperations, foodBudgetExcluded);
+    const previousTotals = calculateTotals(previousOperations, foodBudgetExcluded);
     const annualExpenseTotal = annualTotals.fixed + annualTotals.variable;
     const previousExpenseTotal = previousTotals.fixed + previousTotals.variable;
 
     const months = MONTH_LABELS.map((label, index) => {
       const monthKey = `${selectedYear}-${String(index + 1).padStart(2, '0')}`;
-      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey)), reimbursablePeople);
+      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey)), foodBudgetExcluded);
       return {
         label,
         monthKey,
@@ -872,7 +884,7 @@ export default function App() {
       categories,
       foodBudgetAnnual: annualFoodBudget(budgetSettings, selectedYear),
     };
-  }, [budgetSettings, data.operations, data.categories, reimbursablePeople, selectedMonth]);
+  }, [budgetSettings, data.operations, data.categories, foodBudgetExcluded, selectedMonth]);
 
   useEffect(() => {
     activeViewRef.current = activeView;
@@ -1379,754 +1391,7 @@ export default function App() {
       })
       : null;
 
-    let category = recurringCandidate?.category || 'divers';
-    if (!recurringCandidate) {
-      if (normalized.includes('lanza michel')) category = 'coiffeur';
-      else if (normalized.includes('dats24') || normalized.includes('q8') || normalized.includes('total')) category = 'carburant';
-      else if (normalized.includes('delhaize') || normalized.includes('lidl') || normalized.includes('carrefour') || normalized.includes('colruyt')) category = 'nourriture';
-      else if (normalized.includes('ethias') && amount > 500) category = 'emprunt_maison';
-    }
-
-    setDraft({
-      ...makeEmptyOperation(),
-      date: bankRow?.date || currentDate(),
-      type: Number(bankRow?.amount || 0) > 0 ? 'income' : recurringCandidate ? 'fixed' : 'variable',
-      category: Number(bankRow?.amount || 0) > 0 ? 'revenus' : (bankRow?.learnedSuggestion?.category || category),
-      store: bankRow?.learnedSuggestion?.store || label,
-      paymentMethod: 'Compte Belfius',
-      person: bankRow?.learnedSuggestion?.person || 'Foyer',
-      label: recurringCandidate?.label || bankRow?.learnedSuggestion?.label || (normalized.includes('lanza michel') ? 'Coiffeur' : label),
-      amount,
-      recurrence: recurringCandidate?.frequency || 'once',
-      recurringDay: recurringCandidate?.day || Number(String(bankRow?.date || currentDate()).slice(8, 10)),
-      recurringId: recurringCandidate?.id || '',
-      structuredCommunication: recurringCandidate?.structuredCommunication || recurringCandidate?.structured_communication || '',
-      freeCommunication: recurringCandidate?.freeCommunication || recurringCandidate?.free_communication || '',
-      freeCommunicationMode: recurringCandidate?.freeCommunicationMode || recurringCandidate?.free_communication_mode || 'contains',
-    });
-    setOperationStatus(recurringCandidate
-      ? 'Frais récurrent Belfius reconnu : vérifie les données puis enregistre cette opération.'
-      : 'Opération Belfius préremplie : complète ou corrige les informations avant enregistrement.');
-    setEditingId(null);
-    setActiveView('add');
-  };
-
-  const deleteOperation = async (id) => {
-    if (!window.confirm('Supprimer cette opération ?')) return;
-
-    if (USE_REMOTE_BUDGET) {
-      if (!navigator.onLine) {
-        const queue = enqueueOperationMutation({
-          recordId: id,
-          action: 'delete',
-          queuedAt: new Date().toISOString(),
-        });
-        setPendingSyncCount(queue.length);
-        setSyncStatus('Suppression conservée · envoi automatique dès le retour d’Internet');
-      } else {
-        const { error } = await supabase.from('operations').delete().eq('id', id).eq('household_id', householdId);
-        if (error) {
-          if (!isRetryableSyncError(error)) {
-            setSyncStatus(`Suppression impossible: ${error.message}`);
-            return;
-          }
-          const queue = enqueueOperationMutation({
-            recordId: id,
-            action: 'delete',
-            queuedAt: new Date().toISOString(),
-          });
-          setPendingSyncCount(queue.length);
-        }
-      }
-    }
-    const deletedOperation = data.operations.find((operation) => operation.id === id);
-    saveData({
-      ...data,
-      operations: data.operations.filter((operation) => operation.id !== id),
-      savingsGoals: applySavingsOperationChange(data.savingsGoals, deletedOperation, null),
-    });
-  };
-
-  const addStore = async () => {
-    const store = newStore.trim();
-    if (!store || data.stores.includes(store)) return;
-    if (USE_REMOTE_BUDGET) {
-      const { error } = await supabase.from('stores').insert({ household_id: householdId, name: store });
-      if (error) {
-        setMigrationStatus(`Point de vente non envoyé: ${error.message}`);
-        return;
-      }
-    }
-    saveData({ ...data, stores: [...data.stores, store] });
-    setNewStore('');
-  };
-
-  const deleteStore = async (store) => {
-    if (!window.confirm(`Supprimer le point de vente "${store}" ?`)) return;
-
-    if (USE_REMOTE_BUDGET) {
-      await supabase.from('stores').delete().eq('name', store).eq('household_id', householdId);
-    }
-    saveData({ ...data, stores: data.stores.filter((item) => item !== store) });
-  };
-
-  const addCategory = async () => {
-    const label = newCategory.trim();
-    if (!label) return;
-
-    const id = makeCategoryId(label);
-    if (data.categories.some((category) => category.id === id || category.label.toLowerCase() === label.toLowerCase())) {
-      setCategoryStatus('Ce type de frais existe déjà.');
-      return;
-    }
-
-    const category = {
-      id,
-      label,
-      icon: 'divers',
-      type: newCategoryType,
-      custom: true,
-    };
-
-    if (USE_REMOTE_BUDGET) {
-      const { error } = await supabase.from('categories').insert({
-        household_id: householdId,
-        category_id: category.id,
-        label: category.label,
-        type: category.type,
-        icon: category.icon,
-      });
-
-      if (error) {
-        setCategoryStatus(formatSupabaseCategoryError(error));
-        return;
-      }
-    }
-
-    saveData({
-      ...data,
-      categories: sortCategories([...data.categories, category]),
-    });
-    setNewCategory('');
-    setNewCategoryType('variable');
-    setCategoryStatus('Type de frais ajouté.');
-  };
-
-  const deleteCategory = async (category) => {
-    if (!category.custom) {
-      setCategoryStatus('Les types de frais standard ne peuvent pas être supprimés.');
-      return;
-    }
-
-    if (data.operations.some((operation) => operation.category === category.id)) {
-      setCategoryStatus('Ce type de frais est utilisé dans l’historique.');
-      return;
-    }
-
-    if (!window.confirm(`Supprimer le type de frais "${category.label}" ?`)) return;
-    if (USE_REMOTE_BUDGET) {
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('household_id', householdId)
-        .eq('category_id', category.id);
-
-      if (error) {
-        setCategoryStatus(`Suppression impossible: ${error.message}`);
-        return;
-      }
-    }
-
-    saveData({
-      ...data,
-      categories: sortCategories(data.categories.filter((item) => item.id !== category.id)),
-    });
-    setCategoryStatus('Type de frais supprimé.');
-  };
-
-  const updateGoal = async (id, field, value) => {
-    const numericValue = parseDecimal(value);
-    setData((current) => {
-      const nextData = {
-        ...current,
-        savingsGoals: current.savingsGoals.map((goal) =>
-          goal.id === id ? { ...goal, [field]: numericValue } : goal,
-        ),
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
-      return nextData;
-    });
-
-    if (USE_REMOTE_BUDGET) {
-      const { error } = await supabase
-        .from('savings_goals')
-        .update({ [field]: numericValue })
-        .eq('id', id)
-        .eq('household_id', householdId);
-
-      if (error) {
-        setSyncStatus(`Erreur épargne: ${error.message}`);
-      }
-    }
-  };
-
-  const editRecurringFixedExpense = (expense) => {
-    setRecurringEditingId(expense.id);
-    setRecurringDraft({
-      label: expense.label,
-      amount: String(expense.amount ?? ''),
-      day: expense.day || 1,
-      frequency: expense.frequency || 'monthly',
-      startDate: expense.startDate || expense.start_date || currentDate(),
-      person: expense.person || 'Foyer',
-      category: expense.category || 'habitation',
-      structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',
-      freeCommunication: expense.freeCommunication || expense.free_communication || '',
-      freeCommunicationMode: expense.freeCommunicationMode || expense.free_communication_mode || 'contains',
-    });
-    setRecurringStatus('Modification du frais récurrent en cours.');
-    window.setTimeout(() => {
-      const form = document.querySelector('.recurring-form');
-      form?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      form?.querySelector('input')?.focus({ preventScroll: true });
-    }, 80);
-  };
-
-  const addRecurringFixedExpense = async (event) => {
-    event.preventDefault();
-    const amount = parseDecimal(recurringDraft.amount);
-    const label = recurringDraft.label.trim();
-
-    if (!label || !amount) {
-      setRecurringStatus('Indique un libellé et un montant.');
-      return;
-    }
-
-    let fixedExpense = {
-      id: recurringEditingId || crypto.randomUUID(),
-      label,
-      amount,
-      day: Math.min(Math.max(Number(recurringDraft.day) || 1, 1), 31),
-      person: recurringDraft.person,
-      category: recurringDraft.category,
-      frequency: recurringDraft.frequency || 'monthly',
-      startDate: recurringDraft.startDate || currentDate(),
-      structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),
-      freeCommunication: String(recurringDraft.freeCommunication || '').trim(),
-      freeCommunicationMode: recurringDraft.freeCommunicationMode || 'contains',
-    };
-
-    const identicalRecurring = (data.recurringFixedExpenses || []).find(
-      (expense) => expense.id !== recurringEditingId
-        && recurringExpenseSignature(expense) === recurringExpenseSignature(fixedExpense),
-    );
-
-    if (identicalRecurring) {
-      const category = data.categories.find((item) => item.id === identicalRecurring.category);
-      setRecurringStatus(
-        'Attention : cette récurrence existe déjà — ' + identicalRecurring.label + ', '
-        + formatCurrency(identicalRecurring.amount) + ', jour ' + identicalRecurring.day + ', '
-        + (category?.label || 'Frais fixe') + ', ' + identicalRecurring.person + '.',
-      );
-      return;
-    }
-
-    if (USE_REMOTE_BUDGET) {
-      const payload = {
-        household_id: householdId,
-        label: fixedExpense.label,
-        amount: fixedExpense.amount,
-        day: fixedExpense.day,
-        person: fixedExpense.person,
-        category: fixedExpense.category,
-        frequency: fixedExpense.frequency,
-        start_date: fixedExpense.startDate,
-        structured_communication: fixedExpense.structuredCommunication || null,
-        free_communication: fixedExpense.freeCommunication || null,
-        free_communication_mode: fixedExpense.freeCommunicationMode || 'contains',
-      };
-
-      const query = recurringEditingId
-        ? supabase
-          .from('recurring_fixed_expenses')
-          .update(payload)
-          .eq('id', recurringEditingId)
-          .eq('household_id', householdId)
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
-          .single()
-        : supabase
-          .from('recurring_fixed_expenses')
-          .insert(payload)
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
-          .single();
-
-      const { data: savedExpense, error } = await query;
-
-      if (error) {
-        setRecurringStatus(formatSupabaseRecurringError(error));
-        return;
-      }
-
-      fixedExpense = {
-        id: savedExpense.id,
-        label: savedExpense.label,
-        amount: Number(savedExpense.amount),
-        day: Number(savedExpense.day),
-        person: savedExpense.person,
-        category: savedExpense.category,
-        frequency: savedExpense.frequency || 'monthly',
-        startDate: savedExpense.start_date || currentDate(),
-        structuredCommunication: savedExpense.structured_communication || '',
-        freeCommunication: savedExpense.free_communication || '',
-        freeCommunicationMode: savedExpense.free_communication_mode || 'contains',
-      };
-    }
-
-    const currentExpenses = data.recurringFixedExpenses || [];
-    const nextExpenses = recurringEditingId
-      ? currentExpenses.map((expense) => (expense.id === recurringEditingId ? fixedExpense : expense))
-      : [...currentExpenses, fixedExpense];
-
-    saveData({
-      ...data,
-      recurringFixedExpenses: nextExpenses,
-    });
-    setRecurringDraft(makeEmptyRecurringFixedExpense());
-    setRecurringEditingId(null);
-    setRecurringStatus(recurringEditingId ? 'Frais fixe récurrent modifié.' : 'Frais fixe récurrent ajouté.');
-  };
-
-  const deleteRecurringFixedExpense = async (id) => {
-    if (!window.confirm('Supprimer ce frais fixe récurrent ?')) return;
-
-    if (USE_REMOTE_BUDGET) {
-      const { error } = await supabase
-        .from('recurring_fixed_expenses')
-        .delete()
-        .eq('id', id)
-        .eq('household_id', householdId);
-
-      if (error) {
-        setRecurringStatus(`Suppression impossible: ${error.message}`);
-        return;
-      }
-    }
-
-    saveData({
-      ...data,
-      recurringFixedExpenses: (data.recurringFixedExpenses || []).filter((expense) => expense.id !== id),
-    });
-    setRecurringStatus('Frais fixe récurrent supprimé.');
-  };
-
-  const generateRecurringFixedExpenses = async () => {
-    const fixedExpenses = data.recurringFixedExpenses || [];
-
-    if (fixedExpenses.length === 0) {
-      setRecurringStatus("Ajoute d'abord au moins un frais fixe récurrent.");
-      return;
-    }
-
-    const existing = new Set(
-      data.operations
-        .filter((operation) => operation.type === 'fixed' && operation.date.startsWith(selectedMonth))
-        .map(fixedExpenseSignature),
-    );
-
-    const generatedOperations = fixedExpenses
-      .map((expense) => ({
-        id: crypto.randomUUID(),
-        date: dateInMonth(selectedMonth, expense.day),
-        person: expense.person,
-        type: 'fixed',
-        category: expense.category,
-        store: '',
-        paymentMethod: 'Compte Belfius',
-        label: expense.label,
-        amount: parseDecimal(expense.amount),
-      }))
-      .filter((operation) => !existing.has(fixedExpenseSignature(operation)));
-
-    if (generatedOperations.length === 0) {
-      setRecurringStatus('Tous les frais fixes existent déjà pour ce mois.');
-      return;
-    }
-
-    let savedOperations = generatedOperations;
-
-    if (USE_REMOTE_BUDGET) {
-      const payload = generatedOperations.map((operation) => ({
-        household_id: householdId,
-        date: operation.date,
-        person: operation.person,
-        type: operation.type,
-        category: operation.category,
-        store: null,
-        payment_method: operation.paymentMethod || 'Compte Belfius',
-        label: operation.label,
-        amount: operation.amount,
-      }));
-
-      const { data: insertedRows, error } = await supabase
-        .from('operations')
-        .insert(payload)
-        .select(OPERATION_COLUMNS);
-
-      if (error) {
-        setRecurringStatus(isMissingPaymentColumn(error) ? "Generation impossible: lance le script supabase-payment-method.sql dans Supabase." : `Generation impossible: ${error.message}`);
-        return;
-      }
-
-      savedOperations = (insertedRows || []).map(normalizeOperation);
-    }
-
-    saveData({
-      ...data,
-      operations: [...savedOperations, ...data.operations],
-    });
-    setRecurringStatus(`${savedOperations.length} frais fixe(s) ajoute(s) pour ${selectedMonth}.`);
-  };
-
-  const handleBankSavingsDetected = (detection, auditMeta = {}) => {
-    const totals = detection?.totals || detection || {};
-    const transfers = detection?.transfers || [];
-    setBankSavings(totals);
-    if (!transfers.length) return;
-
-    let applied = {};
-    try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
-
-    // RC2.4.6 : le CSV Belfius identifie les transferts, mais ne connait pas le solde reel
-    // du compte d'epargne externe (ex. Beobank). Au premier releve observe, on etablit
-    // uniquement une ligne de base : l'historique est memorise sans modifier le solde.
-    if (Object.keys(applied).length === 0) {
-      transfers.forEach((transfer) => {
-        applied[transfer.fingerprint] = {
-          bucket: transfer.bucket,
-          amount: transfer.amount,
-          appliedAt: new Date().toISOString(),
-          source: auditMeta.fileName || 'Belfius CSV',
-          baseline: true,
-        };
-      });
-      localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
-      return;
-    }
-
-    const freshTransfers = transfers.filter((transfer) => !applied[transfer.fingerprint]);
-    if (!freshTransfers.length) return;
-
-    const confirmedManualTransfers = freshTransfers.filter((transfer) => data.operations.some((operation) => {
-      const goalId = operation.savingsGoalId || operation.savings_goal_id;
-      const goal = data.savingsGoals.find((candidate) => candidate.id === goalId);
-      return matchesRecordedSavingsDeposit(operation, transfer, savingsBucketForGoal(goal));
-    }));
-    const confirmedFingerprints = new Set(confirmedManualTransfers.map((transfer) => transfer.fingerprint));
-    const transfersToApply = freshTransfers.filter((transfer) => !confirmedFingerprints.has(transfer.fingerprint));
-
-    // Un versement saisi manuellement a déjà crédité l'épargne. Le CSV le confirme,
-    // mais ne doit jamais provoquer un second crédit du même montant.
-    const increments = transfersToApply.reduce((map, transfer) => {
-      map[transfer.bucket] = (map[transfer.bucket] || 0) + Math.abs(Number(transfer.amount) || 0);
-      return map;
-    }, {});
-
-    setData((current) => {
-      const changedGoals = [];
-      const representatives = new Map();
-      current.savingsGoals.forEach((goal) => {
-        const bucket = savingsBucketForGoal(goal);
-        const previous = representatives.get(bucket);
-        const weight = Math.abs(Number(goal.saved || 0)) * 100000 + Math.abs(Number(goal.target || 0));
-        const previousWeight = previous ? Math.abs(Number(previous.saved || 0)) * 100000 + Math.abs(Number(previous.target || 0)) : -1;
-        if (!previous || weight > previousWeight) representatives.set(bucket, goal);
-      });
-      const representativeIds = new Set([...representatives.values()].map((goal) => goal.id));
-      const savingsGoals = current.savingsGoals.map((goal) => {
-        const bucket = savingsBucketForGoal(goal);
-        const increment = increments[bucket] || 0;
-        if (!increment || !representativeIds.has(goal.id)) return goal;
-        const next = { ...goal, saved: Number(goal.saved || 0) + increment };
-        changedGoals.push(next);
-        return next;
-      });
-      const nextData = { ...current, savingsGoals };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
-
-      if (USE_REMOTE_BUDGET && changedGoals.length) {
-        changedGoals.forEach((goal) => {
-          supabase.from('savings_goals')
-            .update({ saved: Number(goal.saved) })
-            .eq('id', goal.id)
-            .eq('household_id', householdId)
-            .then(() => {});
-        });
-      }
-      return nextData;
-    });
-
-    freshTransfers.forEach((transfer) => {
-      applied[transfer.fingerprint] = {
-        bucket: transfer.bucket,
-        amount: transfer.amount,
-        appliedAt: new Date().toISOString(),
-        source: auditMeta.fileName || 'Belfius CSV',
-      };
-    });
-    localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
-  };
-
-  const persistBelfiusSnapshot = async (snapshot) => {
-    const normalized = {
-      balance: Number(snapshot.balance || 0),
-      balanceDate: snapshot.balanceDate || '',
-      importedAt: snapshot.importedAt || new Date().toISOString(),
-      pendingAmount: Number(snapshot.pendingAmount || 0),
-      remaining: Number(snapshot.remaining || 0),
-      confirmations: Number(snapshot.confirmations || 0),
-      anomalies: Number(snapshot.anomalies || 0),
-      clean: Boolean(snapshot.clean),
-      sourceFile: snapshot.sourceFile || '',
-      operationState: capturePaymentOperationState(data.operations, 'Compte Belfius', today),
-      openingMonth: snapshot.openingMonth || '',
-      openingBalance: snapshot.openingBalance == null ? null : Number(snapshot.openingBalance),
-      openingBalances: snapshot.openingMonth && snapshot.openingBalance != null
-        ? { ...(belfiusSnapshot?.openingBalances || {}), [snapshot.openingMonth]: Number(snapshot.openingBalance) }
-        : (belfiusSnapshot?.openingBalances || {}),
-    };
-    setBelfiusSnapshot(normalized);
-    localStorage.setItem('mon-foyer-last-belfius-audit-at', normalized.importedAt);
-    if (!USE_REMOTE_BUDGET) return;
-    const { error } = await supabase.from('bank_snapshots').upsert({
-      household_id: householdId,
-      balance: normalized.balance,
-      balance_date: normalized.balanceDate,
-      imported_at: normalized.importedAt,
-      pending_amount: normalized.pendingAmount,
-      remaining: normalized.remaining,
-      confirmations: normalized.confirmations,
-      anomalies: normalized.anomalies,
-      clean: normalized.clean,
-      source_file: normalized.sourceFile || null,
-      operation_state: normalized.operationState,
-      opening_month: normalized.openingMonth || null,
-      opening_balance: normalized.openingBalance,
-      opening_balances: normalized.openingBalances,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'household_id' });
-    if (error) setSyncStatus('Erreur de mémorisation du solde Belfius: ' + error.message);
-  };
-
-  const synchronizeBelfiusBalance = async ({ balance, balanceDate, month }) => {
-    const currentBalance = calculatePaymentBalances(data.operations)['Compte Belfius'] || 0;
-    const delta = Number(balance) - Number(currentBalance);
-    if (Math.abs(delta) < 0.01) return;
-
-    const dateMatch = String(balanceDate || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    const adjustmentDate = dateMatch ? dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1] : currentDate();
-    const adjustment = {
-      id: crypto.randomUUID(),
-      date: adjustmentDate,
-      person: 'Foyer',
-      type: delta >= 0 ? 'income' : 'fixed',
-      category: delta >= 0 ? 'revenus' : 'divers',
-      store: '',
-      paymentMethod: 'Compte Belfius',
-      label: 'Ajustement Belfius ' + month + ' — solde certifié',
-      amount: Math.abs(delta),
-    };
-
-    if (USE_REMOTE_BUDGET) {
-      const payload = {
-        household_id: householdId,
-        date: adjustment.date,
-        person: adjustment.person,
-        type: adjustment.type,
-        category: adjustment.category,
-        store: null,
-        label: adjustment.label,
-        amount: adjustment.amount,
-        payment_method: adjustment.paymentMethod,
-      };
-      const { data: savedRow, error } = await supabase
-        .from('operations')
-        .insert(payload)
-        .select(OPERATION_COLUMNS)
-        .single();
-      if (error) {
-        setSyncStatus('Synchronisation Belfius impossible : ' + error.message);
-        return;
-      }
-      adjustment.id = savedRow.id;
-    }
-
-    saveData({ ...data, operations: [adjustment, ...data.operations] });
-    setSyncStatus('Solde Belfius synchronisé : ' + formatCurrency(balance));
-  };
-  const refreshFromSupabase = async () => {
-    if (!USE_REMOTE_BUDGET) {
-      setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
-      return;
-    }
-
-    setMigrationStatus('Rechargement depuis Supabase...');
-
-    const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult, budgetSettingsResult, carePeopleResult] = await Promise.all([
-      selectOperations(),
-      supabase
-        .from('stores')
-        .select('id, name')
-        .eq('household_id', householdId)
-        .order('name', { ascending: true }),
-      supabase
-        .from('savings_goals')
-        .select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active')
-        .eq('household_id', householdId)
-        .order('created_at', { ascending: true }),
-      supabase
-        .from('categories')
-        .select('category_id, label, type, icon')
-        .eq('household_id', householdId)
-        .order('label', { ascending: true }),
-      supabase
-        .from('recurring_fixed_expenses')
-        .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
-        .eq('household_id', householdId)
-        .order('created_at', { ascending: true }),
-      supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
-      supabase.from('care_people').select('id, name, tracks_reimbursements, exclude_from_food_budget, active').eq('household_id', householdId).order('created_at', { ascending: true }),
-    ]);
-
-    if (operationsResult.error || storesResult.error || goalsResult.error) {
-      setMigrationStatus('Rechargement impossible: Supabase indisponible.');
-      return;
-    }
-
-    mergeData(normalizeRemoteState({
-      operations: operationsResult.data || [],
-      stores: storesResult.data || [],
-      savingsGoals: goalsResult.data || [],
-      categories: categoriesResult.error ? [] : categoriesResult.data || [],
-      recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
-    }));
-    if (!budgetSettingsResult.error && budgetSettingsResult.data?.length) setBudgetSettings(budgetSettingsResult.data);
-    if (!carePeopleResult.error && carePeopleResult.data?.length) setCarePeople(carePeopleResult.data);
-    setSyncStatus('Synchronise avec Supabase');
-    setMigrationStatus('Données locales remplacées par Supabase.');
-  };
-
-  const migrateLocalData = async () => {
-    if (!USE_REMOTE_BUDGET) {
-      setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
-      return;
-    }
-
-    setMigrationStatus('Migration en cours...');
-
-    const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
-      selectOperations(false),
-      supabase
-        .from('stores')
-        .select('name')
-        .eq('household_id', householdId),
-      supabase
-        .from('savings_goals')
-        .select('label')
-        .eq('household_id', householdId),
-      supabase
-        .from('categories')
-        .select('category_id')
-        .eq('household_id', householdId),
-      supabase
-        .from('recurring_fixed_expenses')
-        .select('label, amount, day, person, category, frequency, start_date')
-        .eq('household_id', householdId),
-    ]);
-
-    if (operationsResult.error || storesResult.error || goalsResult.error) {
-      setMigrationStatus('Migration impossible: lecture Supabase refusée.');
-      return;
-    }
-
-    const signature = (operation) => [
-      operation.date,
-      operation.person,
-      operation.type,
-      operation.category,
-      operation.store || '',
-      operation.payment_method || operation.paymentMethod || 'Compte Belfius',
-      operation.label,
-      Number(operation.amount).toFixed(2),
-    ].join('|');
-
-    const existing = new Set((operationsResult.data || []).map(signature));
-    const missingOperations = data.operations
-      .filter((operation) => !existing.has(signature(operation)))
-      .map((operation) => ({
-        household_id: householdId,
-        date: operation.date,
-        person: operation.person,
-        type: operation.type,
-        category: operation.category,
-        store: operation.store || null,
-        payment_method: operation.paymentMethod || operation.payment_method || 'Compte Belfius',
-        label: operation.label,
-        amount: Number(operation.amount),
-      }));
-
-    const existingStores = new Set((storesResult.data || []).map((store) => store.name.toLowerCase()));
-    const missingStores = data.stores
-      .filter((store) => !existingStores.has(store.toLowerCase()))
-      .map((name) => ({ household_id: householdId, name }));
-
-    const existingGoals = new Set((goalsResult.data || []).map((goal) => goal.label.toLowerCase()));
-    const missingGoals = data.savingsGoals
-      .filter((goal) => !existingGoals.has(goal.label.toLowerCase()))
-      .map(({ label, target, saved }) => ({
-        household_id: householdId,
-        label,
-        target: Number(target),
-        saved: Number(saved),
-      }));
-
-    const existingCategories = new Set((categoriesResult.data || []).map((category) => category.category_id));
-    const missingCategories = data.categories
-      .filter((category) => category.custom && !existingCategories.has(category.id))
-      .map((category) => ({
-        household_id: householdId,
-        category_id: category.id,
-        label: category.label,
-        type: category.type,
-        icon: category.icon || 'divers',
-      }));
-
-    const recurringSignature = (expense) => [
-      expense.label.trim().toLowerCase(),
-      parseDecimal(expense.amount).toFixed(2),
-      Number(expense.day),
-      expense.person,
-      expense.category,
-      expense.frequency || 'monthly',
-      expense.start_date || expense.startDate || currentDate(),
-    ].join('|');
-
-    const existingRecurringExpenses = new Set(
-      (recurringResult.error ? [] : recurringResult.data || []).map(recurringSignature),
-    );
-
-    const uniqueLocalRecurringExpenses = Array.from(
-      new Map(
-        (data.recurringFixedExpenses || []).map((expense) => [recurringSignature(expense), expense]),
-      ).values(),
-    );
-
-    const missingRecurringExpenses = uniqueLocalRecurringExpenses
-      .filter((expense) => !existingRecurringExpenses.has(recurringSignature(expense)))
-      .map((expense) => ({
-        household_id: householdId,
-        label: expense.label,
-        amount: parseDecimal(expense.amount),
-        day: Math.min(Math.max(Number(expense.day) || 1, 1), 31),
+    let category = recurringCandidate?.category || 'divers'…7369 tokens truncated…xpense.day) || 1, 1), 31),
         person: expense.person,
         category: expense.category,
         frequency: expense.frequency || 'monthly',
@@ -2819,7 +2084,7 @@ export default function App() {
                   </select>
                   <select value={historyPerson} onChange={(event) => setHistoryPerson(event.target.value)} aria-label="Personne">
                     <option value="all">Toutes les personnes</option>
-                    {availablePeople.map((person) => <option key={person}>{person}</option>)}
+                    {historyPeople.map((person) => <option key={person}>{person}</option>)}
                   </select>
                 </div>
                 <div className="filter-grid">
