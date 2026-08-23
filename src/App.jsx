@@ -322,6 +322,9 @@ function nextMonthKey(dateValue) {
 
 function inferredBudgetMonth(operation) {
   const date = String(operation?.date || '');
+  const paymentMethod = operation?.payment_method || operation?.paymentMethod || '';
+  const settlementDate = operation?.settlement_date || operation?.settlementDate || '';
+  if (isMastercardPaymentMethod(paymentMethod) && settlementDate) return settlementDate.slice(0, 7);
   const salary = operation?.income_kind === 'salary' || operation?.incomeKind === 'salary'
     || String(operation?.label || '').toLowerCase().includes('salaire');
   return salary && Number(date.slice(8, 10)) >= 24 ? nextMonthKey(date) : date.slice(0, 7);
@@ -601,7 +604,12 @@ export default function App() {
   }, [data.savingsGoals.length, remoteBudgetLoaded, session]);
 
   const monthOperations = useMemo(
-    () => data.operations.filter((operation) => operation.date.startsWith(selectedMonth)),
+    () => data.operations.filter((operation) => {
+      const accountingMonth = isMastercardPaymentMethod(operation.paymentMethod)
+        ? (operation.settlementDate || operation.date).slice(0, 7)
+        : operation.date.slice(0, 7);
+      return accountingMonth === selectedMonth;
+    }),
     [data.operations, selectedMonth],
   );
 
@@ -671,6 +679,7 @@ export default function App() {
 
   const availableForPayments = useMemo(
     () => PAYMENT_METHODS.reduce((sum, method) => {
+      if (method === MASTERCARD_PAYMENT_METHOD) return sum;
       if (method === 'Compte Belfius' && liveBelfiusSnapshot) {
         return sum + Number(liveBelfiusSnapshot.expectedBalance || 0);
       }
@@ -1290,6 +1299,9 @@ export default function App() {
       savingsDirection: savingsSourceGoal ? 'out' : savingsTargetGoal ? 'in' : '',
       id: editingId || crypto.randomUUID(),
     };
+    if (isMastercardPaymentMethod(operation.paymentMethod) && operation.settlementDate) {
+      operation.budgetMonth = operation.settlementDate.slice(0, 7);
+    }
     delete operation.recurrence;
     delete operation.recurringDay;
     delete operation.recurringId;
@@ -1324,7 +1336,9 @@ export default function App() {
         settlement_date: operation.settlementDate || null,
         savings_goal_id: operation.savingsGoalId || null,
       savings_direction: operation.savingsDirection || null,
-        budget_month: operation.type === 'income' ? (operation.budgetMonth || operation.date.slice(0, 7)) : null,
+        budget_month: operation.type === 'income' || isMastercardPaymentMethod(operation.paymentMethod)
+          ? (operation.budgetMonth || operation.date.slice(0, 7))
+          : null,
         income_kind: operation.type === 'income' ? (operation.incomeKind || 'other') : null,
         income_source: operation.type === 'income' ? (operation.incomeSource || null) : null,
       };
@@ -1846,6 +1860,9 @@ export default function App() {
         store: null,
         payment_method: operation.paymentMethod || 'Compte Belfius',
         settlement_date: operation.settlementDate || null,
+        budget_month: isMastercardPaymentMethod(operation.paymentMethod)
+          ? (operation.settlementDate || operation.date).slice(0, 7)
+          : null,
         label: operation.label,
         amount: operation.amount,
       }));
@@ -2163,6 +2180,7 @@ export default function App() {
         payment_method: operation.paymentMethod || operation.payment_method || 'Compte Belfius',
         settles_payment_method: operation.settlesPaymentMethod || operation.settles_payment_method || null,
         settlement_date: operation.settlementDate || operation.settlement_date || null,
+        budget_month: operation.budgetMonth || operation.budget_month || null,
         label: operation.label,
         amount: Number(operation.amount),
       }));
@@ -2494,7 +2512,7 @@ export default function App() {
                       ? `Prélèvement Belfius prévu le ${new Date(`${mastercardNextDebitDate}T12:00:00`).toLocaleDateString('fr-BE')}`
                       : 'Aucun prélèvement Mastercard en attente'}
                   </span>
-                  <small>Déjà réservé dans le disponible total · pas encore débité de Belfius.</small>
+                  <small>Informatif : affectera le budget du mois du prélèvement Belfius.</small>
                 </div>
               </div>
               <PiggyBank size={42} />
