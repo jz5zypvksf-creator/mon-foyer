@@ -102,6 +102,6 @@ function currentMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export function careBalances(operations = [], monthKey = currentMonthKey()) {
-  return ['Papa', 'Nonna'].map((person) => careBalanceForMonth(operations, person, monthKey));
+export function careBalances(operations = [], monthKey = currentMonthKey(), people = ['Papa', 'Nonna']) {
+  return people.map((person) => careBalanceForMonth(operations, person, monthKey));
 }

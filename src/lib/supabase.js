@@ -7,5 +7,9 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 export const householdId = import.meta.env.VITE_HOUSEHOLD_ID;
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      experimental: { passkey: true },
+    },
+  })
   : null;

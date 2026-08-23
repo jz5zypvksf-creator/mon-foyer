@@ -186,11 +186,11 @@ function calculateCsvMonthOpening(audit) {
   return { month, balance: Number(audit.balance || 0) - monthMovement };
 }
 
-function detectSavingsTransfers(rows) {
+function detectSavingsTransfers(rows, savingsGoals = []) {
   const totals = {};
   const transfers = [];
   (rows || []).forEach((row) => {
-    const rule = classifyBankBusinessRule(row);
+    const rule = classifyBankBusinessRule(row, savingsGoals);
     if (!rule || rule.kind !== 'internal-savings-transfer') return;
     const amount = Math.abs(Number(row.amount) || 0);
     totals[rule.bucket] = (totals[rule.bucket] || 0) + amount;
@@ -523,14 +523,14 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
   return null;
 }
 
-function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = []) {
+function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
   // Les transferts vers Beobank sont des transferts internes d'épargne Vacances/Loisirs.
   // Ils sont pris en charge par detectSavingsTransfers et ne participent jamais au moteur
   // de correspondances de dépenses/revenus (sinon un même montant peut proposer Mega, etc.).
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
-    .filter((row) => !isBeobankSavingsTransfer(row))
+    .filter((row) => !isBeobankSavingsTransfer(row, savingsGoals))
     .map((row) => ({ ...row }));
   const appRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
@@ -665,6 +665,7 @@ export default function BelfiusAudit({
   appBelfiusBalance,
   selectedMonth,
   recurringExpenses = [],
+  savingsGoals = [],
   onSynchronizeBelfiusBalance,
   onAddBankOperation,
   onSavingsDetected,
@@ -678,8 +679,8 @@ export default function BelfiusAudit({
   const [confirmationMessage, setConfirmationMessage] = useState('');
   const synchronizationKey = useRef('');
   const result = useMemo(
-    () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules) : null,
-    [audit, learnedRules, operations, recurringExpenses, selectedMonth],
+    () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules, savingsGoals) : null,
+    [audit, learnedRules, operations, recurringExpenses, savingsGoals, selectedMonth],
   );
 
   const handleFile = async (event) => {
@@ -698,7 +699,7 @@ export default function BelfiusAudit({
       setAudit(parsedAudit);
       persistAudit(parsedAudit);
       if (typeof onSavingsDetected === 'function') {
-        onSavingsDetected(detectSavingsTransfers(parsedAudit.rows), parsedAudit);
+        onSavingsDetected(detectSavingsTransfers(parsedAudit.rows, savingsGoals), parsedAudit);
       }
     } catch (exception) {
       setAudit(null);

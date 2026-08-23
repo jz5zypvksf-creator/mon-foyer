@@ -31,7 +31,7 @@ export function savingsBucketForDisplay(goal) {
 }
 
 function canonicalLabel(bucket, fallback) {
-  return savingsRuleForBucket(bucket)?.label || fallback;
+  return fallback || savingsRuleForBucket(bucket)?.label || 'Épargne';
 }
 
 function preferredGoal(current, candidate) {
@@ -43,7 +43,13 @@ function preferredGoal(current, candidate) {
 
 function SavingsCard({ goal, detected = 0, onUpdate }) {
   const bucket = savingsBucketForDisplay(goal);
-  const rule = savingsRuleForBucket(bucket);
+  const staticRule = savingsRuleForBucket(bucket);
+  const configuredReference = goal.standing_order_reference || goal.standingOrderReference || '';
+  const configuredMonthly = Number(goal.monthly_amount ?? goal.monthlyAmount);
+  const rule = configuredReference || staticRule ? {
+    op: configuredReference || staticRule?.op,
+    expectedMonthly: Number.isFinite(configuredMonthly) && configuredMonthly > 0 ? configuredMonthly : staticRule?.expectedMonthly,
+  } : null;
   const label = canonicalLabel(bucket, goal.label);
   const target = Number(goal.target || 0);
   const saved = Number(goal.saved || 0);
@@ -110,7 +116,7 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
 
 export default function SavingsInterface({ goals = [], bankSavings = {}, onUpdate }) {
   const byBucket = new Map();
-  goals.forEach((goal) => {
+  goals.filter((goal) => goal.active !== false).forEach((goal) => {
     const bucket = savingsBucketForDisplay(goal);
     if (bucket === 'autre') return;
     byBucket.set(bucket, preferredGoal(byBucket.get(bucket), goal));

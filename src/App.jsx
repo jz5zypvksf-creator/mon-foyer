@@ -40,6 +40,7 @@ import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
+import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
 import {
   enqueueOperationMutation,
@@ -50,6 +51,14 @@ import {
 import { analyzeBudget } from './lib/budgetAnalysisRules.js';
 import { belongsToHouseholdFoodBudget } from './lib/foodBudgetRules.js';
 import {
+  DEFAULT_CARE_PEOPLE,
+  DEFAULT_FOOD_BUDGET,
+  activeCarePeople,
+  annualFoodBudget,
+  foodBudgetForMonth,
+  peopleOptions,
+} from './lib/configurationRules.js';
+import {
   applySavingsOperationChange,
   calculateLiveBankSnapshot,
   calculatePaymentMethodBalances,
@@ -57,12 +66,11 @@ import {
   matchesRecordedSavingsDeposit,
 } from './lib/accountingLedger.js';
 
-const FOOD_BUDGET = 500;
+const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
 const USE_REMOTE_BUDGET = isSupabaseConfigured && supabase && householdId;
 const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 const PAYMENT_METHODS = ['Compte Belfius', 'Chèques repas Alain', 'Chèques repas Esther'];
-const PEOPLE = ['Foyer', 'Alain', 'Esther', 'Nonna', 'Papa'];
 const RECURRENCE_OPTIONS = [
   { value: 'once', label: 'Une seule fois', months: 0 },
   { value: 'monthly', label: 'Mensuelle', months: 1 },
@@ -76,6 +84,7 @@ const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
 
 function savingsBucketForGoal(goal) {
+  if (goal?.bucket) return goal.bucket;
   const text = String(goal?.label || goal?.id || '')
     .toLowerCase()
     .normalize('NFD')
@@ -388,7 +397,7 @@ function isBelfiusAdjustment(operation) {
   return operation.label?.startsWith('Ajustement Belfius');
 }
 
-function calculateTotals(operations) {
+function calculateTotals(operations, reimbursablePeople = DEFAULT_CARE_PEOPLE) {
   const base = { income: 0, fixed: 0, variable: 0, food: 0 };
   operations.forEach((operation) => {
     if (isBelfiusAdjustment(operation)) return;
@@ -396,7 +405,7 @@ function calculateTotals(operations) {
     if (operation.type === 'income') base.income += amount;
     if (operation.type === 'fixed') base.fixed += amount;
     if (operation.type === 'variable') base.variable += amount;
-    if (belongsToHouseholdFoodBudget(operation)) base.food += amount;
+    if (belongsToHouseholdFoodBudget(operation, reimbursablePeople)) base.food += amount;
   });
   return { ...base, balance: base.income - base.fixed - base.variable };
 }
@@ -416,6 +425,10 @@ function normalizeRemoteState(remote) {
       ...goal,
       target: Number(goal.target),
       saved: Number(goal.saved),
+      monthlyAmount: Number(goal.monthly_amount || 0),
+      standingOrderReference: goal.standing_order_reference || '',
+      standingOrderDay: goal.standing_order_day || null,
+      active: goal.active !== false,
     })),
     recurringFixedExpenses: (remote.recurringFixedExpenses || []).map((expense) => ({
       id: expense.id,
@@ -488,6 +501,8 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [remoteBudgetLoaded, setRemoteBudgetLoaded] = useState(!USE_REMOTE_BUDGET);
+  const [budgetSettings, setBudgetSettings] = useState([{ effective_month: '2026-08', food_budget: FOOD_BUDGET }]);
+  const [carePeople, setCarePeople] = useState(DEFAULT_CARE_PEOPLE.map((name) => ({ name, active: true, tracks_reimbursements: true, exclude_from_food_budget: true })));
   const activeViewRef = useRef(activeView);
 
   useEffect(() => {
@@ -540,7 +555,7 @@ export default function App() {
     const ensure = async () => {
       if (USE_REMOTE_BUDGET) {
         const payload = missing.map((goal) => ({ household_id: householdId, label: goal.label, target: 0, saved: 0 }));
-        const { data: rows, error } = await supabase.from('savings_goals').insert(payload).select('id, label, target, saved');
+        const { data: rows, error } = await supabase.from('savings_goals').insert(payload).select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active');
         if (cancelled || error || !rows?.length) return;
         setData((current) => {
           const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved) }))] };
@@ -567,6 +582,10 @@ export default function App() {
     [data.operations, selectedMonth],
   );
 
+  const reimbursablePeople = useMemo(() => activeCarePeople(carePeople), [carePeople]);
+  const availablePeople = useMemo(() => peopleOptions(reimbursablePeople), [reimbursablePeople]);
+  const foodBudget = useMemo(() => foodBudgetForMonth(budgetSettings, selectedMonth), [budgetSettings, selectedMonth]);
+
   const today = currentDate();
   const endOfSelectedMonth = `${selectedMonth}-31`;
   const balanceCutoff = selectedMonth < today.slice(0, 7) ? endOfSelectedMonth : today;
@@ -577,12 +596,12 @@ export default function App() {
   );
 
   const totals = useMemo(() => {
-    return calculateTotals(effectiveMonthOperations);
-  }, [effectiveMonthOperations]);
+    return calculateTotals(effectiveMonthOperations, reimbursablePeople);
+  }, [effectiveMonthOperations, reimbursablePeople]);
 
   const fullMonthTotals = useMemo(() => {
-    return calculateTotals(monthOperations);
-  }, [monthOperations]);
+    return calculateTotals(monthOperations, reimbursablePeople);
+  }, [monthOperations, reimbursablePeople]);
 
   const previousMonthBalances = useMemo(() => {
     const firstDayOfSelectedMonth = `${selectedMonth}-01`;
@@ -669,12 +688,12 @@ export default function App() {
 
   const scheduledFoodTotal = useMemo(
     () => scheduledExpenses
-      .filter(belongsToHouseholdFoodBudget)
+      .filter((operation) => belongsToHouseholdFoodBudget(operation, reimbursablePeople))
       .reduce((sum, operation) => sum + Number(operation.amount || 0), 0),
-    [scheduledExpenses],
+    [reimbursablePeople, scheduledExpenses],
   );
 
-  const remainingFoodBudget = Math.max(FOOD_BUDGET - totals.food - scheduledFoodTotal, 0);
+  const remainingFoodBudget = Math.max(foodBudget - totals.food - scheduledFoodTotal, 0);
   const totalRemainingToCover = scheduledExpenseTotal + remainingFoodBudget;
   const availableAfterPlannedExpenses = availableForPayments - totalRemainingToCover;
   const forecastStatus = availableAfterPlannedExpenses < 0
@@ -803,29 +822,29 @@ export default function App() {
   }, [data.categories, effectiveMonthOperations, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => {
-    const filteredTotals = calculateTotals(filteredMonthOperations);
+    const filteredTotals = calculateTotals(filteredMonthOperations, reimbursablePeople);
     return {
       ...filteredTotals,
       expenses: filteredTotals.fixed + filteredTotals.variable,
     };
-  }, [filteredMonthOperations]);
+  }, [filteredMonthOperations, reimbursablePeople]);
 
-  const foodRatio = Math.min((totals.food / FOOD_BUDGET) * 100, 100);
-  const foodOverBudget = totals.food > FOOD_BUDGET;
+  const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
+  const foodOverBudget = totals.food > foodBudget;
 
   const annualReview = useMemo(() => {
     const selectedYear = selectedMonth.slice(0, 4);
     const previousYear = String(Number(selectedYear) - 1);
     const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear));
     const previousOperations = data.operations.filter((operation) => operation.date.startsWith(previousYear));
-    const annualTotals = calculateTotals(annualOperations);
-    const previousTotals = calculateTotals(previousOperations);
+    const annualTotals = calculateTotals(annualOperations, reimbursablePeople);
+    const previousTotals = calculateTotals(previousOperations, reimbursablePeople);
     const annualExpenseTotal = annualTotals.fixed + annualTotals.variable;
     const previousExpenseTotal = previousTotals.fixed + previousTotals.variable;
 
     const months = MONTH_LABELS.map((label, index) => {
       const monthKey = `${selectedYear}-${String(index + 1).padStart(2, '0')}`;
-      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey)));
+      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey)), reimbursablePeople);
       return {
         label,
         monthKey,
@@ -851,8 +870,9 @@ export default function App() {
       hasPreviousYear: previousOperations.length > 0,
       months,
       categories,
+      foodBudgetAnnual: annualFoodBudget(budgetSettings, selectedYear),
     };
-  }, [data.operations, data.categories, selectedMonth]);
+  }, [budgetSettings, data.operations, data.categories, reimbursablePeople, selectedMonth]);
 
   useEffect(() => {
     activeViewRef.current = activeView;
@@ -890,13 +910,15 @@ export default function App() {
     let ignore = false;
 
     async function loadBudget() {
-      const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult, snapshotResult] = await Promise.all([
+      const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult, snapshotResult, budgetSettingsResult, carePeopleResult] = await Promise.all([
         selectOperations(),
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
-        supabase.from('savings_goals').select('id, label, target, saved').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('savings_goals').select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
         supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state, opening_month, opening_balance, opening_balances').eq('household_id', householdId).maybeSingle(),
+        supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
+        supabase.from('care_people').select('id, name, tracks_reimbursements, exclude_from_food_budget, active').eq('household_id', householdId).order('created_at', { ascending: true }),
       ]);
 
       if (ignore) return;
@@ -921,7 +943,7 @@ export default function App() {
         const { data: insertedGoals } = await supabase
           .from('savings_goals')
           .insert(defaultState.savingsGoals.map(({ label, target, saved }) => ({ household_id: householdId, label, target, saved })))
-          .select('id, label, target, saved');
+          .select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active');
         remoteGoals = insertedGoals || [];
       }
 
@@ -932,6 +954,8 @@ export default function App() {
         categories: categoriesResult.error ? [] : categoriesResult.data || [],
         recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
       }));
+      if (!budgetSettingsResult.error && budgetSettingsResult.data?.length) setBudgetSettings(budgetSettingsResult.data);
+      if (!carePeopleResult.error && carePeopleResult.data?.length) setCarePeople(carePeopleResult.data);
       setRemoteBudgetLoaded(true);
       if (!snapshotResult.error && snapshotResult.data) {
         if (snapshotResult.data.imported_at) {
@@ -997,14 +1021,22 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_goals' }, async () => {
         const { data: rows } = await supabase
           .from('savings_goals')
-          .select('id, label, target, saved')
+          .select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active')
           .eq('household_id', householdId)
           .order('created_at', { ascending: true });
         if (rows) {
           mergeData({
-            savingsGoals: rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved) })),
+            savingsGoals: rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved), monthlyAmount: Number(row.monthly_amount || 0), standingOrderReference: row.standing_order_reference || '', standingOrderDay: row.standing_order_day || null, active: row.active !== false })),
           });
         }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'household_budget_settings' }, async () => {
+        const { data: rows } = await supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true });
+        if (rows?.length) setBudgetSettings(rows);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'care_people' }, async () => {
+        const { data: rows } = await supabase.from('care_people').select('id, name, tracks_reimbursements, exclude_from_food_budget, active').eq('household_id', householdId).order('created_at', { ascending: true });
+        if (rows?.length) setCarePeople(rows);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, async () => {
         const { data: rows } = await supabase
@@ -1939,7 +1971,7 @@ export default function App() {
 
     setMigrationStatus('Rechargement depuis Supabase...');
 
-    const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult] = await Promise.all([
+    const [operationsResult, storesResult, goalsResult, categoriesResult, recurringResult, budgetSettingsResult, carePeopleResult] = await Promise.all([
       selectOperations(),
       supabase
         .from('stores')
@@ -1948,7 +1980,7 @@ export default function App() {
         .order('name', { ascending: true }),
       supabase
         .from('savings_goals')
-        .select('id, label, target, saved')
+        .select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
       supabase
@@ -1961,6 +1993,8 @@ export default function App() {
         .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
+      supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
+      supabase.from('care_people').select('id, name, tracks_reimbursements, exclude_from_food_budget, active').eq('household_id', householdId).order('created_at', { ascending: true }),
     ]);
 
     if (operationsResult.error || storesResult.error || goalsResult.error) {
@@ -1975,6 +2009,8 @@ export default function App() {
       categories: categoriesResult.error ? [] : categoriesResult.data || [],
       recurringFixedExpenses: recurringResult.error ? data.recurringFixedExpenses || [] : recurringResult.data || [],
     }));
+    if (!budgetSettingsResult.error && budgetSettingsResult.data?.length) setBudgetSettings(budgetSettingsResult.data);
+    if (!carePeopleResult.error && carePeopleResult.data?.length) setCarePeople(carePeopleResult.data);
     setSyncStatus('Synchronise avec Supabase');
     setMigrationStatus('Données locales remplacées par Supabase.');
   };
@@ -2360,13 +2396,13 @@ export default function App() {
             <section className="panel food-budget-panel">
               <div className="section-title">
                 <h2><ShoppingBasket size={20} /> Budget nourriture</h2>
-                <span>{formatCurrency(totals.food)} / {formatCurrency(FOOD_BUDGET)}</span>
+                <span>{formatCurrency(totals.food)} / {formatCurrency(foodBudget)}</span>
               </div>
               <div className="progress-track">
                 <div className={foodOverBudget ? 'progress-fill danger' : 'progress-fill'} style={{ width: `${foodRatio}%` }} />
               </div>
               <p className={foodOverBudget ? 'hint status-error' : 'hint'}>
-                {foodOverBudget ? `${formatCurrency(totals.food - FOOD_BUDGET)} au-dessus de l'idéal` : `${formatCurrency(FOOD_BUDGET - totals.food)} disponibles`}
+                {foodOverBudget ? `${formatCurrency(totals.food - foodBudget)} au-dessus de l'idéal` : `${formatCurrency(foodBudget - totals.food)} disponibles`}
               </p>
             </section>
 
@@ -2392,8 +2428,8 @@ export default function App() {
                 <div className="forecast-icon"><ShoppingBasket size={22} /></div>
                 <div className="forecast-copy">
                   <strong>Budget nourriture restant à prévoir</strong>
-                  <span>Budget mensuel : {formatCurrency(FOOD_BUDGET)}</span>
-                  <span>Déjà utilisé ou programmé : {formatCurrency(Math.min(totals.food + scheduledFoodTotal, FOOD_BUDGET))}</span>
+                  <span>Budget mensuel : {formatCurrency(foodBudget)}</span>
+                  <span>Déjà utilisé ou programmé : {formatCurrency(Math.min(totals.food + scheduledFoodTotal, foodBudget))}</span>
                 </div>
                 <strong className="forecast-amount">{formatCurrency(remainingFoodBudget)}</strong>
               </div>
@@ -2658,7 +2694,7 @@ export default function App() {
                 <label>
                   Personne
                   <select value={draft.person} onChange={(event) => setDraft({ ...draft, person: event.target.value })}>
-                    {PEOPLE.map((person) => <option key={person}>{person}</option>)}
+                    {availablePeople.map((person) => <option key={person}>{person}</option>)}
                   </select>
                 </label>
                 {draft.type !== 'income' && (
@@ -2783,7 +2819,7 @@ export default function App() {
                   </select>
                   <select value={historyPerson} onChange={(event) => setHistoryPerson(event.target.value)} aria-label="Personne">
                     <option value="all">Toutes les personnes</option>
-                    {PEOPLE.map((person) => <option key={person}>{person}</option>)}
+                    {availablePeople.map((person) => <option key={person}>{person}</option>)}
                   </select>
                 </div>
                 <div className="filter-grid">
@@ -2905,11 +2941,28 @@ export default function App() {
               appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
               selectedMonth={selectedMonth}
               recurringExpenses={data.recurringFixedExpenses || []}
+              savingsGoals={data.savingsGoals || []}
               onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
               onSavingsDetected={handleBankSavingsDetected}
               onAuditSnapshot={persistBelfiusSnapshot}
               onEditAppOperation={editOperation}
               onAddBankOperation={addBankOperationFromAudit}
+            />
+
+            <ProtectedSettings
+              session={session}
+              selectedMonth={selectedMonth}
+              budgetSettings={budgetSettings}
+              carePeople={carePeople}
+              savingsGoals={data.savingsGoals}
+              onBudgetSettingsChange={setBudgetSettings}
+              onCarePeopleChange={setCarePeople}
+              onSavingsGoalsChange={(updater) => setData((current) => {
+                const savingsGoals = typeof updater === 'function' ? updater(current.savingsGoals) : updater;
+                const next = { ...current, savingsGoals };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                return next;
+              })}
             />
 
             <section className="panel">
@@ -3014,7 +3067,7 @@ export default function App() {
                       value={recurringDraft.person}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, person: event.target.value })}
                     >
-                      {PEOPLE.map((person) => <option key={person}>{person}</option>)}
+                      {availablePeople.map((person) => <option key={person}>{person}</option>)}
                     </select>
                   </label>
                   <label>
@@ -3322,7 +3375,7 @@ function AnnualReview({ review }) {
       </div>
 
       <p className="hint">
-        Nourriture: {formatCurrency(review.totals.food)} / {formatCurrency(FOOD_BUDGET * 12)} sur l'année. {comparisonText}.
+        Nourriture: {formatCurrency(review.totals.food)} / {formatCurrency(review.foodBudgetAnnual)} sur l'année. {comparisonText}.
       </p>
 
       {topCategories.length > 0 && (

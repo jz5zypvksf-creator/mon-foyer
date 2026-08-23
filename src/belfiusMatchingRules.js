@@ -53,9 +53,25 @@ export function recurringExpenseHasBankMovement(expense, bankRows = []) {
   return Boolean(expense) && bankRows.some((row) => Boolean(strongCommunicationMatch(row, expense)));
 }
 
-export function classifyBankBusinessRule(row) {
+function configuredSavingsRuleForText(value, savingsGoals = []) {
+  const haystack = String(value || '');
+  const goal = savingsGoals.find((candidate) => {
+    const reference = String(candidate.standing_order_reference || candidate.standingOrderReference || '').trim();
+    return candidate.active !== false && reference && haystack.includes(reference);
+  });
+  if (!goal) return null;
+  return {
+    op: String(goal.standing_order_reference || goal.standingOrderReference),
+    bucket: goal.bucket || goal.id,
+    label: goal.label,
+    expectedMonthly: Number(goal.monthly_amount ?? goal.monthlyAmount ?? 0),
+  };
+}
+
+export function classifyBankBusinessRule(row, savingsGoals = []) {
   if (!row || Number(row.amount) >= 0) return null;
-  const savingsRule = savingsRuleForText(bankHaystack(row));
+  const savingsRule = configuredSavingsRuleForText(bankHaystack(row), savingsGoals)
+    || savingsRuleForText(bankHaystack(row));
   if (savingsRule) return {
     key: `op-${savingsRule.op}`,
     destination: savingsRule.label,
