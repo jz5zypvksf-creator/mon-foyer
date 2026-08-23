@@ -94,12 +94,6 @@ function SavingsSettingRow({ goal, savingsGoals, onSaved }) {
 
   return (
     <article className="protected-setting-row">
-      <div className="protected-card-heading">
-        <span><PiggyBank size={18} /><strong>{draft.label || 'Compte d’épargne'}</strong></span>
-        <span className={draft.active ? 'protected-badge active' : 'protected-badge inactive'}>
-          {draft.active ? 'Actif' : 'Inactif'}
-        </span>
-      </div>
       <label>Nom du compte
         <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} />
       </label>
@@ -293,10 +287,8 @@ export default function ProtectedSettings({
   return (
     <section className="panel protected-settings">
       <div className="section-title"><h2><ShieldCheck size={21} /> Paramètres protégés</h2><span>Déverrouillés</span></div>
-      <div className="protected-security-actions">
-        <button className="secondary-button" type="button" onClick={() => setUnlocked(false)}><LockKeyhole size={17} /> Reverrouiller</button>
-        {passkeySupported && <button className="secondary-button" type="button" onClick={registerFaceId}><Fingerprint size={19} /> Configurer Face ID</button>}
-      </div>
+      <button className="secondary-button" type="button" onClick={() => setUnlocked(false)}><LockKeyhole size={17} /> Reverrouiller</button>
+      {passkeySupported && <button className="secondary-button" type="button" onClick={registerFaceId}><Fingerprint size={19} /> Configurer Face ID</button>}
       {authStatus && <p className="protected-status">{authStatus}</p>}
 
       <div className="protected-subsection">
@@ -330,9 +322,6 @@ export default function ProtectedSettings({
       <div className="protected-subsection">
         <h3><PiggyBank size={19} /> Comptes d’épargne</h3>
         <div className="protected-setting-row new-savings-row">
-          <div className="protected-card-heading">
-            <span><Plus size={18} /><strong>Nouveau compte</strong></span>
-          </div>
           <label>Nom du nouveau compte<input value={newSavings.label} onChange={(event) => setNewSavings({ ...newSavings, label: event.target.value })} placeholder="Ex. Travaux terrasse" /></label>
           <div className="protected-grid">
             <label>Solde initial<input inputMode="decimal" value={newSavings.saved} onChange={(event) => setNewSavings({ ...newSavings, saved: event.target.value })} /></label>
