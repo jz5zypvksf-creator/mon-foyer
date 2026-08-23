@@ -74,6 +74,34 @@ test('les employeurs et le complément ONEM sont affectés explicitement au mois
   assert.ok(Math.abs(analysis.forecastBalance - (-102.12)) < 0.005);
 });
 
+test('un achat Mastercard d’août affecte uniquement le mois du prélèvement de septembre', () => {
+  const operation = {
+    date: '2026-08-11', type: 'variable', amount: 2792.50, label: 'TUI Belgium',
+    paymentMethod: 'Mastercard Platinum •••• 4397', settlementDate: '2026-09-16', budgetMonth: '2026-09',
+  };
+  const august = analyzeBudget({
+    operations: [operation], selectedMonth: '2026-08', currentDate: '2026-08-23', openingBalance: 100,
+  });
+  const september = analyzeBudget({
+    operations: [operation], selectedMonth: '2026-09', currentDate: '2026-09-16', openingBalance: 3000,
+  });
+  assert.equal(august.current.expenses, 0);
+  assert.equal(september.current.expenses, 2792.50);
+});
+
+test('un transfert depuis l’épargne finance la trésorerie sans devenir un revenu', () => {
+  const analysis = analyzeBudget({
+    operations: [{
+      date: '2026-09-10', type: 'income', amount: 2792.50,
+      label: 'Transfert depuis épargne — Vacances', savingsDirection: 'out', budgetMonth: '2026-09',
+    }],
+    selectedMonth: '2026-09', currentDate: '2026-09-16', openingBalance: 0,
+  });
+  assert.equal(analysis.current.income, 0);
+  assert.equal(analysis.current.savingsFunding, 2792.50);
+  assert.equal(analysis.current.resources, 2792.50);
+});
+
 test('la suggestion du fonds d’urgence utilise trois mois terminés', () => {
   const analysis = analyzeBudget({
     operations: [
