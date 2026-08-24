@@ -39,6 +39,7 @@ import {
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
+import DesktopDashboard from './DesktopDashboard.jsx';
 import FoodBudgetAnalysis from './FoodBudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import ProtectedSettings from './ProtectedSettings.jsx';
@@ -81,6 +82,8 @@ import {
   mastercardSettlementDate,
 } from './lib/cardPaymentRules.js';
 import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
+import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
+import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -809,6 +812,14 @@ export default function App() {
     }));
   }, [data.categories, effectiveMonthOperations]);
 
+  const desktopDailySeries = useMemo(() => buildDailyBudgetSeries({
+    operations: data.operations,
+    selectedMonth,
+    openingBalance: budgetAnalysis.current.openingBalance,
+    throughDate: balanceCutoff,
+    forecastBalance: budgetAnalysis.forecastBalance,
+  }), [balanceCutoff, budgetAnalysis.current.openingBalance, budgetAnalysis.forecastBalance, data.operations, selectedMonth]);
+
   const reviewMap = useMemo(() => {
     const signatures = new Map();
     monthOperations.forEach((operation) => {
@@ -879,6 +890,16 @@ export default function App() {
       expenses: filteredTotals.fixed + filteredTotals.variable,
     };
   }, [filteredMonthOperations, foodBudgetExcluded]);
+
+  const desktopClosingChecks = useMemo(() => buildMonthClosingChecks({
+    operations: data.operations,
+    selectedMonth,
+    snapshot: belfiusSnapshot,
+    reviewCount: reviewMap.size,
+    scheduledCount: scheduledExpenses.length,
+    lastBackupAt: localStorage.getItem(LAST_BACKUP_STORAGE_KEY) || '',
+    now: new Date(),
+  }), [belfiusSnapshot, data.operations, reviewMap.size, scheduledExpenses.length, selectedMonth]);
 
   const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
   const foodOverBudget = totals.food > foodBudget;
@@ -2402,6 +2423,26 @@ export default function App() {
     setChatStatus('');
   };
 
+  const openHistoryFromDashboard = ({ date = '', category = '', reviewOnly = false } = {}) => {
+    setHistorySearch(date);
+    setHistoryType('all');
+    setHistoryPerson('all');
+    setHistoryCategory(category || 'all');
+    setHistoryPaymentMethod('all');
+    setShowReviewOnly(reviewOnly);
+    setActiveView('history');
+  };
+
+  const openDashboardCheck = (checkId) => {
+    if (checkId === 'review') {
+      openHistoryFromDashboard({ reviewOnly: true });
+      return;
+    }
+    if (checkId === 'csv' || checkId === 'mastercard' || checkId === 'backup') {
+      setActiveView('settings');
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -2457,7 +2498,7 @@ export default function App() {
 
       <main className="content">
         {activeView === 'home' && (
-          <section className="view">
+          <section className="view home-view">
             <div className="hero-panel">
               <div>
                 <span>Disponible total actuel</span>
@@ -2538,6 +2579,18 @@ export default function App() {
             <FoodBudgetAnalysis pace={foodBudgetPace} recommendation={foodBudgetRecommendation} />
 
             <BudgetAnalysis analysis={budgetAnalysis} />
+
+            <DesktopDashboard
+              series={desktopDailySeries}
+              categories={categoryTotals}
+              checks={desktopClosingChecks}
+              selectedMonth={selectedMonth}
+              forecastBalance={budgetAnalysis.forecastBalance}
+              scheduledTotal={scheduledExpenseTotal}
+              onDaySelect={(date) => openHistoryFromDashboard({ date })}
+              onCategorySelect={(category) => openHistoryFromDashboard({ category })}
+              onCheckSelect={openDashboardCheck}
+            />
 
             <div className="stats-grid">
               <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
@@ -3438,7 +3491,7 @@ function ExpenseChart({ categories }) {
   let offset = 0;
 
   return (
-    <section className="panel">
+    <section className="panel expense-chart-panel">
       <div className="section-title">
         <h2>Répartition des dépenses</h2>
         <span>{formatCurrency(total)}</span>
