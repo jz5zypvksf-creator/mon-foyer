@@ -1,43 +1,49 @@
 # Mon Foyer
 
-Application PWA React pour Alain et Esther afin de suivre le budget familial mensuel : revenus, frais fixes, depenses variables, budget nourriture, epargne et historique des operations.
+Application PWA React/Vite de gestion du budget familial. La source de vérité partagée est Supabase ; un cache local permet la consultation et la saisie hors connexion, puis la synchronisation au retour du réseau.
 
-## Installation
+## Fonctions principales
 
-```bash
-npm install
-```
+- opérations, revenus, remboursements et transferts d'épargne ;
+- soldes Belfius, chèques-repas et audit mensuel par CSV ;
+- suivi Mastercard séparant achat, encours et règlement bancaire ;
+- dépenses Loisirs/Vacances et fonctionnement hors connexion ;
+- budget nourriture du foyer et analyse factuelle ;
+- paramètres protégés, sauvegarde JSON et rappels ;
+- tableau de bord adapté à l'iPhone et à l'ordinateur.
 
-## Lancer en local
+## Installation reproductible
 
-```bash
-npm run dev
-```
-
-Ouvrir ensuite l'adresse affichee par Vite, souvent `http://localhost:5173`.
-
-## Construire la version de production
+Prérequis : Node.js 22 et npm.
 
 ```bash
+git clone https://github.com/jz5zypvksf-creator/mon-foyer.git
+cd mon-foyer
+cp .env.example .env.local
+npm ci
+npm test
 npm run build
 ```
 
-Le resultat est genere dans le dossier `dist`.
+Renseigner dans `.env.local` les trois valeurs décrites dans `.env.example`, puis utiliser `npm run dev` pour le développement. Le résultat de production est généré dans `dist/`.
 
-## Installer sur iPhone avec Safari
+## Contrôles
 
-1. Lancer l'application en ligne ou sur une adresse accessible depuis l'iPhone.
-2. Ouvrir l'adresse dans Safari.
-3. Toucher le bouton de partage.
-4. Choisir `Sur l'ecran d'accueil`.
-5. Valider le nom `Mon Foyer`.
+```bash
+npm test
+npm run build
+npm run verify:recovery
+```
 
-L'application s'ouvrira ensuite comme une app installee, avec son icone et son affichage plein ecran.
+GitHub Actions exécute automatiquement `npm ci`, les tests et le build sur chaque pull request et sur `main`.
 
-## Notes techniques
+## Données et sécurité
 
-- Stockage local via `localStorage` pour la v1.0.
-- Donnees separees en `operations`, `categories`, `stores` et `savingsGoals`.
-- Structure preparee pour remplacer plus tard le stockage local par Supabase.
-- Clavardage familial via Supabase, table `public.messages`.
-- Configurer Supabase avec `VITE_SUPABASE_URL` et `VITE_SUPABASE_ANON_KEY` dans `.env`.
+- Ne jamais versionner `.env`, `.env.local`, une clé `service_role`, un export JSON financier ou un numéro complet de carte.
+- Le dépôt contient uniquement le code et les évolutions SQL ; les données courantes restent dans Supabase.
+- L'interface **Réglages → Sauvegarde et récupération** produit la seconde copie portable des données au format JSON.
+- Les tables financières Supabase utilisent la sécurité par ligne (RLS).
+
+## Reprise après incident
+
+La procédure complète, l'inventaire Supabase vérifié et l'ordre de restauration sont décrits dans [docs/DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md).
