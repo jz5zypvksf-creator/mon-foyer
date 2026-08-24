@@ -339,39 +339,6 @@ h2 {
   background: var(--danger);
 }
 
-.progress-fill.food-progress-safe {
-  background: #3e9b68;
-}
-
-.progress-fill.food-progress-warning {
-  background: #e3912f;
-}
-
-.progress-fill.food-progress-danger {
-  background: #c44f49;
-}
-
-.progress-fill.food-progress-exceeded {
-  background: #1e2529;
-}
-
-.food-budget-status.safe {
-  color: #2f7d57;
-}
-
-.food-budget-status.warning {
-  color: #a85c00;
-}
-
-.food-budget-status.danger {
-  color: #b33f3a;
-}
-
-.food-budget-status.exceeded {
-  color: #1e2529;
-  font-weight: 850;
-}
-
 .food-budget-panel .section-title h2 {
   display: inline-flex;
   align-items: center;
@@ -381,130 +348,6 @@ h2 {
 .food-budget-panel .section-title h2 svg {
   color: var(--green);
   flex: 0 0 auto;
-}
-
-.food-budget-analysis {
-  display: grid;
-  gap: 14px;
-}
-
-.food-budget-analysis .section-title {
-  margin-bottom: 0;
-}
-
-.food-budget-analysis .section-title h2 {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.food-analysis-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 15px;
-  background: #eef8f1;
-  color: #2f7d57;
-}
-
-.food-analysis-status div {
-  display: grid;
-  gap: 3px;
-}
-
-.food-analysis-status span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.food-budget-analysis.status-watch .food-analysis-status {
-  background: #fff6e5;
-  color: #986000;
-}
-
-.food-budget-analysis.status-over .food-analysis-status {
-  background: #fff0ed;
-  color: var(--danger);
-}
-
-.food-analysis-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-}
-
-.food-analysis-grid > div {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  padding: 11px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #f8faf9;
-}
-
-.food-analysis-grid span {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.food-analysis-grid strong {
-  color: var(--blue);
-  font-size: 1rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.food-recommendation {
-  padding: 13px;
-  border: 1px solid #cfe3d6;
-  border-radius: 16px;
-  background: linear-gradient(145deg, #f2f9f4, #fbfdfc);
-}
-
-.food-recommendation-title,
-.food-suggestion-amount {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--blue);
-}
-
-.food-recommendation p {
-  margin: 8px 0;
-  color: #52646f;
-  line-height: 1.45;
-}
-
-.food-suggestion-amount {
-  flex-wrap: wrap;
-  padding: 9px 0;
-}
-
-.food-suggestion-amount strong {
-  font-size: 1.35rem;
-}
-
-.food-suggestion-amount span {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--green-soft);
-  color: #2f6f50;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.food-recommendation small {
-  display: block;
-  color: var(--muted);
-  line-height: 1.4;
-}
-
-@media (max-width: 380px) {
-  .food-analysis-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .hint {
@@ -734,6 +577,66 @@ h2 {
 
 .form-row.single {
   grid-template-columns: 1fr;
+}
+
+.operation-review-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f7faf8;
+}
+
+.operation-review-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+  color: var(--blue);
+}
+
+.operation-review-panel > div:first-child span,
+.operation-review-panel small {
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.operation-review-panel textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  resize: vertical;
+  font: inherit;
+}
+
+.operation-review-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.operation-review-actions button {
+  min-height: 40px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.operation-review-actions button.active { background: var(--blue); color: white; }
+.operation-review-panel.review-verified { border-color: #b9dbc7; background: #f2faf5; }
+.operation-review-panel.review-disputed { border-color: #e6b5ad; background: #fff5f2; }
+.operation-review-panel.review-resolved { border-color: #b8d4e5; background: #f2f8fc; }
+
+.operation-review-badge { display: block; margin-top: 4px; font-style: normal; font-weight: 850; }
+.operation-review-badge.review-verified { color: #2e7d50; }
+.operation-review-badge.review-disputed { color: #b33a32; }
+.operation-review-badge.review-resolved { color: #276589; }
+
+@media (max-width: 620px) {
+  .operation-review-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .history-tools {
@@ -1897,24 +1800,46 @@ input, select, textarea {
     max-width: 100%;
   }
 
-  .home-view > .hero-panel,
-  .home-view > .food-budget-panel,
-  .home-view > .budget-analysis,
-  .home-view > .stats-grid {
-    grid-column: 1 / 5;
+  .home-view > .desktop-overview-grid {
+    grid-column: 1 / 13;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: minmax(320px, 4fr) minmax(0, 8fr);
+    gap: 16px;
+    align-items: start;
   }
 
-  .home-view > .hero-panel { grid-row: 1; }
-  .home-view > .food-budget-panel { grid-row: 2; }
-  .home-view > .budget-analysis { grid-row: 3; }
-  .home-view > .stats-grid { grid-row: 4; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .home-view > .balance-control-panel { grid-column: 1 / 13; grid-row: 6; }
-  .home-view > .care-summary-panel { grid-column: 1 / 13; grid-row: 7; }
-  .home-view > .scheduled-panel { grid-column: 1 / 8; grid-row: 8; }
-  .home-view > .expense-chart-panel { grid-column: 8 / 13; grid-row: 8; }
-  .home-view > .annual-panel { grid-column: 1 / 13; grid-row: 9; }
-  .home-view > .expense-types-summary-panel { grid-column: 1 / 7; grid-row: 10; }
-  .home-view > .expense-types-settings-panel { grid-column: 7 / 13; grid-row: 10; }
+  .desktop-summary-column,
+  .desktop-insights-column {
+    display: grid;
+    min-width: 0;
+    gap: 16px;
+    align-content: start;
+  }
+
+  .desktop-summary-column > *,
+  .desktop-insights-column > * {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .desktop-summary-column > .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-view .desktop-insights-column > .desktop-dashboard {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .home-view > .balance-control-panel { grid-column: 1 / 13; grid-row: 2; }
+  .home-view > .care-summary-panel { grid-column: 1 / 13; grid-row: 3; }
+  .home-view > .scheduled-panel { grid-column: 1 / 8; grid-row: 4; }
+  .home-view > .expense-chart-panel { grid-column: 8 / 13; grid-row: 4; }
+  .home-view > .annual-panel { grid-column: 1 / 13; grid-row: 5; }
+  .home-view > .expense-types-summary-panel { grid-column: 1 / 7; grid-row: 6; }
+  .home-view > .expense-types-settings-panel { grid-column: 7 / 13; grid-row: 6; }
 
   .home-view .hero-panel {
     min-height: 0;
@@ -2009,7 +1934,6 @@ input, select, textarea {
   }
 }
 
-
 .mastercard-summary {
   margin-top: 12px;
   padding: 12px 14px;
@@ -2046,6 +1970,7 @@ input, select, textarea {
   font-size: 0.84rem;
   line-height: 1.45;
 }
+
 
 /* Synchronisation automatique visible */
 .sync-indicator {
@@ -2191,65 +2116,4 @@ input, select, textarea {
     padding-inline: 6px;
     font-size: 0.72rem;
   }
-}
-
-
-.operation-review-panel {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #f7faf8;
-}
-
-.operation-review-panel > div:first-child {
-  display: grid;
-  gap: 3px;
-  color: var(--blue);
-}
-
-.operation-review-panel > div:first-child span,
-.operation-review-panel small {
-  color: var(--muted);
-  font-size: .78rem;
-}
-
-.operation-review-panel textarea {
-  width: 100%;
-  padding: 11px 12px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  resize: vertical;
-  font: inherit;
-}
-
-.operation-review-actions {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.operation-review-actions button {
-  min-height: 40px;
-  padding: 7px;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: white;
-  color: var(--blue);
-  font-weight: 800;
-}
-
-.operation-review-actions button.active { background: var(--blue); color: white; }
-.operation-review-panel.review-verified { border-color: #b9dbc7; background: #f2faf5; }
-.operation-review-panel.review-disputed { border-color: #e6b5ad; background: #fff5f2; }
-.operation-review-panel.review-resolved { border-color: #b8d4e5; background: #f2f8fc; }
-
-.operation-review-badge { display: block; margin-top: 4px; font-style: normal; font-weight: 850; }
-.operation-review-badge.review-verified { color: #2e7d50; }
-.operation-review-badge.review-disputed { color: #b33a32; }
-.operation-review-badge.review-resolved { color: #276589; }
-
-@media (max-width: 620px) {
-  .operation-review-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
