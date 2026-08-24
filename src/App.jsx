@@ -2798,7 +2798,7 @@ export default function App() {
 
             <AnnualReview review={annualReview} />
 
-            <section className="panel">
+            <section className="panel expense-types-summary-panel">
               <div className="section-title">
                 <h2>Dépenses par type de frais</h2>
                 <span>{monthOperations.length} opérations</span>
@@ -2812,7 +2812,7 @@ export default function App() {
               </div>
             </section>
 
-            <section className="panel">
+            <section className="panel expense-types-settings-panel">
               <div className="section-title">
                 <h2>Types de frais</h2>
                 <span>{data.categories.filter(isExpenseCategory).length}</span>
