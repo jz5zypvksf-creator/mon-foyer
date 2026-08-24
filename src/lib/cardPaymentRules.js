@@ -28,3 +28,20 @@ export function mastercardSettlementDate(purchaseDate) {
 export function isMastercardPaymentMethod(value) {
   return String(value || '') === MASTERCARD_PAYMENT_METHOD;
 }
+
+export function previousMonthKey(monthKey) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || ''));
+  if (!match) return '';
+  const [, yearText, monthText] = match;
+  const date = new Date(Date.UTC(Number(yearText), Number(monthText) - 2, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// Un achat Mastercard appartient au budget du mois où Belfius prélève le
+// décompte. Pour prévoir un mois donné, on lit donc les récurrents carte du
+// mois précédent, et non ceux du mois affiché.
+export function recurringSourceMonthForBudget(paymentMethod, budgetMonth) {
+  return isMastercardPaymentMethod(paymentMethod)
+    ? previousMonthKey(budgetMonth)
+    : String(budgetMonth || '');
+}
