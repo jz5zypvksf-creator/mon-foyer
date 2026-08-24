@@ -63,8 +63,7 @@ async function showSystemNotification(title, body, tag) {
         body,
         tag,
         renotify: false,
-        icon: '/icons/icon-192.png',
-        badge: '/icons/icon-192.png',
+        icon: '/icon.svg',
         data: { url: '/' },
       });
       return true;
