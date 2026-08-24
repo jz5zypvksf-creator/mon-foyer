@@ -125,3 +125,40 @@ test('un versement Belfius crédite l’épargne et débite Belfius une seule fo
     date: '2026-08-17', amount: -50, bucket: 'urgence',
   }, 'urgence'), true);
 });
+
+test('le grand livre applique une fois chaque mouvement à son bon compte', () => {
+  const mastercard = 'Mastercard Platinum •••• 4397';
+  const goals = [{ id: 'urgence', saved: 200 }];
+  const deposit = {
+    type: 'savings_transfer', amount: 50, paymentMethod: 'Compte Belfius',
+    savingsGoalId: 'urgence', savingsDirection: 'in',
+  };
+  const withdrawal = {
+    type: 'income', amount: 25, paymentMethod: 'Compte Belfius',
+    savingsGoalId: 'urgence', savingsDirection: 'out',
+  };
+  const operations = [
+    { type: 'income', amount: 100, paymentMethod: 'Compte Belfius' },
+    { type: 'fixed', amount: 20, paymentMethod: 'Compte Belfius' },
+    { type: 'variable', amount: 10, paymentMethod: 'Chèques repas Alain' },
+    { type: 'reimbursement', amount: 5, paymentMethod: 'Compte Belfius' },
+    deposit,
+    withdrawal,
+    { type: 'variable', amount: 8, paymentMethod: mastercard },
+    {
+      type: 'card_settlement', amount: 8, paymentMethod: 'Compte Belfius',
+      settlesPaymentMethod: mastercard,
+    },
+  ];
+  const balances = calculatePaymentMethodBalances(
+    operations,
+    ['Compte Belfius', 'Chèques repas Alain', mastercard],
+  );
+  closeTo(balances['Compte Belfius'], 52);
+  closeTo(balances['Chèques repas Alain'], -10);
+  closeTo(balances[mastercard], 0);
+
+  const afterDeposit = applySavingsOperationChange(goals, null, deposit);
+  const afterWithdrawal = applySavingsOperationChange(afterDeposit, null, withdrawal);
+  closeTo(afterWithdrawal[0].saved, 225);
+});
