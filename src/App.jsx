@@ -85,6 +85,7 @@ import {
 import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
 import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
 import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
+import { findPotentialOperationDuplicate } from './lib/operationDuplicateRules.js';
 import {
   recurringRecognitionPresentation,
   recurringStructuredCommunication,
@@ -1361,6 +1362,23 @@ export default function App() {
       const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
       if (amount > availableBalance) {
         setOperationStatus(`${operation.paymentMethod}: solde disponible ${formatCurrency(availableBalance)}. Paiement impossible.`);
+        return;
+      }
+    }
+
+    const duplicate = findPotentialOperationDuplicate(operation, data.operations, editingId || '');
+    if (duplicate) {
+      const existing = duplicate.operation;
+      const duplicateKind = duplicate.confidence === 'exact' ? 'exact' : 'probable';
+      const proceed = window.confirm(
+        `Attention : doublon ${duplicateKind} détecté.\n\n`
+        + `${existing.date} · ${existing.store || existing.label}\n`
+        + `${formatCurrency(existing.amount)} · ${existing.person || 'Foyer'} · ${existing.paymentMethod || 'Compte Belfius'}\n\n`
+        + 'Annuler : revenir à la saisie.\n'
+        + 'OK : enregistrer quand même cette nouvelle opération.',
+      );
+      if (!proceed) {
+        setOperationStatus('Enregistrement annulé : doublon potentiel détecté.');
         return;
       }
     }
