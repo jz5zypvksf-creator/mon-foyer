@@ -36,6 +36,14 @@ test('un remboursement crédite le moyen de paiement', () => {
   closeTo(balances['Compte Belfius'], 118.78);
 });
 
+
+test('un statut de contrôle bancaire ne modifie jamais le grand livre', () => {
+  const base = { type: 'variable', paymentMethod: 'Compte Belfius', amount: 2792.50 };
+  const balances = ['unreviewed', 'verified', 'disputed', 'resolved'].map((reviewStatus) => (
+    calculatePaymentMethodBalances([{ ...base, reviewStatus }], ['Compte Belfius'])['Compte Belfius']
+  ));
+  balances.forEach((balance) => closeTo(balance, -2792.50));
+});
 test('un règlement Mastercard débite Belfius et apure la carte sans seconde dépense', () => {
   const mastercard = 'Mastercard Platinum •••• 4397';
   const operations = [
