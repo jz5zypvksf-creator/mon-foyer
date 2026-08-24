@@ -15,6 +15,56 @@ createRoot(document.getElementById('root')).render(
 
 const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
+function setReactSelectValue(select, value) {
+  if (!select || !value) return;
+  const optionExists = Array.from(select.options || []).some((option) => option.value === value);
+  if (!optionExists) return;
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+  if (setter) setter.call(select, value);
+  else select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function openQuickAdd(person = '') {
+  let attempts = 0;
+  const tryOpen = () => {
+    attempts += 1;
+    const addButton = Array.from(document.querySelectorAll('.bottom-nav button'))
+      .find((button) => button.textContent?.trim().includes('Ajouter'));
+    if (!addButton) {
+      if (attempts < 25) window.setTimeout(tryOpen, 120);
+      return;
+    }
+
+    addButton.click();
+    window.setTimeout(() => {
+      const personLabel = Array.from(document.querySelectorAll('.form-panel label'))
+        .find((label) => label.textContent?.trim().startsWith('Personne'));
+      setReactSelectValue(personLabel?.querySelector('select'), person);
+      const form = document.querySelector('.form-panel');
+      form?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      form?.querySelector('input, select, textarea')?.focus({ preventScroll: true });
+    }, 100);
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('quickAdd');
+    url.searchParams.delete('person');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+  tryOpen();
+}
+
+const initialUrl = new URL(window.location.href);
+if (initialUrl.searchParams.get('quickAdd') === '1') {
+  window.setTimeout(() => openQuickAdd(initialUrl.searchParams.get('person') || ''), 50);
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'OPEN_QUICK_ADD') openQuickAdd(event.data.person || '');
+  });
+}
+
 function waitForActivation(registration) {
   const worker = registration.installing || registration.waiting || registration.active;
   if (!worker) return Promise.reject(new Error('Service worker introuvable.'));

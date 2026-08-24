@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'mon-foyer-';
-const CACHE_NAME = CACHE_PREFIX + 'v36-web-push';
+const CACHE_NAME = CACHE_PREFIX + 'v37-daily-purchase-reminder';
 const PRECACHE_ASSETS = ['/']; // __PRECACHE_ASSETS__
 
 self.addEventListener('install', (event) => {
@@ -56,14 +56,25 @@ self.addEventListener('push', (event) => {
       tag: payload.tag || 'mon-foyer-reminder',
       renotify: false,
       icon: '/icon.svg',
-      data: { url: payload.url || '/' },
+      actions: Array.isArray(payload.actions) ? payload.actions : [],
+      data: {
+        url: payload.url || '/',
+        kind: payload.kind || '',
+        person: payload.person || '',
+      },
     },
   ));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = event.notification.data?.url || '/';
+  if (event.action === 'no') return;
+
+  const data = event.notification.data || {};
+  const person = data.person || '';
+  const quickAddTarget = `/?quickAdd=1${person ? `&person=${encodeURIComponent(person)}` : ''}`;
+  const target = data.kind === 'daily-purchase' ? quickAddTarget : (data.url || '/');
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(async (clients) => {
@@ -77,6 +88,7 @@ self.addEventListener('notificationclick', (event) => {
         if (sameOrigin) {
           await sameOrigin.focus();
           if ('navigate' in sameOrigin) await sameOrigin.navigate(target);
+          sameOrigin.postMessage({ type: 'OPEN_QUICK_ADD', person });
           return sameOrigin;
         }
         return self.clients.openWindow(target);
