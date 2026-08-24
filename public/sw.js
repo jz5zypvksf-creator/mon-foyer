@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'mon-foyer-';
-const CACHE_NAME = CACHE_PREFIX + 'v34-ios-ready';
+const CACHE_NAME = CACHE_PREFIX + 'v35-reminders';
 const PRECACHE_ASSETS = ['/']; // __PRECACHE_ASSETS__
 
 self.addEventListener('install', (event) => {
@@ -37,6 +37,29 @@ self.addEventListener('message', (event) => {
           })),
           cachedAssets: requests.length,
         });
+      }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = event.notification.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(async (clients) => {
+        const sameOrigin = clients.find((client) => {
+          try {
+            return new URL(client.url).origin === self.location.origin;
+          } catch {
+            return false;
+          }
+        });
+        if (sameOrigin) {
+          await sameOrigin.focus();
+          if ('navigate' in sameOrigin) await sameOrigin.navigate(target);
+          return sameOrigin;
+        }
+        return self.clients.openWindow(target);
       }),
   );
 });
