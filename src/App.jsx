@@ -87,6 +87,12 @@ import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
 import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
 import { findPotentialOperationDuplicate } from './lib/operationDuplicateRules.js';
 import {
+  OPERATION_REVIEW_STATUSES,
+  normalizeReviewStatus,
+  reviewReasonsForOperation,
+  reviewStatusLabel,
+} from './lib/operationReviewRules.js';
+import {
   recurringRecognitionPresentation,
   recurringStructuredCommunication,
   sortedBeneficiaryOptions,
@@ -105,7 +111,7 @@ const RECURRENCE_OPTIONS = [
   { value: 'annual', label: 'Annuelle', months: 12 },
 ];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius', MASTERCARD_PAYMENT_METHOD];
-const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, settles_payment_method, settlement_date, savings_goal_id, savings_direction, budget_month, income_kind, income_source, created_at';
+const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, settles_payment_method, settlement_date, savings_goal_id, savings_direction, budget_month, income_kind, income_source, review_status, review_note, reviewed_by, reviewed_at, dispute_reference, resolved_at, created_at';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
 
@@ -286,6 +292,12 @@ function normalizeOperation(operation) {
     budgetMonth: operation.budget_month || operation.budgetMonth || inferredBudgetMonth(operation),
     incomeKind: operation.income_kind || operation.incomeKind || (String(operation.label || '').toLowerCase().includes('salaire') ? 'salary' : 'other'),
     incomeSource: operation.income_source || operation.incomeSource || '',
+    reviewStatus: normalizeReviewStatus(operation.review_status || operation.reviewStatus),
+    reviewNote: operation.review_note || operation.reviewNote || '',
+    reviewedBy: operation.reviewed_by || operation.reviewedBy || '',
+    reviewedAt: operation.reviewed_at || operation.reviewedAt || '',
+    disputeReference: operation.dispute_reference || operation.disputeReference || '',
+    resolvedAt: operation.resolved_at || operation.resolvedAt || '',
     createdAt: operation.created_at || operation.createdAt || '',
   };
 }
@@ -367,6 +379,12 @@ function makeEmptyOperation() {
     incomeSource: '',
     settlesPaymentMethod: '',
     settlementDate: '',
+    reviewStatus: OPERATION_REVIEW_STATUSES.UNREVIEWED,
+    reviewNote: '',
+    reviewedBy: '',
+    reviewedAt: '',
+    disputeReference: '',
+    resolvedAt: '',
   };
 }
 
@@ -875,7 +893,8 @@ export default function App() {
       if (operation.type !== 'income' && amount >= 1000) reasons.push('montant élevé');
       if (signatures.get(signature) > 1) reasons.push('doublon possible');
 
-      if (reasons.length > 0) alerts.set(operation.id, reasons);
+      const effectiveReasons = reviewReasonsForOperation(operation, reasons);
+      if (effectiveReasons.length > 0) alerts.set(operation.id, effectiveReasons);
       return alerts;
     }, new Map());
   }, [monthOperations]);
@@ -1358,6 +1377,22 @@ export default function App() {
     delete operation.recurringId;
     delete operation.savingsSource;
 
+    const previousReviewStatus = normalizeReviewStatus(editingOperation?.reviewStatus);
+    operation.reviewStatus = normalizeReviewStatus(operation.reviewStatus);
+    if (operation.reviewStatus === OPERATION_REVIEW_STATUSES.DISPUTED
+      && !String(operation.reviewNote || '').trim()
+      && !String(operation.disputeReference || '').trim()) {
+      setOperationStatus('Pour une contestation, indique au moins une note ou la référence du dossier bancaire.');
+      return;
+    }
+    if (operation.reviewStatus !== previousReviewStatus) {
+      operation.reviewedAt = new Date().toISOString();
+      operation.reviewedBy = session?.user?.email || 'Utilisateur Mon Foyer';
+      operation.resolvedAt = operation.reviewStatus === OPERATION_REVIEW_STATUSES.RESOLVED
+        ? operation.reviewedAt
+        : '';
+    }
+
     if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
       const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
       if (amount > availableBalance) {
@@ -1409,6 +1444,12 @@ export default function App() {
           : null,
         income_kind: operation.type === 'income' ? (operation.incomeKind || 'other') : null,
         income_source: operation.type === 'income' ? (operation.incomeSource || null) : null,
+        review_status: operation.reviewStatus,
+        review_note: operation.reviewNote || null,
+        reviewed_by: operation.reviewedBy || null,
+        reviewed_at: operation.reviewedAt || null,
+        dispute_reference: operation.disputeReference || null,
+        resolved_at: operation.resolvedAt || null,
       };
       const mutation = {
         recordId: operation.id,
@@ -3042,6 +3083,61 @@ export default function App() {
                 </label>
               )}
 
+              {editingId && (
+                <section className={`operation-review-panel review-${normalizeReviewStatus(draft.reviewStatus)}`}>
+                  <div>
+                    <strong>Contrôle bancaire</strong>
+                    <span>Le statut ne modifie jamais le montant comptabilisé.</span>
+                  </div>
+                  <div className="operation-review-actions" role="group" aria-label="Statut du contrôle bancaire">
+                    {[
+                      [OPERATION_REVIEW_STATUSES.UNREVIEWED, 'À vérifier'],
+                      [OPERATION_REVIEW_STATUSES.VERIFIED, 'Vérifié'],
+                      [OPERATION_REVIEW_STATUSES.DISPUTED, 'Contesté'],
+                      [OPERATION_REVIEW_STATUSES.RESOLVED, 'Résolu'],
+                    ].map(([status, label]) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className={normalizeReviewStatus(draft.reviewStatus) === status ? 'active' : ''}
+                        onClick={() => setDraft({
+                          ...draft,
+                          reviewStatus: status,
+                          resolvedAt: status === OPERATION_REVIEW_STATUSES.RESOLVED ? draft.resolvedAt : '',
+                        })}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {(draft.reviewStatus === OPERATION_REVIEW_STATUSES.DISPUTED
+                    || draft.reviewStatus === OPERATION_REVIEW_STATUSES.RESOLVED) && (
+                    <label>
+                      Référence du dossier bancaire
+                      <input
+                        value={draft.disputeReference || ''}
+                        onChange={(event) => setDraft({ ...draft, disputeReference: event.target.value })}
+                        placeholder="Ex. numéro de plainte ou de dossier"
+                      />
+                    </label>
+                  )}
+                  {draft.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
+                    <label>
+                      Note de contrôle
+                      <textarea
+                        value={draft.reviewNote || ''}
+                        onChange={(event) => setDraft({ ...draft, reviewNote: event.target.value })}
+                        placeholder="Ex. achat TUI reconnu par Alain"
+                        rows="3"
+                      />
+                    </label>
+                  )}
+                  {draft.reviewedAt && (
+                    <small>Dernière décision : {new Date(draft.reviewedAt).toLocaleString('fr-BE')} · {draft.reviewedBy || 'Mon Foyer'}</small>
+                  )}
+                </section>
+              )}
+
               <button className="primary-button" type="submit">
                 <Plus size={20} />
                 {editingId ? 'Enregistrer' : 'Ajouter'}
@@ -3689,6 +3785,12 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
         <strong>{operation.label}</strong>
         <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
         {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
+        {operation.reviewStatus && operation.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
+          <em className={`operation-review-badge review-${operation.reviewStatus}`}>
+            {reviewStatusLabel(operation.reviewStatus)}
+            {operation.disputeReference ? ` · dossier ${operation.disputeReference}` : ''}
+          </em>
+        )}
       </div>
       <strong className={operation.type === 'income' ? 'amount income' : 'amount'}>
         {sign}{formatCurrency(operation.amount)}
