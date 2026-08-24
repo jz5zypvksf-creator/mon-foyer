@@ -80,6 +80,7 @@ import {
   MASTERCARD_MASKED_NUMBER,
   MASTERCARD_PAYMENT_METHOD,
   mastercardSettlementDate,
+  recurringSourceMonthForBudget,
 } from './lib/cardPaymentRules.js';
 import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
 import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
@@ -354,6 +355,7 @@ function makeEmptyOperation() {
     recurringDay: new Date().getDate(),
     recurringId: '',
     structuredCommunication: '',
+    directDebitReference: '',
     freeCommunication: '',
     freeCommunicationMode: 'contains',
     savingsSource: '',
@@ -474,6 +476,7 @@ function normalizeRemoteState(remote) {
       frequency: expense.frequency || 'monthly',
       startDate: expense.start_date || currentDate(),
       structuredCommunication: expense.structured_communication || '',
+      directDebitReference: expense.direct_debit_reference || '',
       freeCommunication: expense.free_communication || '',
       freeCommunicationMode: expense.free_communication_mode || 'contains',
       paymentMethod: expense.payment_method || expense.paymentMethod || 'Compte Belfius',
@@ -713,26 +716,34 @@ export default function App() {
     );
 
     const recurringScheduledExpenses = (data.recurringFixedExpenses || [])
-      .filter((expense) => isRecurringDueInMonth(expense, selectedMonth))
-      .map((expense) => ({
+      .map((expense) => {
+        const paymentMethod = expense.paymentMethod || expense.payment_method || 'Compte Belfius';
+        const sourceMonth = recurringSourceMonthForBudget(paymentMethod, selectedMonth);
+        if (!isRecurringDueInMonth(expense, sourceMonth)) return null;
+        const purchaseDate = dateInMonth(sourceMonth, expense.day);
+        const settlementDate = isMastercardPaymentMethod(paymentMethod)
+          ? mastercardSettlementDate(purchaseDate)
+          : '';
+        return {
         id: `recurring-${expense.id}-${selectedMonth}`,
-        date: dateInMonth(selectedMonth, expense.day),
+        date: purchaseDate,
         person: expense.person,
         type: 'fixed',
         category: expense.category,
         store: '',
-        paymentMethod: expense.paymentMethod || expense.payment_method || 'Compte Belfius',
-        settlementDate: isMastercardPaymentMethod(expense.paymentMethod || expense.payment_method)
-          ? mastercardSettlementDate(dateInMonth(selectedMonth, expense.day))
-          : '',
+        paymentMethod,
+        settlementDate,
         label: expense.label,
         amount: Number(expense.amount) || 0,
         projectedRecurring: true,
         recurringExpenseId: expense.id,
         frequency: expense.frequency || 'monthly',
-      }))
+        };
+      })
+      .filter(Boolean)
       .filter((operation) => (
-        operation.date > balanceCutoff
+        (operation.settlementDate || operation.date) > balanceCutoff
+        && (operation.settlementDate || operation.date).slice(0, 7) === selectedMonth
         && !existingFixedSignatures.has(fixedExpenseSignature(operation))
       ));
 
@@ -1011,7 +1022,7 @@ export default function App() {
         supabase.from('stores').select('id, name').eq('household_id', householdId).order('name', { ascending: true }),
         supabase.from('savings_goals').select('id, label, target, saved, bucket, monthly_amount, standing_order_reference, standing_order_day, active').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('categories').select('category_id, label, type, icon').eq('household_id', householdId).order('label', { ascending: true }),
-        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method').eq('household_id', householdId).order('created_at', { ascending: true }),
+        supabase.from('recurring_fixed_expenses').select('id, label, amount, day, person, category, frequency, start_date, direct_debit_reference, structured_communication, free_communication, free_communication_mode, payment_method').eq('household_id', householdId).order('created_at', { ascending: true }),
         supabase.from('bank_snapshots').select('balance, balance_date, imported_at, pending_amount, remaining, confirmations, anomalies, clean, source_file, operation_state, opening_month, opening_balance, opening_balances, live_balance, live_balance_date, live_balance_source, live_operation_state').eq('household_id', householdId).maybeSingle(),
         supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
         supabase.from('care_people').select('id, name, tracks_reimbursements, exclude_from_food_budget, active').eq('household_id', householdId).order('created_at', { ascending: true }),
@@ -1159,7 +1170,7 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_fixed_expenses' }, async () => {
         const { data: rows } = await supabase
           .from('recurring_fixed_expenses')
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
+          .select('id, label, amount, day, person, category, frequency, start_date, direct_debit_reference, structured_communication, free_communication, free_communication_mode, payment_method')
           .eq('household_id', householdId)
           .order('created_at', { ascending: true });
         if (rows) {
@@ -1168,6 +1179,7 @@ export default function App() {
               ...expense,
               amount: Number(expense.amount),
               day: Number(expense.day),
+              directDebitReference: expense.direct_debit_reference || '',
               structuredCommunication: expense.structured_communication || '',
               freeCommunication: expense.free_communication || '',
               freeCommunicationMode: expense.free_communication_mode || 'contains',
@@ -1227,6 +1239,7 @@ export default function App() {
       category: operation.category,
       frequency: operation.recurrence || 'monthly',
       startDate: operation.date,
+      directDebitReference: operation.directDebitReference ?? existing?.directDebitReference ?? existing?.direct_debit_reference ?? '',
       structuredCommunication: operation.structuredCommunication ?? existing?.structuredCommunication ?? existing?.structured_communication ?? '',
       freeCommunication: operation.freeCommunication ?? existing?.freeCommunication ?? existing?.free_communication ?? '',
       freeCommunicationMode: operation.freeCommunicationMode || existing?.freeCommunicationMode || existing?.free_communication_mode || 'contains',
@@ -1243,6 +1256,7 @@ export default function App() {
         category: recurringExpense.category,
         frequency: recurringExpense.frequency,
         start_date: recurringExpense.startDate,
+        direct_debit_reference: recurringExpense.directDebitReference || null,
         structured_communication: recurringExpense.structuredCommunication || null,
         free_communication: recurringExpense.freeCommunication || null,
         free_communication_mode: recurringExpense.freeCommunicationMode || 'contains',
@@ -1253,7 +1267,7 @@ export default function App() {
         ? supabase.from('recurring_fixed_expenses').update(payload).eq('id', existing.id).eq('household_id', householdId)
         : supabase.from('recurring_fixed_expenses').insert(payload);
 
-      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method');
+      const { data: savedRows, error } = await query.select('id, label, amount, day, person, category, frequency, start_date, direct_debit_reference, structured_communication, free_communication, free_communication_mode, payment_method');
       if (error) throw new Error(formatSupabaseRecurringError(error));
       const saved = savedRows?.[0];
       if (saved) {
@@ -1708,6 +1722,7 @@ export default function App() {
       startDate: expense.startDate || expense.start_date || currentDate(),
       person: expense.person || 'Foyer',
       category: expense.category || 'habitation',
+      directDebitReference: expense.directDebitReference || expense.direct_debit_reference || '',
       structuredCommunication: expense.structuredCommunication || expense.structured_communication || '',
       freeCommunication: expense.freeCommunication || expense.free_communication || '',
       freeCommunicationMode: expense.freeCommunicationMode || expense.free_communication_mode || 'contains',
@@ -1740,6 +1755,7 @@ export default function App() {
       category: recurringDraft.category,
       frequency: recurringDraft.frequency || 'monthly',
       startDate: recurringDraft.startDate || currentDate(),
+      directDebitReference: String(recurringDraft.directDebitReference || '').trim(),
       structuredCommunication: recurringStructuredCommunication(
         recurringDraft.paymentMethod,
         recurringDraft.structuredCommunication,
@@ -1774,6 +1790,7 @@ export default function App() {
         category: fixedExpense.category,
         frequency: fixedExpense.frequency,
         start_date: fixedExpense.startDate,
+        direct_debit_reference: fixedExpense.directDebitReference || null,
         structured_communication: fixedExpense.structuredCommunication || null,
         free_communication: fixedExpense.freeCommunication || null,
         free_communication_mode: fixedExpense.freeCommunicationMode || 'contains',
@@ -1786,12 +1803,12 @@ export default function App() {
           .update(payload)
           .eq('id', recurringEditingId)
           .eq('household_id', householdId)
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
+          .select('id, label, amount, day, person, category, frequency, start_date, direct_debit_reference, structured_communication, free_communication, free_communication_mode, payment_method')
           .single()
         : supabase
           .from('recurring_fixed_expenses')
           .insert(payload)
-          .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
+          .select('id, label, amount, day, person, category, frequency, start_date, direct_debit_reference, structured_communication, free_communication, free_communication_mode, payment_method')
           .single();
 
       const { data: savedExpense, error } = await query;
@@ -1811,6 +1828,7 @@ export default function App() {
         frequency: savedExpense.frequency || 'monthly',
         startDate: savedExpense.start_date || currentDate(),
         structuredCommunication: savedExpense.structured_communication || '',
+        directDebitReference: savedExpense.direct_debit_reference || '',
         freeCommunication: savedExpense.free_communication || '',
         freeCommunicationMode: savedExpense.free_communication_mode || 'contains',
         paymentMethod: savedExpense.payment_method || 'Compte Belfius',
@@ -2140,7 +2158,7 @@ export default function App() {
         .order('label', { ascending: true }),
       supabase
         .from('recurring_fixed_expenses')
-        .select('id, label, amount, day, person, category, frequency, start_date, structured_communication, free_communication, free_communication_mode, payment_method')
+        .select('id, label, amount, day, person, category, frequency, start_date, direct_debit_reference, structured_communication, free_communication, free_communication_mode, payment_method')
         .eq('household_id', householdId)
         .order('created_at', { ascending: true }),
       supabase.from('household_budget_settings').select('effective_month, food_budget, updated_at').eq('household_id', householdId).order('effective_month', { ascending: true }),
@@ -3230,14 +3248,24 @@ export default function App() {
                 <fieldset className="recurring-bank-identification">
                   <legend>{recurringRecognition.legend}</legend>
                   {!isMastercardPaymentMethod(recurringDraft.paymentMethod) && (
-                    <label>
-                      Communication structurée
-                      <input
-                        value={recurringDraft.structuredCommunication || ''}
-                        onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
-                        placeholder="+++123/4567/89012+++"
-                      />
-                    </label>
+                    <>
+                      <label>
+                        Référence de domiciliation / numéro d’OP
+                        <input
+                          value={recurringDraft.directDebitReference || ''}
+                          onChange={(event) => setRecurringDraft({ ...recurringDraft, directDebitReference: event.target.value })}
+                          placeholder="Ex. 18833987 ou référence de mandat"
+                        />
+                      </label>
+                      <label>
+                        Communication structurée
+                        <input
+                          value={recurringDraft.structuredCommunication || ''}
+                          onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
+                          placeholder="+++123/4567/89012+++"
+                        />
+                      </label>
+                    </>
                   )}
                   <label>
                     {recurringRecognition.fieldLabel}
