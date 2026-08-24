@@ -1857,6 +1857,7 @@ input, select, textarea {
 @media (min-width: 1024px) {
   .app-shell {
     width: min(100%, 1440px);
+    min-width: 0;
     padding-inline: 28px;
   }
 
@@ -1864,19 +1865,36 @@ input, select, textarea {
   .sync-indicator,
   .message-notice,
   .content {
+    /*
+     * La vue active est remplacée dans ce conteneur. En conservant ici une
+     * grille imbriquée, certains navigateurs recalculaient sa piste sur la
+     * largeur minimale de l'ancienne vue au retour vers Accueil.
+     */
+    display: block;
     width: min(1280px, 100%);
+    min-width: 0;
     margin-inline: auto;
   }
 
   .view {
     width: 100%;
+    min-width: 0;
     margin-inline: auto;
   }
 
   .home-view {
+    display: grid;
+    inline-size: 100%;
+    max-inline-size: 100%;
+    min-inline-size: 0;
     grid-template-columns: repeat(12, minmax(0, 1fr));
     align-items: start;
     gap: 16px;
+  }
+
+  .home-view > * {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .home-view > .hero-panel,
