@@ -8,6 +8,23 @@ export function normalizeBankText(value) {
 export function normalizeStructuredCommunication(value) { return String(value || '').replace(/\D/g, ''); }
 export function normalizeDirectDebitReference(value) { return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
+export function isBankCreditAppOperation(operation) {
+  return operation?.type === 'income' || operation?.type === 'reimbursement';
+}
+
+const BANK_PERSON_ALIASES = Object.freeze([
+  { bank: ['pluta janina'], app: ['nonna'] },
+]);
+
+export function bankPersonAliasMatch(bankRow, appRow) {
+  const bankText = normalizeBankText(bankHaystack(bankRow));
+  const appText = normalizeBankText(`${appRow?.person || ''} ${appRow?.label || ''} ${appRow?.store || ''}`);
+  return BANK_PERSON_ALIASES.some((alias) => (
+    alias.bank.some((needle) => bankText.includes(needle))
+    && alias.app.some((needle) => appText.includes(needle))
+  ));
+}
+
 function bankHaystack(row) {
   return `${row?.directDebitReference || ''} ${row?.label || ''} ${row?.communication || ''} ${row?.details || ''} ${row?.rawDetails || ''}`;
 }

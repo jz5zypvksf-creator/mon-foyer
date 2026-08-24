@@ -1855,9 +1855,66 @@ input, select, textarea {
 }
 
 @media (min-width: 1024px) {
-  .view {
-    width: min(1180px, calc(100% - 3rem));
+  .app-shell {
+    width: min(100%, 1440px);
+    padding-inline: 28px;
+  }
+
+  .topbar,
+  .sync-indicator,
+  .message-notice,
+  .content {
+    width: min(1280px, 100%);
     margin-inline: auto;
+  }
+
+  .view {
+    width: 100%;
+    margin-inline: auto;
+  }
+
+  .home-view {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+  }
+
+  .home-view > .hero-panel,
+  .home-view > .food-budget-panel,
+  .home-view > .budget-analysis,
+  .home-view > .stats-grid {
+    grid-column: 1 / 5;
+  }
+
+  .home-view > .hero-panel { grid-row: 1; }
+  .home-view > .food-budget-panel { grid-row: 2; }
+  .home-view > .budget-analysis { grid-row: 3; }
+  .home-view > .stats-grid { grid-row: 4; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-view > .scheduled-panel { grid-column: 1 / 8; grid-row: 6; }
+  .home-view > .expense-chart-panel { grid-column: 8 / 13; grid-row: 6; }
+  .home-view > .annual-panel { grid-column: 1 / 13; grid-row: 7; }
+
+  .home-view .hero-panel {
+    min-height: 0;
+  }
+
+  .home-view .hero-panel strong {
+    font-size: clamp(2rem, 3.2vw, 3.25rem);
+  }
+
+  .home-view .budget-analysis-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .home-view .stats-grid .stat-card {
+    min-height: 98px;
+  }
+
+  .bottom-nav {
+    width: min(100%, 1280px);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
   }
 }
 

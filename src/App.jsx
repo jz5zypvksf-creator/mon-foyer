@@ -39,6 +39,7 @@ import {
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
+import DesktopDashboard from './DesktopDashboard.jsx';
 import FoodBudgetAnalysis from './FoodBudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import ProtectedSettings from './ProtectedSettings.jsx';
@@ -81,6 +82,13 @@ import {
   mastercardSettlementDate,
 } from './lib/cardPaymentRules.js';
 import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
+import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
+import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
+import {
+  recurringRecognitionPresentation,
+  recurringStructuredCommunication,
+  sortedBeneficiaryOptions,
+} from './lib/recurringExpenseRules.js';
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -338,7 +346,7 @@ function makeEmptyOperation() {
     person: 'Foyer',
     type: 'variable',
     category: 'nourriture',
-    store: 'Colruyt',
+    store: '',
     paymentMethod: 'Compte Belfius',
     label: '',
     amount: '',
@@ -616,6 +624,11 @@ export default function App() {
 
   const activeEntryCarePeople = useMemo(() => activeCarePeople(carePeople), [carePeople]);
   const reimbursablePeople = useMemo(() => reimbursementTrackedPeople(carePeople), [carePeople]);
+  const beneficiaryOptions = useMemo(() => sortedBeneficiaryOptions(data.stores), [data.stores]);
+  const recurringRecognition = useMemo(
+    () => recurringRecognitionPresentation(recurringDraft.paymentMethod),
+    [recurringDraft.paymentMethod],
+  );
   const foodBudgetExcluded = useMemo(() => foodBudgetExcludedPeople(carePeople), [carePeople]);
   const availablePeople = useMemo(() => peopleOptions(activeEntryCarePeople), [activeEntryCarePeople]);
   const historyPeople = useMemo(() => peopleOptions([
@@ -809,6 +822,14 @@ export default function App() {
     }));
   }, [data.categories, effectiveMonthOperations]);
 
+  const desktopDailySeries = useMemo(() => buildDailyBudgetSeries({
+    operations: data.operations,
+    selectedMonth,
+    openingBalance: budgetAnalysis.current.openingBalance,
+    throughDate: balanceCutoff,
+    forecastBalance: budgetAnalysis.forecastBalance,
+  }), [balanceCutoff, budgetAnalysis.current.openingBalance, budgetAnalysis.forecastBalance, data.operations, selectedMonth]);
+
   const reviewMap = useMemo(() => {
     const signatures = new Map();
     monthOperations.forEach((operation) => {
@@ -879,6 +900,16 @@ export default function App() {
       expenses: filteredTotals.fixed + filteredTotals.variable,
     };
   }, [filteredMonthOperations, foodBudgetExcluded]);
+
+  const desktopClosingChecks = useMemo(() => buildMonthClosingChecks({
+    operations: data.operations,
+    selectedMonth,
+    snapshot: belfiusSnapshot,
+    reviewCount: reviewMap.size,
+    scheduledCount: scheduledExpenses.length,
+    lastBackupAt: localStorage.getItem(LAST_BACKUP_STORAGE_KEY) || '',
+    now: new Date(),
+  }), [belfiusSnapshot, data.operations, reviewMap.size, scheduledExpenses.length, selectedMonth]);
 
   const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
   const foodOverBudget = totals.food > foodBudget;
@@ -1246,6 +1277,10 @@ export default function App() {
     const savingsTargetGoal = draft.type === 'savings_transfer' && draft.savingsGoalId ? data.savingsGoals.find((goal) => goal.id === draft.savingsGoalId) : null;
     if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatCurrency(savingsSourceGoal.saved) + '.'); return; }
     if (draft.type === 'savings_transfer' && !savingsTargetGoal) { setOperationStatus('Choisis le poste d’épargne à créditer.'); return; }
+    if (!['income', 'savings_transfer', 'card_settlement'].includes(draft.type) && !draft.store) {
+      setOperationStatus('Choisis un bénéficiaire ou un point de vente.');
+      return;
+    }
 
     if (draft.recurrence !== 'once' && draft.type !== 'income' && !draft.recurringId) {
       const recurringCandidate = {
@@ -1705,7 +1740,10 @@ export default function App() {
       category: recurringDraft.category,
       frequency: recurringDraft.frequency || 'monthly',
       startDate: recurringDraft.startDate || currentDate(),
-      structuredCommunication: String(recurringDraft.structuredCommunication || '').trim(),
+      structuredCommunication: recurringStructuredCommunication(
+        recurringDraft.paymentMethod,
+        recurringDraft.structuredCommunication,
+      ),
       freeCommunication: String(recurringDraft.freeCommunication || '').trim(),
       freeCommunicationMode: recurringDraft.freeCommunicationMode || 'contains',
       paymentMethod: recurringDraft.paymentMethod || 'Compte Belfius',
@@ -2402,6 +2440,26 @@ export default function App() {
     setChatStatus('');
   };
 
+  const openHistoryFromDashboard = ({ date = '', category = '', reviewOnly = false } = {}) => {
+    setHistorySearch(date);
+    setHistoryType('all');
+    setHistoryPerson('all');
+    setHistoryCategory(category || 'all');
+    setHistoryPaymentMethod('all');
+    setShowReviewOnly(reviewOnly);
+    setActiveView('history');
+  };
+
+  const openDashboardCheck = (checkId) => {
+    if (checkId === 'review') {
+      openHistoryFromDashboard({ reviewOnly: true });
+      return;
+    }
+    if (checkId === 'csv' || checkId === 'mastercard' || checkId === 'backup') {
+      setActiveView('settings');
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -2457,7 +2515,7 @@ export default function App() {
 
       <main className="content">
         {activeView === 'home' && (
-          <section className="view">
+          <section className="view home-view">
             <div className="hero-panel">
               <div>
                 <span>Disponible total actuel</span>
@@ -2538,6 +2596,18 @@ export default function App() {
             <FoodBudgetAnalysis pace={foodBudgetPace} recommendation={foodBudgetRecommendation} />
 
             <BudgetAnalysis analysis={budgetAnalysis} />
+
+            <DesktopDashboard
+              series={desktopDailySeries}
+              categories={categoryTotals}
+              checks={desktopClosingChecks}
+              selectedMonth={selectedMonth}
+              forecastBalance={budgetAnalysis.forecastBalance}
+              scheduledTotal={scheduledExpenseTotal}
+              onDaySelect={(date) => openHistoryFromDashboard({ date })}
+              onCategorySelect={(category) => openHistoryFromDashboard({ category })}
+              onCheckSelect={openDashboardCheck}
+            />
 
             <div className="stats-grid">
               <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
@@ -2928,8 +2998,9 @@ export default function App() {
                 <label>
                   Bénéficiaire / Point de vente
                   <select value={draft.store} onChange={(event) => setDraft({ ...draft, store: event.target.value })}>
-                    {data.stores.map((store) => (
-                      <option key={store}>{store}</option>
+                    <option value="" disabled>Faire un choix</option>
+                    {beneficiaryOptions.map((store) => (
+                      <option key={store} value={store}>{store}</option>
                     ))}
                   </select>
                 </label>
@@ -3157,21 +3228,23 @@ export default function App() {
                   />
                 </label>
                 <fieldset className="recurring-bank-identification">
-                  <legend>Identification Belfius (facultatif)</legend>
+                  <legend>{recurringRecognition.legend}</legend>
+                  {!isMastercardPaymentMethod(recurringDraft.paymentMethod) && (
+                    <label>
+                      Communication structurée
+                      <input
+                        value={recurringDraft.structuredCommunication || ''}
+                        onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
+                        placeholder="+++123/4567/89012+++"
+                      />
+                    </label>
+                  )}
                   <label>
-                    Communication structurée
-                    <input
-                      value={recurringDraft.structuredCommunication || ''}
-                      onChange={(event) => setRecurringDraft({ ...recurringDraft, structuredCommunication: event.target.value })}
-                      placeholder="+++123/4567/89012+++"
-                    />
-                  </label>
-                  <label>
-                    Communication libre / motif Belfius
+                    {recurringRecognition.fieldLabel}
                     <input
                       value={recurringDraft.freeCommunication || ''}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, freeCommunication: event.target.value })}
-                      placeholder="Ex. Pension, Pour voiture, POL. DROIT COM..."
+                      placeholder={recurringRecognition.placeholder}
                     />
                   </label>
                   <label>
@@ -3180,10 +3253,11 @@ export default function App() {
                       value={recurringDraft.freeCommunicationMode || 'contains'}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, freeCommunicationMode: event.target.value })}
                     >
-                      <option value="contains">La communication Belfius contient ce texte</option>
-                      <option value="exact">La communication Belfius correspond exactement</option>
+                      <option value="contains">{recurringRecognition.containsLabel}</option>
+                      <option value="exact">{recurringRecognition.exactLabel}</option>
                     </select>
                   </label>
+                  <p className="hint">{recurringRecognition.hint}</p>
                 </fieldset>
                 <div className="recurring-grid">
                   <label>
@@ -3438,7 +3512,7 @@ function ExpenseChart({ categories }) {
   let offset = 0;
 
   return (
-    <section className="panel">
+    <section className="panel expense-chart-panel">
       <div className="section-title">
         <h2>Répartition des dépenses</h2>
         <span>{formatCurrency(total)}</span>

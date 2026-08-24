@@ -6,6 +6,7 @@ import {
   isMastercardStatementRow,
   mastercardStatementMatchEvidence,
 } from './lib/mastercardStatementRules.js';
+import { bankPersonAliasMatch, isBankCreditAppOperation } from './belfiusMatchingRules.js';
 
 const money = (value) => new Intl.NumberFormat('fr-BE', {
   style: 'currency', currency: 'EUR',
@@ -225,7 +226,7 @@ function labelsLikelyMatch(bankRow, appRow) {
 function aliasMatch(bankRow, appRow) {
   const bankLabel = labelText(bankRow);
   const applicationLabel = appText(appRow);
-  return BELFIUS_ALIASES.some((alias) => (
+  return bankPersonAliasMatch(bankRow, appRow) || BELFIUS_ALIASES.some((alias) => (
     alias.bank.some((needle) => bankLabel.includes(needle))
     && alias.app.some((needle) => applicationLabel.includes(needle))
   ));
@@ -363,7 +364,7 @@ function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
 
   const amountDelta = Math.abs(Math.abs(Number(appRow.amount) || 0) - Math.abs(bankRow.amount));
   const dayDelta = dateDistance(bankRow.date, appRow.date);
-  const directionMatches = (bankRow.amount > 0) === (appRow.type === 'income');
+  const directionMatches = (bankRow.amount > 0) === isBankCreditAppOperation(appRow);
   if (!directionMatches || amountDelta > AMOUNT_TOLERANCE) return null;
 
   const learned = learnedEvidence(bankRow, appRow, learnedRules);
