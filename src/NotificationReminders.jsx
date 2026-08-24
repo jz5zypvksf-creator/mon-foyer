@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, CheckCircle2, DatabaseBackup, FileSpreadsheet, X } from 'lucide-react';
 import { LAST_BACKUP_STORAGE_KEY, LAST_BELFIUS_AUDIT_STORAGE_KEY } from './lib/backupRules.js';
+import {
+  currentUserId,
+  ensurePushSubscription,
+  pushSupported,
+  syncReminderPreferences,
+} from './lib/pushReminders.js';
 import './NotificationReminders.css';
 
 const SETTINGS_KEY = 'mon-foyer-reminder-settings-v1';
@@ -82,6 +88,9 @@ export default function NotificationReminders() {
     'Notification' in window ? Notification.permission : 'unsupported'
   ));
   const [now, setNow] = useState(Date.now());
+  const [userId, setUserId] = useState(null);
+  const [pushActive, setPushActive] = useState(false);
+  const [pushStatus, setPushStatus] = useState('');
 
   const snapshot = useMemo(() => {
     const lastBackup = localStorage.getItem(LAST_BACKUP_STORAGE_KEY) || '';
@@ -119,6 +128,14 @@ export default function NotificationReminders() {
   }, [settings]);
 
   useEffect(() => {
+    let cancelled = false;
+    currentUserId().then((id) => {
+      if (!cancelled) setUserId(id);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const refresh = () => setNow(Date.now());
     const interval = window.setInterval(refresh, 60 * 60 * 1000);
     window.addEventListener('focus', refresh);
@@ -131,12 +148,36 @@ export default function NotificationReminders() {
   }, []);
 
   useEffect(() => {
-    if (permission !== 'granted') return;
+    if (!userId) return;
+    syncReminderPreferences({
+      userId,
+      settings,
+      lastBackupAt: snapshot.lastBackup,
+      lastCsvImportAt: snapshot.lastCsv,
+    }).catch((error) => {
+      setPushStatus(`Synchronisation des rappels impossible : ${error.message}`);
+    });
+  }, [settings, snapshot.lastBackup, snapshot.lastCsv, userId]);
+
+  useEffect(() => {
+    if (!userId || permission !== 'granted' || !pushSupported()) return;
+    ensurePushSubscription(userId)
+      .then(() => {
+        setPushActive(true);
+        setPushStatus('Rappels en arrière-plan activés sur cet appareil.');
+      })
+      .catch((error) => {
+        setPushActive(false);
+        setPushStatus(`Rappels en arrière-plan indisponibles : ${error.message}`);
+      });
+  }, [permission, userId]);
+
+  useEffect(() => {
+    if (permission !== 'granted' || pushActive) return;
     const notices = readJson(NOTICE_KEY, {});
 
     async function notifyIfNeeded() {
       let changed = false;
-
       if (snapshot.backupDue) {
         const token = noticeToken('backup', snapshot.lastBackup);
         if (notices.backup !== token) {
@@ -151,7 +192,6 @@ export default function NotificationReminders() {
           }
         }
       }
-
       if (snapshot.csvDue) {
         const token = noticeToken('csv', snapshot.lastCsv);
         if (notices.csv !== token) {
@@ -164,21 +204,31 @@ export default function NotificationReminders() {
           }
         }
       }
-
       if (changed) localStorage.setItem(NOTICE_KEY, JSON.stringify(notices));
     }
 
     notifyIfNeeded();
-  }, [permission, snapshot]);
+  }, [permission, pushActive, snapshot]);
 
   const requestPermission = async () => {
-    if (!('Notification' in window)) {
+    if (!pushSupported()) {
       setPermission('unsupported');
+      setPushStatus('Sur iPhone, installe Mon Foyer sur l’écran d’accueil puis autorise les notifications.');
       return;
     }
     const result = await Notification.requestPermission();
     setPermission(result);
     setNow(Date.now());
+    if (result === 'granted' && userId) {
+      try {
+        await ensurePushSubscription(userId);
+        setPushActive(true);
+        setPushStatus('Rappels en arrière-plan activés sur cet appareil.');
+      } catch (error) {
+        setPushActive(false);
+        setPushStatus(`Activation incomplète : ${error.message}`);
+      }
+    }
   };
 
   const updateSetting = (name, value) => {
@@ -219,16 +269,20 @@ export default function NotificationReminders() {
 
             <div className="reminder-permission">
               {permission === 'granted' ? (
-                <span className="is-ok"><CheckCircle2 size={17} /> Notifications système autorisées</span>
+                <span className="is-ok">
+                  <CheckCircle2 size={17} />
+                  {pushActive ? 'Notifications en arrière-plan activées' : 'Notifications système autorisées'}
+                </span>
               ) : permission === 'unsupported' ? (
-                <span>Les notifications système ne sont pas disponibles dans ce navigateur.</span>
+                <span>Les notifications Push ne sont pas disponibles dans ce contexte.</span>
               ) : (
                 <>
-                  <span>Autorise les notifications pour recevoir les rappels sur cet appareil.</span>
+                  <span>Autorise les notifications pour recevoir les rappels même quand Mon Foyer est fermé.</span>
                   <button type="button" onClick={requestPermission}>Autoriser</button>
                 </>
               )}
             </div>
+            {pushStatus && <p className="reminder-note">{pushStatus}</p>}
 
             <article className={`reminder-card ${snapshot.backupDue ? 'is-due' : ''}`}>
               <div className="reminder-card-title">
@@ -296,7 +350,7 @@ export default function NotificationReminders() {
             </article>
 
             <p className="reminder-note">
-              Les rappels sont enregistrés sur cet appareil. Une sauvegarde ou un nouvel import CSV remet automatiquement le délai à zéro.
+              Les réglages et les dernières dates sont synchronisés avec Mon Foyer. Le serveur vérifie les échéances chaque heure et peut envoyer le rappel même si l’application est fermée.
             </p>
           </section>
         </div>
