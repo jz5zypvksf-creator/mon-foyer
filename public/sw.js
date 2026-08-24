@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'mon-foyer-';
-const CACHE_NAME = CACHE_PREFIX + 'v35-reminders';
+const CACHE_NAME = CACHE_PREFIX + 'v36-web-push';
 const PRECACHE_ASSETS = ['/']; // __PRECACHE_ASSETS__
 
 self.addEventListener('install', (event) => {
@@ -39,6 +39,26 @@ self.addEventListener('message', (event) => {
         });
       }),
   );
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data?.json() || {};
+  } catch {
+    payload = { body: event.data?.text() || 'Un rappel Mon Foyer est arrivé.' };
+  }
+
+  event.waitUntil(self.registration.showNotification(
+    payload.title || 'Mon Foyer',
+    {
+      body: payload.body || 'Un rappel Mon Foyer est arrivé.',
+      tag: payload.tag || 'mon-foyer-reminder',
+      renotify: false,
+      icon: '/icon.svg',
+      data: { url: payload.url || '/' },
+    },
+  ));
 });
 
 self.addEventListener('notificationclick', (event) => {
