@@ -40,7 +40,6 @@ import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
 import DesktopDashboard from './DesktopDashboard.jsx';
-import FoodBudgetAnalysis from './FoodBudgetAnalysis.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
@@ -52,11 +51,6 @@ import {
 } from './lib/syncOutbox.js';
 import { analyzeBudget } from './lib/budgetAnalysisRules.js';
 import { belongsToHouseholdFoodBudget } from './lib/foodBudgetRules.js';
-import {
-  analyzeFoodBudgetPace,
-  foodBudgetProgressStatus,
-  recommendFoodBudget,
-} from './lib/foodBudgetAnalysisRules.js';
 import {
   DEFAULT_CARE_PEOPLE,
   DEFAULT_FOOD_BUDGET,
@@ -944,20 +938,6 @@ export default function App() {
 
   const foodRatio = foodBudget > 0 ? Math.min((totals.food / foodBudget) * 100, 100) : 100;
   const foodOverBudget = totals.food > foodBudget;
-  const foodProgressStatus = foodBudgetProgressStatus(totals.food, foodBudget);
-  const foodBudgetPace = useMemo(() => analyzeFoodBudgetPace({
-    monthKey: selectedMonth,
-    budget: foodBudget,
-    spent: totals.food,
-    currentDate: today,
-  }), [foodBudget, selectedMonth, today, totals.food]);
-  const foodBudgetRecommendation = useMemo(() => recommendFoodBudget({
-    operations: data.operations,
-    budgetSettings,
-    currentBudget: foodBudget,
-    excludedPeople: foodBudgetExcluded,
-    currentDate: today,
-  }), [budgetSettings, data.operations, foodBudget, foodBudgetExcluded, today]);
 
   const annualReview = useMemo(() => {
     const selectedYear = selectedMonth.slice(0, 4);
@@ -2593,7 +2573,9 @@ export default function App() {
       <main className="content">
         {activeView === 'home' && (
           <section className="view home-view">
-            <div className="hero-panel">
+            <div className="desktop-overview-grid">
+              <div className="desktop-summary-column">
+                <div className="hero-panel">
               <div>
                 <span>Disponible total actuel</span>
                 <strong>{formatCurrency(availableForPayments)}</strong>
@@ -2655,44 +2637,48 @@ export default function App() {
                 </div>
               </div>
               <PiggyBank size={42} />
-            </div>
+                </div>
 
-            <section className="panel food-budget-panel">
+                <section className="panel food-budget-panel">
               <div className="section-title">
                 <h2><ShoppingBasket size={20} /> Budget nourriture</h2>
                 <span>{formatCurrency(totals.food)} / {formatCurrency(foodBudget)}</span>
               </div>
               <div className="progress-track">
-                <div className={`progress-fill food-progress-${foodProgressStatus}`} style={{ width: `${foodRatio}%` }} />
+                <div className={foodOverBudget ? 'progress-fill danger' : 'progress-fill'} style={{ width: `${foodRatio}%` }} />
               </div>
-              <p className={`hint food-budget-status ${foodProgressStatus}`}>
+              <p className={foodOverBudget ? 'hint status-error' : 'hint'}>
                 {foodOverBudget ? `${formatCurrency(totals.food - foodBudget)} au-dessus de l'idéal` : `${formatCurrency(foodBudget - totals.food)} disponibles`}
               </p>
-            </section>
+                </section>
 
-            <FoodBudgetAnalysis pace={foodBudgetPace} recommendation={foodBudgetRecommendation} />
+                <BudgetAnalysis analysis={budgetAnalysis} />
 
-            <BudgetAnalysis analysis={budgetAnalysis} />
+                <div className="stats-grid">
+                  <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
+                  <StatCard icon={Banknote} label="Revenus encaissés" value={formatCurrency(totals.income)} />
+                  <StatCard icon={TrendingUp} label="Revenus prévus du mois" value={formatCurrency(fullMonthTotals.income)} />
+                  <StatCard icon={WalletCards} label="Dépenses exécutées" value={formatCurrency(totals.fixed + totals.variable)} />
+                  <StatCard icon={Landmark} label="Frais fixes exécutés" value={formatCurrency(totals.fixed)} />
+                  <StatCard icon={WalletCards} label="Variables exécutées" value={formatCurrency(totals.variable)} />
+                </div>
+              </div>
 
-            <DesktopDashboard
-              series={desktopDailySeries}
-              categories={categoryTotals}
-              checks={desktopClosingChecks}
-              selectedMonth={selectedMonth}
-              forecastBalance={budgetAnalysis.forecastBalance}
-              scheduledTotal={scheduledExpenseTotal}
-              onDaySelect={(date) => openHistoryFromDashboard({ date })}
-              onCategorySelect={(category) => openHistoryFromDashboard({ category })}
-              onCheckSelect={openDashboardCheck}
-            />
+              <div className="desktop-insights-column">
+                <DesktopDashboard
+                  series={desktopDailySeries}
+                  categories={categoryTotals}
+                  checks={desktopClosingChecks}
+                  selectedMonth={selectedMonth}
+                  forecastBalance={budgetAnalysis.forecastBalance}
+                  scheduledTotal={scheduledExpenseTotal}
+                  onDaySelect={(date) => openHistoryFromDashboard({ date })}
+                  onCategorySelect={(category) => openHistoryFromDashboard({ category })}
+                  onCheckSelect={openDashboardCheck}
+                />
 
-            <div className="stats-grid">
-              <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
-              <StatCard icon={Banknote} label="Revenus encaissés" value={formatCurrency(totals.income)} />
-              <StatCard icon={TrendingUp} label="Revenus prévus du mois" value={formatCurrency(fullMonthTotals.income)} />
-              <StatCard icon={WalletCards} label="Dépenses exécutées" value={formatCurrency(totals.fixed + totals.variable)} />
-              <StatCard icon={Landmark} label="Frais fixes exécutés" value={formatCurrency(totals.fixed)} />
-              <StatCard icon={WalletCards} label="Variables exécutées" value={formatCurrency(totals.variable)} />
+                <SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />
+              </div>
             </div>
 
             <section className="panel scheduled-panel">
@@ -2849,7 +2835,6 @@ export default function App() {
               {categoryStatus && <p className="hint">{categoryStatus}</p>}
             </section>
 
-            <SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />
           </section>
         )}
 

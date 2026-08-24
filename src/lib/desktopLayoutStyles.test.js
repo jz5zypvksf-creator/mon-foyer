@@ -23,3 +23,11 @@ test('chaque ancien bloc de l’Accueil possède une zone explicite dans la gril
     assert.ok(app.includes(className) || buildIntegration.includes(className), `${className} absent du rendu`);
   });
 });
+
+test('la synthèse et les modules complémentaires occupent deux colonnes indépendantes', () => {
+  assert.match(app, /className="desktop-overview-grid"/);
+  assert.match(app, /className="desktop-summary-column"/);
+  assert.match(app, /className="desktop-insights-column"/);
+  assert.match(styles, /\.home-view\s*>\s*\.desktop-overview-grid\s*\{[^}]*grid-column:\s*1\s*\/\s*13;[^}]*grid-template-columns:\s*minmax\(320px,\s*4fr\)\s*minmax\(0,\s*8fr\);/s);
+  assert.match(styles, /\.home-view\s+\.desktop-insights-column\s*>\s*\.desktop-dashboard\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto;/s);
+});
