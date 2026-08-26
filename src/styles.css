@@ -339,6 +339,22 @@ h2 {
   background: var(--danger);
 }
 
+.food-progress-green { background: #2f7d57; }
+.food-progress-orange { background: #d97706; }
+.food-progress-red { background: #c2413b; }
+.food-progress-dark-red { background: #7f1d1d; }
+.food-progress-black { background: #17242f; }
+
+.food-budget-text-green { color: #256744; }
+.food-budget-text-orange { color: #a65300; }
+.food-budget-text-red { color: #b42318; }
+.food-budget-text-dark-red { color: #7f1d1d; }
+.food-budget-text-black { color: #17242f; }
+
+.food-budget-panel [class*='food-budget-text-'] {
+  font-weight: 800;
+}
+
 .food-budget-panel .section-title h2 {
   display: inline-flex;
   align-items: center;

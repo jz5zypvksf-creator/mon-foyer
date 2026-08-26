@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { foodBudgetExcludedPeople } from './configurationRules.js';
-import { belongsToHouseholdFoodBudget, householdFoodTotal } from './foodBudgetRules.js';
+import {
+  belongsToHouseholdFoodBudget,
+  foodBudgetVisualStatus,
+  householdFoodTotal,
+} from './foodBudgetRules.js';
 
 test('les achats de Papa et Nonna sont exclus du budget nourriture du foyer', () => {
   const operations = [
@@ -31,4 +35,24 @@ test('désactiver Papa ne réintègre pas ses anciens achats au budget du foyer'
   ];
 
   assert.equal(householdFoodTotal(operations, excludedPeople), 25);
+});
+
+test('la couleur du budget nourriture suit cinq seuils proportionnels', () => {
+  assert.equal(foodBudgetVisualStatus(399.99, 500).key, 'green');
+  assert.equal(foodBudgetVisualStatus(400, 500).key, 'orange');
+  assert.equal(foodBudgetVisualStatus(474.99, 500).key, 'orange');
+  assert.equal(foodBudgetVisualStatus(475, 500).key, 'red');
+  assert.equal(foodBudgetVisualStatus(500, 500).key, 'red');
+  assert.equal(foodBudgetVisualStatus(500.01, 500).key, 'dark-red');
+  assert.equal(foodBudgetVisualStatus(550, 500).key, 'dark-red');
+  assert.equal(foodBudgetVisualStatus(550.01, 500).key, 'black');
+  assert.equal(foodBudgetVisualStatus(593.99, 500).key, 'black');
+});
+
+test('les seuils visuels évoluent avec le montant du budget', () => {
+  assert.equal(foodBudgetVisualStatus(479.99, 600).key, 'green');
+  assert.equal(foodBudgetVisualStatus(480, 600).key, 'orange');
+  assert.equal(foodBudgetVisualStatus(570, 600).key, 'red');
+  assert.equal(foodBudgetVisualStatus(600.01, 600).key, 'dark-red');
+  assert.equal(foodBudgetVisualStatus(660.01, 600).key, 'black');
 });
