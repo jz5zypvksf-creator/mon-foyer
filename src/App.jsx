@@ -80,6 +80,7 @@ import { isMastercardStatementCommunication } from './lib/mastercardStatementRul
 import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
 import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
 import { findPotentialOperationDuplicate } from './lib/operationDuplicateRules.js';
+import { operationRequiresStore, operationStoreValue } from './lib/operationFormRules.js';
 import {
   OPERATION_REVIEW_STATUSES,
   normalizeReviewStatus,
@@ -1292,7 +1293,7 @@ export default function App() {
     const savingsTargetGoal = draft.type === 'savings_transfer' && draft.savingsGoalId ? data.savingsGoals.find((goal) => goal.id === draft.savingsGoalId) : null;
     if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatCurrency(savingsSourceGoal.saved) + '.'); return; }
     if (draft.type === 'savings_transfer' && !savingsTargetGoal) { setOperationStatus('Choisis le poste d’épargne à créditer.'); return; }
-    if (!['income', 'savings_transfer', 'card_settlement'].includes(draft.type) && !draft.store) {
+    if (operationRequiresStore(draft.type) && !draft.store) {
       setOperationStatus('Choisis un bénéficiaire ou un point de vente.');
       return;
     }
@@ -1332,10 +1333,9 @@ export default function App() {
         : savingsTargetGoal
           ? `Transfert vers épargne — ${savingsTargetGoal.label} · ${draft.label.trim()}`
           : draft.label.trim(),
-      // Le bénéficiaire / point de vente est utile pour tous les débits, y compris les frais fixes.
-      store: draft.type === 'income' || draft.type === 'savings_transfer'
-        ? ''
-        : draft.type === 'card_settlement' ? 'Mastercard' : draft.store,
+      // La source d'un remboursement est portée par « Personne » ; seuls les achats
+      // et frais ordinaires nécessitent un bénéficiaire / point de vente distinct.
+      store: operationStoreValue(draft.type, draft.store),
       category: draft.type === 'income'
         ? 'revenus'
         : ['savings_transfer', 'card_settlement'].includes(draft.type) ? 'divers' : draft.category,
@@ -3057,7 +3057,7 @@ export default function App() {
                 </section>
               )}
 
-              {draft.type !== 'income' && (
+              {operationRequiresStore(draft.type) && (
                 <label>
                   Bénéficiaire / Point de vente
                   <select value={draft.store} onChange={(event) => setDraft({ ...draft, store: event.target.value })}>
