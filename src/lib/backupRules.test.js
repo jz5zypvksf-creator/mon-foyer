@@ -23,6 +23,22 @@ test('une sauvegarde intacte est acceptée et comptée', async () => {
 
   assert.equal(parsed.counts.operations, 1);
   assert.equal(parsed.counts.leisure_expenses, 0);
+  assert.equal(parsed.counts.monthly_accounting_audits, 0);
+});
+
+test('une ancienne sauvegarde v1 reste restaurable sans inventer de lignes', async () => {
+  const tables = Object.fromEntries(
+    BACKUP_TABLES
+      .filter(({ name }) => !['household_budget_settings', 'care_people', 'reminder_preferences', 'monthly_accounting_audits'].includes(name))
+      .map(({ name }) => [name, []]),
+  );
+  const payload = { createdAt: '2026-08-17T12:00:00.000Z', householdId: 'foyer-a', tables };
+  const envelope = await createBackupEnvelope(payload);
+  envelope.version = 1;
+
+  const parsed = await parseBackup(JSON.stringify(envelope), 'foyer-a');
+  assert.deepEqual(parsed.payload.tables.monthly_accounting_audits, []);
+  assert.deepEqual(parsed.payload.tables.household_budget_settings, []);
 });
 
 test('le rappel de sauvegarde évolue après 7 et 30 jours', () => {

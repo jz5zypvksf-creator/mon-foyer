@@ -99,7 +99,27 @@ test('un transfert depuis l’épargne finance la trésorerie sans devenir un re
   });
   assert.equal(analysis.current.income, 0);
   assert.equal(analysis.current.savingsFunding, 2792.50);
-  assert.equal(analysis.current.resources, 2792.50);
+  assert.equal(analysis.current.resources, 0);
+  assert.equal(analysis.current.cashResources, 2792.50);
+  assert.equal(analysis.current.surplus, 0);
+  assert.equal(analysis.current.cashAfterSavings, 2792.50);
+});
+
+test('la clôture d’août sépare dépenses, remboursements et épargne', () => {
+  const analysis = analyzeBudget({
+    operations: [
+      { date: '2026-08-04', type: 'income', amount: 975.47, label: 'Revenus août', budgetMonth: '2026-08' },
+      { date: '2026-08-10', type: 'fixed', amount: 4458.67, label: 'Dépenses réelles' },
+      { date: '2026-08-12', type: 'fixed', amount: 1940, label: 'Épargne loisirs', accountingNature: 'internal_transfer' },
+      { date: '2026-08-15', type: 'reimbursement', amount: 120.92, label: 'Remboursements Nonna et Papa' },
+    ],
+    selectedMonth: '2026-08', currentDate: '2026-08-31', openingBalance: 4111.97,
+  });
+  assert.ok(Math.abs(analysis.current.resources - 5208.36) < 0.005);
+  assert.ok(Math.abs(analysis.current.expenses - 4458.67) < 0.005);
+  assert.equal(analysis.current.savingsTransfers, 1940);
+  assert.ok(Math.abs(analysis.current.surplus - 749.69) < 0.005);
+  assert.ok(Math.abs(analysis.current.cashAfterSavings - (-1190.31)) < 0.005);
 });
 
 test('la suggestion du fonds d’urgence utilise trois mois terminés', () => {

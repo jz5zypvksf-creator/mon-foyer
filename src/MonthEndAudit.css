@@ -1,0 +1,23 @@
+.month-end-audit { border-top: 4px solid #8aa6b9; }
+.month-end-audit.status-balanced { border-top-color: #2f9f69; }
+.month-end-audit.status-review { border-top-color: #d88b16; }
+.month-end-audit.status-critical { border-top-color: #a92f2f; }
+.month-end-status, .month-end-empty { display: flex; gap: .7rem; align-items: center; padding: .9rem; border-radius: 14px; background: #f4f7f7; }
+.month-end-status div { display: grid; gap: .15rem; }
+.month-end-status small { color: #65777f; }
+.month-end-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin-top: .8rem; }
+.month-end-block { padding: .85rem; border: 1px solid #dce6e8; border-radius: 14px; background: #f8fafb; }
+.month-end-block h3 { display: flex; align-items: center; gap: .45rem; margin: 0 0 .55rem; color: #163e5d; font-size: .96rem; }
+.month-end-block p { margin: .55rem 0 0; color: #65777f; font-size: .78rem; }
+.month-end-row { display: flex; justify-content: space-between; align-items: flex-end; gap: .8rem; padding: .42rem 0; border-bottom: 1px solid #e5ecee; }
+.month-end-row span { display: grid; color: #61737b; font-size: .84rem; }
+.month-end-row small { margin-top: .1rem; color: #84949b; font-size: .7rem; }
+.month-end-row strong { color: #163e5d; white-space: nowrap; }
+.month-end-row.is-total { margin-top: .2rem; padding: .55rem .6rem; border: 0; border-radius: 9px; background: #eaf3f6; }
+.month-end-row.is-total span,.month-end-row.is-total strong { color: #123f5d; font-weight: 800; }
+.month-end-anomalies { margin: .8rem 0 0; padding-left: 1.3rem; color: #8b2f2f; }
+.month-end-run { margin-top: .9rem; display: inline-flex; align-items: center; gap: .45rem; }
+.month-end-note { margin: .75rem 0 0; color: #65777f; font-size: .82rem; }
+@keyframes month-end-spin { to { transform: rotate(360deg); } }
+.month-end-run .is-spinning { animation: month-end-spin .9s linear infinite; }
+@media (max-width: 700px) { .month-end-sections { grid-template-columns: 1fr; } }
