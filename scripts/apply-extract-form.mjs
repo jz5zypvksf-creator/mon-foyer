@@ -15,4 +15,4 @@ if(!s.includes(close)) throw new Error('form closing anchor missing');
 s=s.replace(close,`          </OperationForm>\n        )}`);
 if(!s.includes('<OperationForm')) throw new Error('OperationForm wiring missing');
 fs.writeFileSync(path,s);
-console.log('OperationForm wired; draft state delegated to useOperationDraft.');
+// permanent extraction trigger
