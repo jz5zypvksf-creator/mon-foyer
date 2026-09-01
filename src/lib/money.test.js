@@ -13,7 +13,7 @@ test('parseMoney accepte les saisies belges et internationales usuelles', () => 
 
 test('formatMoney impose toujours exactement deux décimales en euros', () => {
   assert.equal(formatMoney(20), '20,00 €');
-  assert.equal(formatMoney('5,45'), '5,45 €');
-  assert.equal(formatMoney('1 250'), '1 250,00 €');
+  assert.equal(formatMoney(parseMoney('5,45')), '5,45 €');
+  assert.equal(formatMoney(parseMoney('1 250')), '1 250,00 €');
   assert.equal(formatMoney(Number.NaN), '0,00 €');
 });

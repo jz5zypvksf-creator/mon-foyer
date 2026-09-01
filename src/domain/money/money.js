@@ -1,10 +1,3 @@
-const EURO_FORMATTER = new Intl.NumberFormat('fr-BE', {
-  style: 'currency',
-  currency: 'EUR',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
 /**
  * Convertit une saisie monétaire humaine en nombre.
  * Accepte notamment les espaces ordinaires/insécables, EUR, €, la virgule
@@ -49,7 +42,10 @@ export function parseMoney(value) {
 
 /** Formate toujours un montant EUR avec exactement deux décimales. */
 export function formatMoney(value) {
-  const parsed = parseMoney(value);
-  const safeValue = Number.isFinite(parsed) && !Object.is(parsed, -0) ? parsed : 0;
-  return EURO_FORMATTER.format(safeValue);
+  return new Intl.NumberFormat('fr-BE', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(value) || 0);
 }
