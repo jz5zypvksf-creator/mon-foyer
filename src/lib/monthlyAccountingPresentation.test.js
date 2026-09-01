@@ -28,3 +28,11 @@ test('les salaires reçus en fin de mois pour le mois suivant restent séparés'
   assert.equal(nextMonthKey('2026-12'), '2027-01');
   assert.equal(incomeReceivedForNextMonth(operations, '2026-08').toFixed(2), '4805.17');
 });
+
+test('une clôture absente ne provoque pas de page blanche', () => {
+  const result = monthlyAccountingPresentation(null, 0);
+
+  assert.equal(result.budgetResult, 0);
+  assert.equal(result.cashAfterSavings, 0);
+  assert.equal(result.bankBalance, null);
+});

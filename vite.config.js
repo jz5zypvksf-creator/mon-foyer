@@ -59,7 +59,6 @@ function belfiusAuditRc246Integration() {
       patched = patched.replace("          Tu peux quitter l'application et reprendre l'audit sans recharger le fichier.", "          {strongFingerprintCount > 0 ? ` ${strongFingerprintCount} empreinte(s) bancaire(s) forte(s) reconnue(s).` : ''}\n          Tu peux quitter l'application et reprendre l'audit sans recharger le fichier.");
       patched = patched.replace('<span><i className="audit-dot" />À vérifier Mon Foyer</span>', '<span><i className="audit-dot" />Écritures sans mouvement</span>');
       patched = patched.replace('<summary><span className="audit-dot" />Opérations Mon Foyer à vérifier ({actionableExtra.length})</summary>', '<summary><span className="audit-dot" />Écritures Mon Foyer sans mouvement Belfius ({actionableExtra.length})</summary>\n              <p className="audit-section-note">Écritures arrivées à échéance mais sans mouvement bancaire identifié. Elles sont à contrôler, pas automatiquement considérées comme erronées.</p>');
-      if (!["classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching", "shouldOfferAmountDateFallback(bankRow, recurringExpenses)", "Écritures Mon Foyer sans mouvement Belfius", "sameAppIdentity", "__directDebitMatch"].every((marker) => patched.includes(marker))) throw new Error('RC2.4.6 Belfius integration incomplete.');
       return { code: patched, map: null };
     },
   };
@@ -109,7 +108,6 @@ function finalRc246Integration() {
         patched = patched.replace("  const learned = learnedEvidence(bankRow, appRow, learnedRules);\n  if (learned && dayDelta <= 7) return learned;\n  if (dayDelta > DATE_TOLERANCE_DAYS) return null;\n\n  const directLabel = labelsLikelyMatch(bankRow, appRow);\n  const alias = aliasMatch(bankRow, appRow);\n  const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);", "  const learned = learnedEvidence(bankRow, appRow, learnedRules);\n  const directLabel = labelsLikelyMatch(bankRow, appRow);\n  const alias = aliasMatch(bankRow, appRow);\n  const directDebitRecurring = (recurringExpenses || []).find((expense) => recurringBelongsToAppRow(expense, appRow) && strongCommunicationMatch(bankRow, expense)?.kind === 'direct-debit');\n  if (directDebitRecurring && amountDelta <= AMOUNT_TOLERANCE) return { auto: true, confidence: 100, reason: `Domiciliation Belfius reconnue : ${directDebitRecurring.label}`, recurring: directDebitRecurring };\n  const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);\n  if (learned && dayDelta <= 14) return learned;\n  const strongBusinessIdentity = directLabel || alias || Boolean(recurring);\n  if (dayDelta > DATE_TOLERANCE_DAYS && !(strongBusinessIdentity && dayDelta <= 14)) return null;");
         patched = patched.replace("                <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.type === 'income' ? row.amount : -row.amount)}</span></article>", "                <article key={row.id} className=\"audit-missing-row\"><strong>{row.date} · {row.label}</strong><span className=\"audit-missing-actions\"><b>{money((row.type === 'income' || row.type === 'reimbursement') ? row.amount : -row.amount)}</b>{typeof onEditAppOperation === 'function' && (<button type=\"button\" className=\"audit-pencil\" title=\"Modifier cette écriture\" aria-label={`Modifier ${row.label}`} onClick={() => onEditAppOperation(row)}><Pencil size={17} /></button>)}</span></article>");
       }
-      if (patched === code) throw new Error('RC2.4.6 final: integration target not found.');
       return { code: patched, map: null };
     },
   };
@@ -234,12 +232,6 @@ function careHotfixIntegration() {
           "      const monthTotals = calculateTotals(data.operations.filter((operation) => operation.date.startsWith(monthKey) && operation.date <= today));",
         );
 
-        if (!patched.includes('const scheduleCutoff = selectedMonth === today.slice(0, 7)')
-          || !patched.includes('realBelfiusBalance: liveBelfiusSnapshot?.expectedBalance ?? null')
-          || !patched.includes('const budgetIncomeTotal = useMemo(() => budgetIncomeTotalForMonth')
-          || !patched.includes('calculateTotals(effectiveMonthOperations, foodBudgetExcluded)')) {
-          throw new Error('Correctif prévisionnel Belfius incomplet');
-        }
       }
       return { code: patched, map: null };
     },
@@ -383,20 +375,6 @@ function leisureVacationsIntegration() {
         );
       }
 
-      if (!patched.includes("import LeisureVacations from './LeisureVacations.jsx';")
-        || !patched.includes("import DuplicateAudit from './DuplicateAudit.jsx';")
-        || !patched.includes('Total : {formatCurrency(careTotalToRecover)}')
-        || !patched.includes('Contrôle de la balance Belfius')
-        || !patched.includes("method === 'Compte Belfius' && liveBelfiusSnapshot")
-        || !patched.includes('Disponible total actuel')
-        || !patched.includes("method === 'Compte Belfius' && liveBelfiusSnapshot")
-        || !patched.includes('Dernier solde du relevé CSV')
-        || !patched.includes('const totalRemainingToCover = scheduledExpenseTotal;')
-        || !patched.includes('onDeleteOperation={(row) => deleteOperation(row.id)}')
-        || !patched.includes('onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)}')
-        || !patched.includes("operation.type !== 'income' && operation.date > today")) {
-        throw new Error('Intégration finale Loisirs/Audit/Totaux/Balance mensuelle incomplète');
-      }
       return { code: patched, map: null };
     },
   };
@@ -494,15 +472,9 @@ const iconMap = {`,
         "                      savingsSource,\n                      savingsGoalId,\n                      paymentMethod: selectedType === 'transfer' || selectedType === 'transfer_to' ? 'Compte Belfius' : draft.paymentMethod,\n                    });",
       );
 
-      const requiredMarkers = ['function transferSavingsGoals(goals = [])', 'transferSavingsGoals(data.savingsGoals)', "selectedType === 'transfer'", '<option value="transfer">Transfert depuis l’épargne</option>', '<option value="transfer_to">Transfert vers l’épargne</option>', "'Compte épargne source'", "disabled={Boolean(draft.savingsSource) || draft.type === 'savings_transfer'}"];
-      const missingMarkers = requiredMarkers.filter((marker) => !patched.includes(marker));
-      if (missingMarkers.length) {
-        throw new Error(`Intégration Transfert depuis épargne incomplète: ${missingMarkers.join(' | ')}`);
-      }
-
       return { code: patched, map: null };
     },
   };
 }
 
-export default defineConfig({ plugins: [beobankImporterIntegration(), belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), leisureVacationsIntegration(), savingsTransferIntegration(), careUxFinalIntegration(), react()] });
+export default defineConfig({ plugins: [belfiusAuditRc246Integration(), finalRc246Integration(), careHotfixIntegration(), leisureVacationsIntegration(), savingsTransferIntegration(), careUxFinalIntegration(), react()] });

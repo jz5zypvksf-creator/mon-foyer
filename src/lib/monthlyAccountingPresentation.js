@@ -19,11 +19,12 @@ export function incomeReceivedForNextMonth(operations = [], selectedMonth = '') 
 }
 
 export function monthlyAccountingPresentation(audit = {}, nextMonthIncome = 0) {
-  const assignedIncome = number(audit.assigned_income);
-  const reimbursements = number(audit.reimbursements);
-  const expenses = number(audit.expenses);
-  const savingsTransfers = number(audit.savings_transfers);
-  const savingsWithdrawals = number(audit.savings_withdrawals);
+  const source = audit || {};
+  const assignedIncome = number(source.assigned_income);
+  const reimbursements = number(source.reimbursements);
+  const expenses = number(source.expenses);
+  const savingsTransfers = number(source.savings_transfers);
+  const savingsWithdrawals = number(source.savings_withdrawals);
   const budgetResources = assignedIncome + reimbursements;
   const budgetResult = budgetResources - expenses;
 
@@ -37,9 +38,9 @@ export function monthlyAccountingPresentation(audit = {}, nextMonthIncome = 0) {
     savingsWithdrawals,
     netSavingsEffort: savingsTransfers - savingsWithdrawals,
     cashAfterSavings: budgetResult - savingsTransfers + savingsWithdrawals,
-    openingBalance: number(audit.opening_balance),
-    incomeReceivedDuringMonth: number(audit.income),
+    openingBalance: number(source.opening_balance),
+    incomeReceivedDuringMonth: number(source.income),
     nextMonthIncome: number(nextMonthIncome),
-    bankBalance: audit.bank_balance == null ? null : number(audit.bank_balance),
+    bankBalance: source.bank_balance == null ? null : number(source.bank_balance),
   };
 }
