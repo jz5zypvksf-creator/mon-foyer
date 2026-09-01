@@ -1410,7 +1410,10 @@ export default function App() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     const amount = parseDecimal(draft.amount);
-    if (!draft.label.trim() || !amount) return;
+    if (!draft.label.trim() || !amount) {
+      setOperationStatus('Renseigne un libellé et un montant supérieur à zéro.');
+      return;
+    }
 
     setOperationStatus('');
     const savingsSourceGoal = draft.type === 'income' && draft.savingsSource ? data.savingsGoals.find((goal) => goal.id === draft.savingsSource) : null;
@@ -1664,6 +1667,8 @@ export default function App() {
     setEditingId(null);
     setOperationStatus('Saisie effacée. Aucune opération n’a été enregistrée.');
   };
+
+  const operationDraftIsValid = Boolean(draft.label.trim() && parseDecimal(draft.amount) > 0);
 
 
   const addBankOperationFromAudit = (bankRow) => {
@@ -3269,12 +3274,17 @@ export default function App() {
                 <button className="secondary-button" type="button" onClick={cancelOperationDraft}>
                   Annuler
                 </button>
-                <button className="primary-button" type="submit">
+                <button className="primary-button" type="submit" disabled={!operationDraftIsValid}>
                   <Plus size={20} />
-                  {editingId ? 'Enregistrer' : 'Ajouter'}
+                  Enregistrer
                 </button>
               </div>
-              {operationStatus && <p className="hint status-error">{operationStatus}</p>}
+              {!operationDraftIsValid && (
+                <p className="hint status-error" role="alert">Renseigne un libellé et un montant supérieur à zéro.</p>
+              )}
+              {operationStatus && operationStatus !== 'Renseigne un libellé et un montant supérieur à zéro.' && (
+                <p className="hint status-error" role="status">{operationStatus}</p>
+              )}
             </form>
           </section>
         )}
