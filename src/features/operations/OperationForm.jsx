@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 /**
  * Présentation du formulaire d'opération. Les champs métier sont fournis par App pendant
  * la migration progressive; l'en-tête, l'annulation et la validation vivent désormais ici.
+ * Le composant ne filtre aucun type métier : « reimbursement » reste un type valide.
  */
 export default function OperationForm({
   editingId,

@@ -55,7 +55,7 @@ function formatCurrency(value) {
   }).format(value || 0);
 }
 
-function OperationRow({ operation, categories, alerts, planned = false, onEdit, onDelete }) {
+function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
   const category = categories.find((item) => item.id === operation.category);
   const Icon = iconMap[category?.icon] || CircleEllipsis;
   const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';
@@ -66,7 +66,6 @@ function OperationRow({ operation, categories, alerts, planned = false, onEdit, 
       <div>
         <strong>{operation.label}</strong>
         <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
-        {planned && <em className="operation-planned-badge">Prévue · déjà enregistrée</em>}
         {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
         {operation.reviewStatus && operation.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
           <em className={`operation-review-badge review-${operation.reviewStatus}`}>
@@ -116,6 +115,13 @@ export default function OperationHistory({
   DuplicateAuditComponent,
 }) {
   const DuplicateAudit = DuplicateAuditComponent;
+  const currentMonth = today.slice(0, 7);
+  const visibleMonthOperations = selectedMonth === currentMonth
+    ? monthOperations.filter((operation) => operation.date <= today)
+    : monthOperations;
+  const visibleFilteredMonthOperations = selectedMonth === currentMonth
+    ? filteredMonthOperations.filter((operation) => operation.date <= today)
+    : filteredMonthOperations;
 
   return (
     <section className="view">
@@ -130,7 +136,7 @@ export default function OperationHistory({
       <div className="panel">
         <div className="section-title">
           <h2>Historique</h2>
-          <span>{filteredMonthOperations.length} / {monthOperations.length} lignes</span>
+          <span>{visibleFilteredMonthOperations.length} / {visibleMonthOperations.length} lignes</span>
         </div>
         <div className="history-tools">
           <input
@@ -203,20 +209,19 @@ export default function OperationHistory({
           ))}
         </div>
         <div className="operation-list">
-          {filteredMonthOperations.length === 0 && (
+          {visibleFilteredMonthOperations.length === 0 && (
             <p className="empty-state">
-              {monthOperations.length > 0
-                ? `${monthOperations.length} opération(s) enregistrée(s), mais aucune ne correspond aux filtres actifs.`
+              {visibleMonthOperations.length > 0
+                ? `${visibleMonthOperations.length} opération(s) enregistrée(s), mais aucune ne correspond aux filtres actifs.`
                 : 'Aucune opération enregistrée pour ce mois.'}
             </p>
           )}
-          {filteredMonthOperations.map((operation) => (
+          {visibleFilteredMonthOperations.map((operation) => (
             <OperationRow
               key={operation.id}
               operation={operation}
               categories={categories}
               alerts={reviewMap.get(operation.id)}
-              planned={operation.date > today}
               onEdit={onEditOperation}
               onDelete={onDeleteOperation}
             />
