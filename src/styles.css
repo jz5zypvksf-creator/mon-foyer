@@ -827,6 +827,42 @@ h2 {
   font-weight: 850;
 }
 
+.operation-form-actions {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.45fr) minmax(220px, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.operation-form-actions .primary-button,
+.operation-form-actions .secondary-button {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 0;
+}
+
+.operation-planned-badge {
+  display: block;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #e8f1fb;
+  color: #24618a;
+  font-style: normal;
+  font-weight: 850;
+}
+
+@media (max-width: 600px) {
+  .operation-form-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .operation-form-actions .secondary-button {
+    order: 2;
+  }
+}
+
 .text-button {
   color: var(--blue-soft);
   background: transparent;
