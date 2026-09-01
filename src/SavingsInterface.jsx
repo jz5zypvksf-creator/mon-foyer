@@ -4,8 +4,7 @@ import BeobankStatementImport from './BeobankStatementImport.jsx';
 import './BeobankStatementImport.css';
 import './SavingsInterface.css';
 import { SAVINGS_ORDER_RULES, savingsRuleForBucket } from './savingsOrderRules.js';
-
-const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
+import { formatMoney } from './domain/money/money.js';
 
 function normalize(value) {
   return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -87,8 +86,8 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
       {rule && (
         <div className={detectedOk ? 'savings-op-control ok' : 'savings-op-control pending'}>
           {detectedOk ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-          <span>{detectedOk ? `Versement identifié dans le CSV : ${money(detected)}` : 'Versement du mois à contrôler dans le prochain CSV'}</span>
-          {rule.expectedMonthly != null && <em>Référence mensuelle : {money(rule.expectedMonthly)}</em>}
+          <span>{detectedOk ? `Versement identifié dans le CSV : ${formatMoney(detected)}` : 'Versement du mois à contrôler dans le prochain CSV'}</span>
+          {rule.expectedMonthly != null && <em>Référence mensuelle : {formatMoney(rule.expectedMonthly)}</em>}
         </div>
       )}
       <div className="goal-inputs">
@@ -143,7 +142,7 @@ export default function SavingsInterface({ goals = [], bankSavings = {}, onUpdat
     <section className="panel savings-interface">
       <div className="section-title">
         <h2><Landmark size={21} /> Épargne</h2>
-        <span>{money(total)}</span>
+        <span>{formatMoney(total)}</span>
       </div>
       <p className="hint">Les numéros d’ordre permanent servent d’identifiants bancaires. Le montant peut varier sans casser la reconnaissance.</p>
       <div className="goals-grid">

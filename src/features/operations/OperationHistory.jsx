@@ -21,6 +21,7 @@ import {
   OPERATION_REVIEW_STATUSES,
   reviewStatusLabel,
 } from '../../lib/operationReviewRules.js';
+import { formatMoney } from '../../domain/money/money.js';
 
 const PAYMENT_METHODS = [
   'Compte Belfius',
@@ -48,13 +49,6 @@ const iconMap = {
   electricite: Zap,
 };
 
-function formatCurrency(value) {
-  return new Intl.NumberFormat('fr-BE', {
-    style: 'currency',
-    currency: 'EUR',
-  }).format(value || 0);
-}
-
 function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
   const category = categories.find((item) => item.id === operation.category);
   const Icon = iconMap[category?.icon] || CircleEllipsis;
@@ -75,7 +69,7 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
         )}
       </div>
       <strong className={(operation.type === 'income' || operation.type === 'reimbursement') ? 'amount income' : 'amount'}>
-        {sign}{formatCurrency(operation.amount)}
+        {sign}{formatMoney(operation.amount)}
       </strong>
       <button type="button" onClick={() => onEdit(operation)} aria-label="Modifier">
         <Edit3 size={17} />
@@ -186,16 +180,16 @@ export default function OperationHistory({
           <div>
             <span>Total affiché</span>
             <strong className={historyTotals.balance >= 0 ? 'income' : 'expense'}>
-              {formatCurrency(historyTotals.balance)}
+              {formatMoney(historyTotals.balance)}
             </strong>
           </div>
           <div>
             <span>Revenus budgétaires</span>
-            <strong className="income">{formatCurrency(historyTotals.income)}</strong>
+            <strong className="income">{formatMoney(historyTotals.income)}</strong>
           </div>
           <div>
             <span>Dépenses</span>
-            <strong className="expense">{formatCurrency(historyTotals.expenses)}</strong>
+            <strong className="expense">{formatMoney(historyTotals.expenses)}</strong>
           </div>
         </div>
         <div className="history-summary">
@@ -203,7 +197,7 @@ export default function OperationHistory({
             <div key={method}>
               <span>{method}</span>
               <strong className={paymentBalances[method] >= 0 ? 'income' : 'expense'}>
-                {formatCurrency(paymentBalances[method])}
+                {formatMoney(paymentBalances[method])}
               </strong>
             </div>
           ))}

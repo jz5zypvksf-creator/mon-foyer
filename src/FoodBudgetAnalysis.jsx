@@ -1,10 +1,5 @@
 import { CalendarDays, Gauge, Sparkles, TrendingUp } from 'lucide-react';
-
-const euro = (value) => new Intl.NumberFormat('fr-BE', {
-  style: 'currency',
-  currency: 'EUR',
-  minimumFractionDigits: 2,
-}).format(Number(value) || 0);
+import { formatMoney } from './domain/money/money.js';
 
 const monthLabel = (monthKey) => {
   if (!monthKey) return '';
@@ -33,10 +28,10 @@ export default function FoodBudgetAnalysis({ pace, recommendation }) {
       </div>
 
       <div className="food-analysis-grid">
-        <div><span>Budget moyen/jour</span><strong>{euro(pace.budgetPerDay)}</strong></div>
-        <div><span>Dépensé/jour à ce jour</span><strong>{euro(pace.actualPerDay)}</strong></div>
-        <div><span>Projection fin de mois</span><strong>{euro(pace.projectedMonth)}</strong></div>
-        <div><span>Disponible/jour restant</span><strong>{euro(pace.remainingPerDay)}</strong></div>
+        <div><span>Budget moyen/jour</span><strong>{formatMoney(pace.budgetPerDay)}</strong></div>
+        <div><span>Dépensé/jour à ce jour</span><strong>{formatMoney(pace.actualPerDay)}</strong></div>
+        <div><span>Projection fin de mois</span><strong>{formatMoney(pace.projectedMonth)}</strong></div>
+        <div><span>Disponible/jour restant</span><strong>{formatMoney(pace.remainingPerDay)}</strong></div>
       </div>
 
       <div className="food-recommendation">
@@ -50,16 +45,16 @@ export default function FoodBudgetAnalysis({ pace, recommendation }) {
           <>
             <p>
               Sur les trois derniers mois terminés, la dépense moyenne est de
-              {' '}{euro(recommendation.average)}. Budget conseillé pour
+              {' '}{formatMoney(recommendation.average)}. Budget conseillé pour
               {' '}{monthLabel(recommendation.effectiveMonth)} :
             </p>
             <div className="food-suggestion-amount">
               <TrendingUp size={19} />
-              <strong>{euro(recommendation.suggestedBudget)}</strong>
+              <strong>{formatMoney(recommendation.suggestedBudget)}</strong>
               <span>
                 {recommendation.adjustment === 0
                   ? 'Maintien conseillé'
-                  : `${recommendation.adjustment > 0 ? '+' : ''}${euro(recommendation.adjustment)} maximum ce mois-ci`}
+                  : `${recommendation.adjustment > 0 ? '+' : ''}${formatMoney(recommendation.adjustment)} maximum ce mois-ci`}
               </span>
             </div>
             <small>
@@ -72,4 +67,3 @@ export default function FoodBudgetAnalysis({ pace, recommendation }) {
     </section>
   );
 }
-

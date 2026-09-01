@@ -1,14 +1,13 @@
 import { BarChart3, Lightbulb, ShieldPlus } from 'lucide-react';
+import { formatMoney } from './domain/money/money.js';
 import './BudgetAnalysis.css';
-
-const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
 const monthLabel = (month) => new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric' })
   .format(new Date(`${month}-01T12:00:00`));
 
 function trendText(trend) {
   if (!trend) return 'Une comparaison apparaîtra dès que deux mois terminés contiendront des données.';
   const direction = trend.difference > 0 ? 'augmenté' : trend.difference < 0 ? 'diminué' : 'été identiques';
-  const amount = money(Math.abs(trend.difference));
+  const amount = formatMoney(Math.abs(trend.difference));
   const percent = trend.percent === null ? '' : ` (${Math.abs(trend.percent).toFixed(1).replace('.', ',')} %)`;
   return `Les dépenses ont ${direction} de ${amount}${percent} entre ${monthLabel(trend.previousMonth)} et ${monthLabel(trend.latestMonth)}.`;
 }
@@ -25,33 +24,33 @@ export default function BudgetAnalysis({ analysis }) {
         <Lightbulb size={22} />
         <div>
           <strong>{analysis.status.label}</strong>
-          <span>Solde prévisionnel : {money(analysis.forecastBalance)} après les montants restant à couvrir.</span>
+          <span>Solde prévisionnel : {formatMoney(analysis.forecastBalance)} après les montants restant à couvrir.</span>
         </div>
       </div>
       <div className="budget-analysis-facts">
-        <div><span>Disponible au début du mois</span><strong>{money(analysis.current.openingBalance)}</strong></div>
-        <div><span>Revenus encaissés dans le mois</span><strong>{money(analysis.current.income)}</strong></div>
-        <div><span>Revenus affectés au mois</span><strong>{money(analysis.current.assignedIncome)}</strong></div>
-        <div><span>Remboursements reçus</span><strong>{money(analysis.current.reimbursements)}</strong></div>
-        <div><span>Transferts depuis l’épargne</span><strong>{money(analysis.current.savingsFunding)}</strong></div>
-        <div><span>Ressources budgétaires cumulées</span><strong>{money(analysis.current.resources)}</strong></div>
-        <div><span>Trésorerie disponible avant dépenses</span><strong>{money(analysis.current.cashResources)}</strong></div>
-        <div><span>Dépenses exécutées</span><strong>{money(analysis.current.expenses)}</strong></div>
-        <div><span>Transferts vers l’épargne</span><strong>{money(analysis.current.savingsTransfers)}</strong></div>
-        <div><span>Trésorerie après épargne</span><strong>{money(analysis.current.cashAfterSavings)}</strong></div>
-        <div><span>Dépenses programmées</span><strong>{money(analysis.scheduledExpenseTotal)}</strong></div>
-        <div><span>Épargne encore programmée</span><strong>{money(analysis.scheduledSavingsTransferTotal)}</strong></div>
-        <div><span>Trésorerie prévue après épargne</span><strong>{money(analysis.cashForecastBalance)}</strong></div>
-        <div><span>Nourriture encore prévue</span><strong>{money(analysis.remainingFoodBudget)}</strong></div>
+        <div><span>Disponible au début du mois</span><strong>{formatMoney(analysis.current.openingBalance)}</strong></div>
+        <div><span>Revenus encaissés dans le mois</span><strong>{formatMoney(analysis.current.income)}</strong></div>
+        <div><span>Revenus affectés au mois</span><strong>{formatMoney(analysis.current.assignedIncome)}</strong></div>
+        <div><span>Remboursements reçus</span><strong>{formatMoney(analysis.current.reimbursements)}</strong></div>
+        <div><span>Transferts depuis l’épargne</span><strong>{formatMoney(analysis.current.savingsFunding)}</strong></div>
+        <div><span>Ressources budgétaires cumulées</span><strong>{formatMoney(analysis.current.resources)}</strong></div>
+        <div><span>Trésorerie disponible avant dépenses</span><strong>{formatMoney(analysis.current.cashResources)}</strong></div>
+        <div><span>Dépenses exécutées</span><strong>{formatMoney(analysis.current.expenses)}</strong></div>
+        <div><span>Transferts vers l’épargne</span><strong>{formatMoney(analysis.current.savingsTransfers)}</strong></div>
+        <div><span>Trésorerie après épargne</span><strong>{formatMoney(analysis.current.cashAfterSavings)}</strong></div>
+        <div><span>Dépenses programmées</span><strong>{formatMoney(analysis.scheduledExpenseTotal)}</strong></div>
+        <div><span>Épargne encore programmée</span><strong>{formatMoney(analysis.scheduledSavingsTransferTotal)}</strong></div>
+        <div><span>Trésorerie prévue après épargne</span><strong>{formatMoney(analysis.cashForecastBalance)}</strong></div>
+        <div><span>Nourriture encore prévue</span><strong>{formatMoney(analysis.remainingFoodBudget)}</strong></div>
       </div>
       <p className="budget-analysis-observation">{trendText(analysis.trend)}</p>
       <div className={`emergency-advice is-${emergency.key}`}>
         <ShieldPlus size={23} />
         <div>
-          <strong>Fonds d’urgence : {money(emergency.saved)}</strong>
+          <strong>Fonds d’urgence : {formatMoney(emergency.saved)}</strong>
           <span>{emergency.reason}</span>
           {emergency.monthlySuggestion !== null ? (
-            <b>Suggestion mensuelle de départ : {money(emergency.monthlySuggestion)}</b>
+            <b>Suggestion mensuelle de départ : {formatMoney(emergency.monthlySuggestion)}</b>
           ) : null}
         </div>
       </div>

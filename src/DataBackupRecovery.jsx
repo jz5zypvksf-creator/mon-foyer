@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, DatabaseBackup, Download, FileCheck2, RotateCcw, Upload } from 'lucide-react';
-import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
+import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
 import {
   BACKUP_TABLES,
   LAST_BACKUP_STORAGE_KEY,

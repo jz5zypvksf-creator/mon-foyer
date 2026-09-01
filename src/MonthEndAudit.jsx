@@ -1,15 +1,14 @@
 import { AlertTriangle, CheckCircle2, Landmark, PiggyBank, RefreshCw, Scale, WalletCards } from 'lucide-react';
 import { monthlyAccountingPresentation } from './lib/monthlyAccountingPresentation.js';
+import { formatMoney } from './domain/money/money.js';
 import './MonthEndAudit.css';
-
-const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
 const statusLabel = { balanced: 'Balance contrôlée', review: 'À compléter', critical: 'Anomalies à corriger' };
 
 function AmountRow({ label, value, strong = false, note = '' }) {
   return (
     <div className={strong ? 'month-end-row is-total' : 'month-end-row'}>
       <span>{label}{note && <small>{note}</small>}</span>
-      <strong>{money(value)}</strong>
+      <strong>{formatMoney(value)}</strong>
     </div>
   );
 }
