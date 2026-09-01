@@ -1,0 +1,78 @@
+name: Sauvegarde nocturne Supabase
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-nightly-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Export PostgreSQL complet
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Exporter et compresser la base Supabase
+        id: backup
+        shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
+            echo "Le secret SUPABASE_DB_URL est absent." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$SUPABASE_DB_URL"
+
+          backup_date="$(date -u +'%Y-%m-%d')"
+          sql_name="backup_${backup_date}.sql"
+          archive_name="backup_${backup_date}.tar.gz"
+          backup_dir="$RUNNER_TEMP/supabase-backup"
+
+          mkdir -p "$backup_dir"
+
+          docker run --rm \
+            --env SUPABASE_DB_URL \
+            --env BACKUP_SQL_NAME="$sql_name" \
+            --volume "$backup_dir:/backup" \
+            postgres:17-alpine \
+            sh -ceu '
+              pg_dump \
+                --dbname="$SUPABASE_DB_URL" \
+                --format=plain \
+                --clean \
+                --if-exists \
+                --no-owner \
+                --no-privileges \
+                --file="/backup/$BACKUP_SQL_NAME"
+            '
+
+          test -s "$backup_dir/$sql_name"
+          tar -czf "$backup_dir/$archive_name" -C "$backup_dir" "$sql_name"
+          tar -tzf "$backup_dir/$archive_name" >/dev/null
+          rm "$backup_dir/$sql_name"
+
+          echo "date=$backup_date" >> "$GITHUB_OUTPUT"
+          echo "archive=$backup_dir/$archive_name" >> "$GITHUB_OUTPUT"
+
+      - name: Conserver la sauvegarde pendant 14 jours
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ steps.backup.outputs.date }}
+          path: ${{ steps.backup.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
