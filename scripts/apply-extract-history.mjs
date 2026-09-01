@@ -35,4 +35,4 @@ if (!source.includes('<OperationHistory')) {
 }
 
 fs.writeFileSync(path, source);
-console.log('OperationHistory wired into App.jsx and legacy history code removed.');
+console.log('OperationHistory permanently wired into App.jsx and legacy history code removed.');
