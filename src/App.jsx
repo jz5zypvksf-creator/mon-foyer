@@ -38,12 +38,16 @@ import {
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import BelfiusAudit from './BelfiusAudit.jsx';
+import { budgetIncomeTotalForMonth, forecastBalances, careBalances } from './budgetMonthRules.js';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
 import MonthEndAudit from './MonthEndAudit.jsx';
 import DesktopDashboard from './DesktopDashboard.jsx';
 import DataBackupRecovery from './DataBackupRecovery.jsx';
 import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
+import LeisureVacations from './LeisureVacations.jsx';
+import DuplicateAudit from './DuplicateAudit.jsx';
+import './NavSix.css';
 import {
   enqueueOperationMutation,
   isRetryableSyncError,
@@ -129,6 +133,32 @@ function savingsBucketForGoal(goal) {
   if (text.includes('pension')) return 'pension';
   if (text.includes('urgence')) return 'urgence';
   return String(goal?.id || 'autre');
+}
+
+function transferSavingsGoals(goals = []) {
+  const byBucket = new Map();
+  goals.forEach((goal) => {
+    const bucket = savingsBucketForDisplay(goal);
+    if (bucket === 'autre') return;
+    const current = byBucket.get(bucket);
+    const currentWeight = current
+      ? Math.abs(Number(current.saved || 0)) * 100000 + Math.abs(Number(current.target || 0))
+      : -1;
+    const candidateWeight = Math.abs(Number(goal.saved || 0)) * 100000 + Math.abs(Number(goal.target || 0));
+    if (!current || candidateWeight > currentWeight) byBucket.set(bucket, goal);
+  });
+
+  const order = ['solde_peugeot', 'vacances', 'garage', 'taxes', 'frais_maison', 'pension_alain', 'pension_esther', 'urgence'];
+  return [...byBucket.entries()]
+    .sort(([bucketA], [bucketB]) => {
+      const a = order.indexOf(bucketA);
+      const b = order.indexOf(bucketB);
+      return (a < 0 ? 999 : a) - (b < 0 ? 999 : b);
+    })
+    .map(([bucket, goal]) => ({
+      ...goal,
+      transferLabel: REQUIRED_SAVINGS_GOALS.find((item) => item.bucket === bucket)?.label || goal.label,
+    }));
 }
 
 const iconMap = {
@@ -277,6 +307,10 @@ function parseDecimal(value) {
   return Number(String(value).replace(',', '.').trim());
 }
 
+/**
+ * Convertit une ligne Supabase ou locale vers le modèle unique utilisé par l’interface.
+ * Cette frontière protège le reste de l’application des noms snake_case de la base.
+ */
 function normalizeOperation(operation) {
   return {
     ...operation,
@@ -359,6 +393,10 @@ function inferredBudgetMonth(operation) {
   return salary && Number(date.slice(8, 10)) >= 24 ? nextMonthKey(date) : date.slice(0, 7);
 }
 
+/**
+ * Crée un brouillon neuf. Toujours appeler cette fabrique au lieu de réutiliser un objet
+ * partagé afin qu’Annuler et les nouvelles saisies ne conservent aucun ancien champ.
+ */
 function makeEmptyOperation() {
   return {
     id: '',
@@ -458,6 +496,10 @@ function isBelfiusAdjustment(operation) {
   return operation.label?.startsWith('Ajustement Belfius');
 }
 
+/**
+ * Calcule les totaux budgétaires sans confondre dépenses, remboursements et transferts.
+ * Les mouvements internes déplacent la trésorerie mais ne modifient jamais le résultat.
+ */
 function calculateTotals(operations, reimbursablePeople = DEFAULT_CARE_PEOPLE) {
   const base = { income: 0, reimbursements: 0, fixed: 0, variable: 0, savingsTransfers: 0, food: 0 };
   operations.forEach((operation) => {
@@ -591,21 +633,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const removeObsoleteBelfiusShortcut = () => {
-      document.querySelectorAll('button, a').forEach((element) => {
-        if (element.textContent?.trim() === 'Rapprocher Belfius') {
-          element.remove();
-        }
-      });
-    };
-
-    removeObsoleteBelfiusShortcut();
-    const observer = new MutationObserver(removeObsoleteBelfiusShortcut);
-    observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, []);
-
   const saveData = (nextData) => {
     setData(nextData);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
@@ -683,13 +710,11 @@ export default function App() {
     [balanceCutoff, monthOperations],
   );
 
-  const totals = useMemo(() => {
-    return calculateTotals(effectiveMonthOperations, foodBudgetExcluded);
-  }, [effectiveMonthOperations, foodBudgetExcluded]);
+  const budgetIncomeTotal = useMemo(() => budgetIncomeTotalForMonth(data.operations, selectedMonth), [data.operations, selectedMonth]);
 
-  const fullMonthTotals = useMemo(() => {
-    return calculateTotals(monthOperations, foodBudgetExcluded);
-  }, [monthOperations, foodBudgetExcluded]);
+  const totals = useMemo(() => { const actual = calculateTotals(effectiveMonthOperations, foodBudgetExcluded); return { ...actual, income: budgetIncomeTotal, balance: budgetIncomeTotal - actual.fixed - actual.variable }; }, [budgetIncomeTotal, effectiveMonthOperations, foodBudgetExcluded]);
+
+  const fullMonthTotals = useMemo(() => { const actual = calculateTotals(monthOperations, foodBudgetExcluded); return { ...actual, income: budgetIncomeTotal, balance: budgetIncomeTotal - actual.fixed - actual.variable }; }, [budgetIncomeTotal, monthOperations, foodBudgetExcluded]);
 
   const previousMonthBalances = useMemo(() => {
     const firstDayOfSelectedMonth = `${selectedMonth}-01`;
@@ -740,8 +765,9 @@ export default function App() {
   );
 
   const scheduledExpenses = useMemo(() => {
+    const scheduleCutoff = selectedMonth === today.slice(0, 7) && today > balanceCutoff ? today : balanceCutoff;
     const explicitScheduledExpenses = monthOperations
-      .filter((operation) => operation.type !== 'income' && operation.date > balanceCutoff);
+      .filter((operation) => operation.type !== 'income' && operation.date > today);
 
     const existingFixedSignatures = new Set(
       monthOperations
@@ -789,6 +815,7 @@ export default function App() {
     data.recurringFixedExpenses,
     monthOperations,
     selectedMonth,
+    today,
   ]);
 
   const scheduledExpenseTotal = useMemo(
@@ -811,6 +838,9 @@ export default function App() {
   const remainingFoodBudget = Math.max(foodBudget - totals.food - scheduledFoodTotal, 0);
   const totalRemainingToCover = scheduledExpenseTotal;
   const availableAfterPlannedExpenses = availableForPayments - totalRemainingToCover;
+  const forecastPair = forecastBalances({ appAvailable: availableForPayments, appBelfiusBalance: paymentBalances['Compte Belfius'], realBelfiusBalance: liveBelfiusSnapshot?.expectedBalance ?? null, remainingToCover: totalRemainingToCover });
+  const careSummary = useMemo(() => careBalances(data.operations, selectedMonth, reimbursablePeople), [data.operations, reimbursablePeople, selectedMonth]);
+  const careTotalToRecover = careSummary.reduce((sum, item) => sum + Math.max(Number(item.balance || 0), 0), 0);
   const forecastStatus = availableAfterPlannedExpenses < 0
     ? { key: 'danger', label: 'Déficit prévisionnel' }
     : availableAfterPlannedExpenses < 50
@@ -880,6 +910,7 @@ export default function App() {
     previousMonthBalances,
   ]);
 
+  /** Lance la clôture SQL du mois sélectionné sans bloquer l’accueil en cas d’absence d’audit. */
   const runMonthEndAudit = async () => {
     if (!USE_REMOTE_BUDGET || !session) return;
     setMonthEndAuditRunning(true);
@@ -918,6 +949,8 @@ export default function App() {
     automaticMonthEndAuditRef.current = automaticKey;
     runMonthEndAudit();
   }, [remoteBudgetLoaded, selectedMonth, session, today]);
+
+  const startCareReimbursement = (person) => { setDraft({ ...makeEmptyOperation(), type: 'reimbursement', category: 'divers', person, paymentMethod: 'Espèces', store: '', label: `Remboursement ${person}` }); setEditingId(null); setOperationStatus('Remboursement : choisis Compte Belfius s’il est bancaire ou Espèces s’il est remis en cash.'); setActiveView('add'); };
 
   const editingOperation = useMemo(() => {
     return editingId ? data.operations.find((operation) => operation.id === editingId) : null;
@@ -1013,13 +1046,7 @@ export default function App() {
     });
   }, [data.categories, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
 
-  const historyTotals = useMemo(() => {
-    const filteredTotals = calculateTotals(filteredMonthOperations, foodBudgetExcluded);
-    return {
-      ...filteredTotals,
-      expenses: filteredTotals.fixed + filteredTotals.variable,
-    };
-  }, [filteredMonthOperations, foodBudgetExcluded]);
+  const historyTotals = useMemo(() => { const filteredTotals = calculateTotals(filteredMonthOperations, foodBudgetExcluded); const defaultBudgetView = historyType === 'all' && historyPerson === 'all' && historyCategory === 'all' && historyPaymentMethod === 'all' && !historySearch.trim() && !showReviewOnly; const income = defaultBudgetView ? budgetIncomeTotal : filteredTotals.income; return { ...filteredTotals, income, balance: income - filteredTotals.fixed - filteredTotals.variable, expenses: filteredTotals.fixed + filteredTotals.variable }; }, [budgetIncomeTotal, filteredMonthOperations, foodBudgetExcluded, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, showReviewOnly]);
 
   const desktopClosingChecks = useMemo(() => buildMonthClosingChecks({
     operations: data.operations,
@@ -1038,7 +1065,7 @@ export default function App() {
   const annualReview = useMemo(() => {
     const selectedYear = selectedMonth.slice(0, 4);
     const previousYear = String(Number(selectedYear) - 1);
-    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear));
+    const annualOperations = data.operations.filter((operation) => operation.date.startsWith(selectedYear) && operation.date <= today);
     const previousOperations = data.operations.filter((operation) => operation.date.startsWith(previousYear));
     const annualTotals = calculateTotals(annualOperations, foodBudgetExcluded);
     const previousTotals = calculateTotals(previousOperations, foodBudgetExcluded);
@@ -1471,7 +1498,7 @@ export default function App() {
         : '';
     }
 
-    if (operation.type !== 'income' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
+    if (operation.type !== 'income' && operation.type !== 'reimbursement' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
       const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
       if (amount > availableBalance) {
         setOperationStatus(`${operation.paymentMethod}: solde disponible ${formatCurrency(availableBalance)}. Paiement impossible.`);
@@ -1631,6 +1658,7 @@ export default function App() {
     setActiveView('add');
   };
 
+  /** Efface la saisie et quitte le mode modification sans enregistrer ni changer de vue. */
   const cancelOperationDraft = () => {
     setDraft(makeEmptyOperation());
     setEditingId(null);
@@ -2234,52 +2262,6 @@ export default function App() {
     if (error) setSyncStatus('Erreur de mémorisation du solde Belfius: ' + error.message);
   };
 
-  const synchronizeBelfiusBalance = async ({ balance, balanceDate, month }) => {
-    const currentBalance = calculatePaymentBalances(data.operations)['Compte Belfius'] || 0;
-    const delta = Number(balance) - Number(currentBalance);
-    if (Math.abs(delta) < 0.01) return;
-
-    const dateMatch = String(balanceDate || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    const adjustmentDate = dateMatch ? dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1] : currentDate();
-    const adjustment = {
-      id: crypto.randomUUID(),
-      date: adjustmentDate,
-      person: 'Foyer',
-      type: delta >= 0 ? 'income' : 'fixed',
-      category: delta >= 0 ? 'revenus' : 'divers',
-      store: '',
-      paymentMethod: 'Compte Belfius',
-      label: 'Ajustement Belfius ' + month + ' — solde certifié',
-      amount: Math.abs(delta),
-    };
-
-    if (USE_REMOTE_BUDGET) {
-      const payload = {
-        household_id: householdId,
-        date: adjustment.date,
-        person: adjustment.person,
-        type: adjustment.type,
-        category: adjustment.category,
-        store: null,
-        label: adjustment.label,
-        amount: adjustment.amount,
-        payment_method: adjustment.paymentMethod,
-      };
-      const { data: savedRow, error } = await supabase
-        .from('operations')
-        .insert(payload)
-        .select(OPERATION_COLUMNS)
-        .single();
-      if (error) {
-        setSyncStatus('Synchronisation Belfius impossible : ' + error.message);
-        return;
-      }
-      adjustment.id = savedRow.id;
-    }
-
-    saveData({ ...data, operations: [adjustment, ...data.operations] });
-    setSyncStatus('Solde Belfius synchronisé : ' + formatCurrency(balance));
-  };
   const refreshFromSupabase = async () => {
     if (!USE_REMOTE_BUDGET) {
       setMigrationStatus('Supabase ou le foyer ne sont pas configurés.');
@@ -2775,7 +2757,7 @@ export default function App() {
 
                 <div className="stats-grid">
                   <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
-                  <StatCard icon={Banknote} label="Revenus encaissés" value={formatCurrency(totals.income)} />
+                  <StatCard icon={Banknote} label="Revenus budgétaires" value={formatCurrency(totals.income)} />
                   <StatCard icon={TrendingUp} label="Revenus prévus du mois" value={formatCurrency(fullMonthTotals.income)} />
                   <StatCard icon={WalletCards} label="Dépenses exécutées" value={formatCurrency(totals.fixed + totals.variable)} />
                   <StatCard icon={Landmark} label="Frais fixes exécutés" value={formatCurrency(totals.fixed)} />
@@ -2797,13 +2779,29 @@ export default function App() {
                 />
 
                 <SavingsInterface goals={data.savingsGoals} bankSavings={bankSavings} onUpdate={updateGoal} />
+            <div className="leisure-launch-card">
+              <div><strong>Loisirs / Vacances</strong><span>Suivre le solde Beobank et enregistrer restaurants, hôtels et voyages.</span></div>
+              <button type="button" onClick={() => setActiveView('leisure')}>Ouvrir</button>
+            </div>
               </div>
             </div>
+
+            {belfiusSnapshot && (
+              <section className="panel balance-control-panel">
+                <div className="section-title"><h2>Contrôle de la balance Belfius</h2><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>
+                <div className="history-summary">
+                  <div><span>Solde Mon Foyer cumulé</span><strong>{formatCurrency(paymentBalances['Compte Belfius'] || 0)}</strong></div>
+                  <div><span>Solde Belfius réel</span><strong>{formatCurrency(belfiusSnapshot.balance || 0)}</strong></div>
+                  <div><span>Écart comptable</span><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>
+                </div>
+                <p className="hint">Ce contrôle bancaire est distinct du solde budgétaire mensuel. {Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'Balance conforme au dernier relevé Belfius.' : 'Écart à auditer : il peut provenir d’un solde d’ouverture absent, d’une écriture manquante ou d’un doublon. Aucun ajustement automatique n’est effectué.'}</p>
+              </section>
+            )}
 
             <section className="panel scheduled-panel">
               <div className="section-title">
                 <h2>Dépenses programmées</h2>
-                <strong>{formatCurrency(scheduledExpenseTotal)}</strong>
+                <strong>Total : {formatCurrency(scheduledExpenseTotal)}</strong>
               </div>
               <p className="scheduled-caption">Montants restant à prévoir jusqu’à la fin du mois</p>
 
@@ -2822,7 +2820,7 @@ export default function App() {
                 <div className="forecast-copy">
                   <strong>Total restant à couvrir</strong>
                   <span>Dépenses programmées : {formatCurrency(scheduledExpenseTotal)}</span>
-                  <span>Budget nourriture restant : {formatCurrency(remainingFoodBudget)}</span>
+                  <span>Budget nourriture restant : {formatCurrency(remainingFoodBudget)} · indicatif, non déduit</span>
                 </div>
                 <strong className="forecast-amount">{formatCurrency(totalRemainingToCover)}</strong>
               </div>
@@ -2831,7 +2829,8 @@ export default function App() {
                 <div className="forecast-icon"><WalletCards size={22} /></div>
                 <div className="forecast-copy">
                   <strong>Solde prévisionnel fin de mois</strong>
-                  <span>Disponible actuel : {formatCurrency(availableForPayments)}</span>
+                  <span>Selon Mon Foyer : <b>{formatCurrency(forecastPair.appForecast)}</b></span>
+                  {belfiusSnapshot && (<span>Selon Belfius — relevé {belfiusSnapshot.balanceDate || 'importé'} : <b>{formatCurrency(forecastPair.belfiusForecast)}</b></span>)}
                   <span className="forecast-status-label">{forecastStatus.label}</span>
                 </div>
                 <strong className={`forecast-amount status-text-${forecastStatus.key}`}>
@@ -2841,9 +2840,9 @@ export default function App() {
 
               <details className="forecast-details">
                 <summary>Détail du calcul</summary>
-                <div><span>Disponible actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>
+                <div><span>Disponible total actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>
                 <div><span>− Dépenses programmées</span><strong>− {formatCurrency(scheduledExpenseTotal)}</strong></div>
-                <div><span>− Budget nourriture restant</span><strong>− {formatCurrency(remainingFoodBudget)}</strong></div>
+                <div><span>Budget nourriture restant (indicatif)</span><strong>{formatCurrency(remainingFoodBudget)}</strong></div>
                 <div className="forecast-details-total">
                   <span>= Solde prévisionnel fin de mois</span>
                   <strong className={availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}>{formatCurrency(availableAfterPlannedExpenses)}</strong>
@@ -2897,6 +2896,12 @@ export default function App() {
                   );
                 })}
               </div>
+            </section>
+
+            <section className="panel care-summary-panel">
+              <div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatCurrency(careTotalToRecover)}</strong></div><p className="scheduled-caption">{reimbursablePeople.join(' & ')}</p>
+              <p className="hint">Un remboursement en espèces est comptabilisé ici sans créer de mouvement Belfius.</p>
+              {careSummary.map((item) => (<div key={item.person} className="forecast-card care-recovery-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Dépenses : {formatCurrency(item.expenses)}</span><span>Remboursé : {formatCurrency(item.reimbursed)}</span></div><div className="care-recovery-actions"><strong className={item.balance > 0 ? 'expense' : 'income'}>{formatCurrency(item.balance)}</strong><button type="button" className="secondary-button care-recovery-button" onClick={() => { setHistoryPerson(item.person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); }}>Voir le détail</button><button type="button" className="secondary-button care-recovery-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}
             </section>
 
             <ExpenseChart categories={categoryTotals} />
@@ -2957,6 +2962,14 @@ export default function App() {
           </section>
         )}
 
+        {activeView === 'leisure' && (
+          <LeisureVacations
+            goal={data.savingsGoals.find((goal) => savingsBucketForGoal(goal) === 'vacances')}
+            onUpdateGoal={updateGoal}
+            onBack={() => setActiveView('home')}
+          />
+        )}
+
         {activeView === 'add' && (
           <section className="view">
             <form className="panel form-panel" onSubmit={handleSubmit}>
@@ -2972,10 +2985,16 @@ export default function App() {
               <label>
                 Type
                 <select
-                  value={draft.type === 'income' && draft.incomeKind === 'salary' ? 'salary' : draft.type}
+                  value={draft.type === 'income' && draft.savingsSource ? 'transfer' : draft.type === 'savings_transfer' ? 'transfer_to' : draft.type === 'income' && draft.incomeKind === 'salary' ? 'salary' : draft.type}
                   onChange={(event) => {
                     const selectedType = event.target.value;
-                    const type = selectedType === 'salary' ? 'income' : selectedType;
+                    const type = selectedType === 'transfer' || selectedType === 'salary' ? 'income' : selectedType === 'transfer_to' ? 'savings_transfer' : selectedType;
+                    const savingsSource = selectedType === 'transfer'
+                      ? (draft.savingsSource || transferSavingsGoals(data.savingsGoals)[0]?.id || '')
+                      : selectedType === 'income' || selectedType === 'salary' ? '' : draft.savingsSource;
+                    const savingsGoalId = selectedType === 'transfer_to'
+                      ? (draft.savingsGoalId || transferSavingsGoals(data.savingsGoals)[0]?.id || '')
+                      : selectedType === 'transfer' ? '' : draft.savingsGoalId;
                     const nextCategory = type === 'income'
                       ? 'revenus'
                       : draft.category === 'revenus'
@@ -2985,6 +3004,8 @@ export default function App() {
                       ...draft,
                       type,
                       category: nextCategory,
+                      savingsSource,
+                      savingsGoalId,
                       paymentMethod: selectedType === 'card_settlement' ? 'Compte Belfius' : draft.paymentMethod,
                       incomeKind: selectedType === 'salary' ? 'salary' : selectedType === 'income' ? 'other' : draft.incomeKind,
                       budgetMonth: selectedType === 'salary' ? nextMonthKey(draft.date) : draft.budgetMonth,
@@ -2993,6 +3014,8 @@ export default function App() {
                 >
                   <option value="salary">Salaire</option>
                   <option value="income">Autre revenu</option>
+                  <option value="transfer">Transfert depuis l’épargne</option>
+                  <option value="transfer_to">Transfert vers l’épargne</option>
                   <option value="reimbursement">Remboursement</option>
                   <option value="card_settlement">Règlement Mastercard</option>
                   <option value="fixed">Frais fixes</option>
@@ -3002,7 +3025,7 @@ export default function App() {
 
               <label>
                 Libellé
-                <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Ex. Courses, salaire, assurance" />
+                <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder={draft.savingsSource ? 'Ex. Paiement taxe, régularisation voiture…' : 'Ex. Courses, salaire, assurance'} />
               </label>
 
               <div className="form-row">
@@ -3021,9 +3044,9 @@ export default function App() {
               </div>
 
               <label>
-                Moyen de paiement
-                <select value={draft.paymentMethod} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>
-                  {PAYMENT_METHODS.map((method) => {
+                {draft.savingsSource ? 'Compte de destination' : 'Moyen de paiement'}
+                <select value={draft.paymentMethod} disabled={Boolean(draft.savingsSource) || draft.type === 'savings_transfer'} onChange={(event) => setDraft({ ...draft, paymentMethod: event.target.value })}>
+                  {(draft.type === 'reimbursement' ? [...PAYMENT_METHODS, 'Espèces'] : PAYMENT_METHODS).map((method) => {
                     const availableBalance = getAvailablePaymentBalance(method);
                     const disabled = draft.type !== 'income'
                       && !canPaymentMethodGoNegative(method)
@@ -3055,10 +3078,10 @@ export default function App() {
               {draft.type === 'income' && (
                 <>
                   <label>
-                    Source du revenu
+                    {draft.savingsSource ? 'Compte épargne source' : 'Source du revenu'}
                     <select value={draft.savingsSource || ''} onChange={(event) => setDraft({ ...draft, savingsSource: event.target.value })}>
-                      <option value="">Revenu du foyer</option>
-                      {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>Épargne {goal.label}</option>))}
+                      {!draft.savingsSource && <option value="">Revenu du foyer</option>}
+                      {transferSavingsGoals(data.savingsGoals).map((goal) => (<option key={goal.id} value={goal.id}>{goal.transferLabel} · {formatCurrency(goal.saved || 0)}</option>))}
                     </select>
                     {draft.savingsSource && <span className="hint">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
                   </label>
@@ -3090,12 +3113,12 @@ export default function App() {
 
               <div className={draft.type === 'income' ? 'form-row single' : 'form-row'}>
                 <label>
-                  Personne
+                  {draft.type === 'reimbursement' ? 'Source / Personne' : 'Personne'}
                   <select value={draft.person} onChange={(event) => setDraft({ ...draft, person: event.target.value })}>
                     {availablePeople.map((person) => <option key={person}>{person}</option>)}
                   </select>
                 </label>
-                {draft.type !== 'income' && (
+                {!['income', 'reimbursement', 'savings_transfer'].includes(draft.type) && (
                   <label>
                     Type de frais
                     <select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>
@@ -3109,7 +3132,7 @@ export default function App() {
                 )}
               </div>
 
-              {draft.type !== 'income' && (
+              {!['income', 'reimbursement', 'savings_transfer'].includes(draft.type) && (
                 <section className="recurring-inline-panel">
                   <label>
                     Fréquence
@@ -3258,6 +3281,7 @@ export default function App() {
 
         {activeView === 'history' && (
           <section className="view">
+            <DuplicateAudit mode="history" operations={data.operations} selectedMonth={selectedMonth} onDeleteOperation={(row) => deleteOperation(row.id)} />
             <div className="panel">
               <div className="section-title">
                 <h2>Historique</h2>
@@ -3273,6 +3297,7 @@ export default function App() {
                   <select value={historyType} onChange={(event) => setHistoryType(event.target.value)} aria-label="Type">
                     <option value="all">Tous les types</option>
                     <option value="income">Revenus</option>
+                  <option value="reimbursement">Remboursement</option>
                     <option value="fixed">Frais fixes</option>
                     <option value="variable">Dépenses variables</option>
                   </select>
@@ -3314,7 +3339,7 @@ export default function App() {
                   </strong>
                 </div>
                 <div>
-                  <span>Revenus</span>
+                  <span>Revenus budgétaires</span>
                   <strong className="income">{formatCurrency(historyTotals.income)}</strong>
                 </div>
                 <div>
@@ -3403,13 +3428,13 @@ export default function App() {
 
         {activeView === 'settings' && (
           <section className="view">
+            <DuplicateAudit mode="recurring" recurringExpenses={data.recurringFixedExpenses || []} onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)} />
             <BelfiusAudit
               operations={data.operations}
               appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
               selectedMonth={selectedMonth}
               recurringExpenses={data.recurringFixedExpenses || []}
               savingsGoals={data.savingsGoals || []}
-              onSynchronizeBelfiusBalance={synchronizeBelfiusBalance}
               onSavingsDetected={handleBankSavingsDetected}
               onAuditSnapshot={persistBelfiusSnapshot}
               onEditAppOperation={editOperation}
@@ -3664,6 +3689,7 @@ export default function App() {
         <NavButton icon={Home} label="Accueil" active={activeView === 'home'} onClick={() => setActiveView('home')} />
         <NavButton icon={Plus} label="Ajouter" active={activeView === 'add'} onClick={() => setActiveView('add')} />
         <NavButton icon={ReceiptText} label="Historique" active={activeView === 'history'} onClick={() => setActiveView('history')} />
+        <NavButton icon={Umbrella} label="Loisirs" active={activeView === 'leisure'} onClick={() => setActiveView('leisure')} />
         <NavButton icon={MessageCircle} label="Messages" badge={unreadMessages} active={activeView === 'messages'} onClick={() => setActiveView('messages')} />
         <NavButton icon={Settings} label="Réglages" active={activeView === 'settings'} onClick={() => setActiveView('settings')} />
       </nav>
@@ -3689,75 +3715,6 @@ function CategoryRow({ category }) {
       <span>{category.label}</span>
       <strong>{formatCurrency(category.total)}</strong>
     </div>
-  );
-}
-
-function GoalCard({ goal, onUpdate, bankDetected = 0 }) {
-  const [draft, setDraft] = useState({
-    saved: String(goal.saved ?? 0),
-    target: String(goal.target ?? 0),
-  });
-  const actualRatio = goal.target ? (goal.saved / goal.target) * 100 : 0;
-  const progressRatio = Math.min(Math.max(actualRatio, 0), 100);
-
-  useEffect(() => {
-    setDraft({
-      saved: String(goal.saved ?? 0),
-      target: String(goal.target ?? 0),
-    });
-  }, [goal.saved, goal.target]);
-
-  const commit = (field) => {
-    const value = draft[field] === '' ? 0 : parseDecimal(draft[field]);
-    onUpdate(goal.id, field, Number.isFinite(value) ? value : 0);
-  };
-
-  const handleKeyDown = (event, field) => {
-    if (event.key === 'Enter') {
-      event.currentTarget.blur();
-    }
-  };
-
-  return (
-    <article className="goal-card">
-      <div className="goal-head">
-        <strong>{goal.label}</strong>
-        <span>{Math.round(actualRatio)}%</span>
-      </div>
-      <div className="progress-track slim">
-        <div className="progress-fill green" style={{ width: `${progressRatio}%` }} />
-      </div>
-      {bankDetected > 0 && (
-        <div className="goal-bank-sync">
-          <span>🏦 Versements Belfius identifiés dans le CSV</span>
-          <strong>{formatCurrency(bankDetected)}</strong>
-        </div>
-      )}
-      <div className="goal-inputs">
-        <label>
-          Mis de côté (épargne)
-          <input
-            type="text"
-            inputMode="decimal"
-            value={draft.saved}
-            onChange={(event) => setDraft({ ...draft, saved: event.target.value })}
-            onBlur={() => commit('saved')}
-            onKeyDown={(event) => handleKeyDown(event, 'saved')}
-          />
-        </label>
-        <label>
-          Objectif
-          <input
-            type="text"
-            inputMode="decimal"
-            value={draft.target}
-            onChange={(event) => setDraft({ ...draft, target: event.target.value })}
-            onBlur={() => commit('target')}
-            onKeyDown={(event) => handleKeyDown(event, 'target')}
-          />
-        </label>
-      </div>
-    </article>
   );
 }
 
@@ -3893,7 +3850,7 @@ function AnnualReview({ review }) {
 function OperationRow({ operation, categories, alerts, planned = false, onEdit, onDelete }) {
   const category = categories.find((item) => item.id === operation.category);
   const Icon = iconMap[category?.icon] || CircleEllipsis;
-  const sign = operation.type === 'income' ? '+' : '-';
+  const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';
 
   return (
     <article className={alerts?.length ? 'operation-row needs-review' : 'operation-row'}>
@@ -3910,7 +3867,7 @@ function OperationRow({ operation, categories, alerts, planned = false, onEdit, 
           </em>
         )}
       </div>
-      <strong className={operation.type === 'income' ? 'amount income' : 'amount'}>
+      <strong className={(operation.type === 'income' || operation.type === 'reimbursement') ? 'amount income' : 'amount'}>
         {sign}{formatCurrency(operation.amount)}
       </strong>
       <button type="button" onClick={() => onEdit(operation)} aria-label="Modifier">

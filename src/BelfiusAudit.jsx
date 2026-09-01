@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileSearch, Pencil, RefreshCw, Upload } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, FileSearch, Pencil, Upload } from 'lucide-react';
+import { classifyBankBusinessRule, hasStrongCommunicationFingerprint, isTrueOrphanAppOperation, shouldOfferAmountDateFallback, strongCommunicationMatch } from './belfiusMatchingRules.js';
 import { calculateBankAuditSummary } from './lib/budgetMetrics.js';
 import {
   isMastercardSettlementOperation,
@@ -59,6 +60,7 @@ const BELFIUS_ALIASES = [
   { bank: ['setca'], app: ['syndicat'] },
   { bank: ['ag insurance'], app: ['ag assurance', 'remboursement maison esther'] },
   { bank: ['sd worx'], app: ['salaire alain'] },
+  { bank: ['office national de l emploi'], app: ['onem'] },
   { bank: ['rexel belgium'], app: ['salaire esther'] },
   { bank: ['stellantis financial', 'psa finance'], app: ['psa finance'] },
   { bank: ['mega power online', 'mega'], app: ['mega'] },
@@ -169,9 +171,10 @@ function parseBelfius(text) {
       date: parseDate(cells[dateIndex]),
       amount: parseAmount(cells[amountIndex]),
       label: cells[nameIndex] || cells[transactionIndex] || cells[communicationIndex] || 'Opération Belfius',
-      details: cells[communicationIndex] || cells[transactionIndex] || '',
+      details: [cells[communicationIndex], cells[transactionIndex]].filter(Boolean).join(' '),
       communication: cells[communicationIndex] || '',
       structuredCommunication: extractStructuredCommunication(cells[communicationIndex] || ''),
+      rawDetails: cells.join(' '),
     }))
     .filter((row) => row.date && row.amount !== 0);
 
@@ -279,6 +282,9 @@ function findRecurringMatch(bankRow, appRow, recurringExpenses) {
       && Math.abs(recurringAmount - operationAmount) <= AMOUNT_TOLERANCE;
   });
 
+  const directDebit = identityCandidates.find((expense) => ['direct-debit', 'bank-reference'].includes(strongCommunicationMatch(bankRow, expense)?.kind));
+  if (directDebit) return { ...directDebit, __directDebitMatch: true };
+
   // L'empreinte bancaire est prioritaire sur le jour théorique du prélèvement.
   if (bankCommunication) {
     const exactCommunication = identityCandidates.find((expense) => {
@@ -313,9 +319,8 @@ function learnedBankIdentityMatches(rule, bankRow) {
   return true;
 }
 
-function isBeobankSavingsTransfer(row) {
-  if (!row || Number(row.amount) >= 0) return false;
-  return normalize(`${row.label || ''} ${row.communication || ''} ${row.details || ''}`).includes('beobank');
+function isBeobankSavingsTransfer(row, savingsGoals = []) {
+  return Boolean(classifyBankBusinessRule(row, savingsGoals));
 }
 
 function isBeobankSavingsAppRow(row) {
@@ -326,6 +331,7 @@ function isBeobankSavingsAppRow(row) {
 function learnedTargetMatches(rule, appRow) {
   if (!rule?.target || !appRow) return false;
   const target = rule.target;
+  if (target.id) return target.id === appRow.id;
   if (target.label && normalize(target.label) === normalize(appRow.label)) return true;
   if (target.category && target.category === appRow.category) {
     if (!target.store) return true;
@@ -368,13 +374,18 @@ function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
   if (!directionMatches || amountDelta > AMOUNT_TOLERANCE) return null;
 
   const learned = learnedEvidence(bankRow, appRow, learnedRules);
-  if (learned && dayDelta <= 7) return learned;
-  if (dayDelta > DATE_TOLERANCE_DAYS) return null;
-
   const directLabel = labelsLikelyMatch(bankRow, appRow);
   const alias = aliasMatch(bankRow, appRow);
+  const directDebitRecurring = (recurringExpenses || []).find((expense) => recurringBelongsToAppRow(expense, appRow) && ['direct-debit', 'bank-reference'].includes(strongCommunicationMatch(bankRow, expense)?.kind));
+  if (directDebitRecurring && amountDelta <= AMOUNT_TOLERANCE) return { auto: true, confidence: 100, reason: `Domiciliation Belfius reconnue : ${directDebitRecurring.label}`, recurring: directDebitRecurring };
   const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);
+  if (learned && dayDelta <= 14) return learned;
+  const strongBusinessIdentity = directLabel || alias || Boolean(recurring);
+  if (dayDelta > DATE_TOLERANCE_DAYS && !(strongBusinessIdentity && dayDelta <= 14)) return null;
 
+  if (recurring && recurring.__directDebitMatch) {
+    return { auto: true, confidence: 100, reason: `Référence de domiciliation Belfius reconnue : ${recurring.label}`, recurring };
+  }
   if (recurring && recurring.__freeCommunicationMatch) {
     return {
       auto: true,
@@ -415,6 +426,8 @@ function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
       recurring: null,
     };
   }
+
+  if (!shouldOfferAmountDateFallback(bankRow, recurringExpenses)) return null;
 
   // Montant/date seuls ne sont plus une preuve suffisante : ils deviennent une proposition.
   return {
@@ -476,7 +489,7 @@ function recurringFingerprintMatchesBankRow(bankRow, expense) {
     && (actualStructured.includes(expectedStructured) || expectedStructured.includes(actualStructured)),
   );
 
-  return structuredMatch || recurringFreeCommunicationMatch(bankRow, expense);
+  return Boolean(strongCommunicationMatch(bankRow, expense)) || structuredMatch || recurringFreeCommunicationMatch(bankRow, expense);
 }
 
 function recurringCompatibleWithGroupedApp(expense, appRow) {
@@ -541,6 +554,11 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
   return null;
 }
 
+/**
+ * Rapproche un relevé bancaire et le grand livre sans créer ni modifier d’écriture.
+ * Les correspondances automatiques exigent une preuve forte ; les cas ambigus restent
+ * proposés à l’utilisateur pour confirmation explicite.
+ */
 function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
   // Les transferts vers Beobank sont des transferts internes d'épargne Vacances/Loisirs.
@@ -548,12 +566,13 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
   // de correspondances de dépenses/revenus (sinon un même montant peut proposer Mega, etc.).
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
-    .filter((row) => !isBeobankSavingsTransfer(row, savingsGoals))
+    .filter((row) => !classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching)
     .map((row) => ({ ...row }));
   const appRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
     .filter((row) => !isBeobankSavingsAppRow(row))
+    .filter((row) => !normalize(row.label || '').startsWith('epargne '))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
 
@@ -619,14 +638,15 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
   // 2) Regroupements n opérations Belfius → 1 opération Mon Foyer.
   // Ils exigent désormais une cohérence de bénéficiaire/alias.
   appRows.forEach((appRow, appIndex) => {
-    if (usedApp.has(appIndex)) return;
+    if (usedApp.has(appIndex) || pendingApp.has(appIndex)) return;
     const availableBank = monthBankRows
       .map((row, index) => ({ row, index }))
       .filter(({ index }) => !usedBank.has(index));
     const group = possibleBankGroup(appRow, availableBank, recurringExpenses);
     if (!group) return;
 
-    group.rows.forEach(({ index }) => usedBank.add(index));
+    group.rows.forEach(({ index }) => { usedBank.add(index); pendingBank.delete(index); });
+    pendingApp.delete(appIndex);
     usedApp.add(appIndex);
     groups.push({
       bank: group.rows.map(({ row }) => row),
@@ -641,10 +661,10 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
   // 3) Ventilations 1 opération Belfius → n opérations Mon Foyer.
   // Le total seul ne suffit plus : chaque ligne doit être cohérente avec le bénéficiaire.
   monthBankRows.forEach((bankRow, bankIndex) => {
-    if (usedBank.has(bankIndex)) return;
+    if (usedBank.has(bankIndex) || pendingBank.has(bankIndex)) return;
     const availableApp = appRows
       .map((row, index) => ({ row, index }))
-      .filter(({ index }) => !usedApp.has(index));
+      .filter(({ index }) => !usedApp.has(index) && !pendingApp.has(index));
     const split = possibleSplit(bankRow, availableApp, recurringExpenses);
     if (!split) return;
 
@@ -678,13 +698,23 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
   };
 }
 
+function sameAppIdentity(left, right) {
+  const amountSame = Math.abs(Number(left?.amount || 0) - Number(right?.amount || 0)) <= AMOUNT_TOLERANCE;
+  const personSame = (left?.person || 'Foyer') === (right?.person || 'Foyer');
+  const leftLabel = normalize(left?.label || '');
+  const rightLabel = normalize(right?.label || '');
+  const labelSame = leftLabel === rightLabel || (leftLabel && rightLabel && (leftLabel.includes(rightLabel) || rightLabel.includes(leftLabel)));
+  const categorySame = Boolean(left?.category && right?.category && left.category === right.category);
+  const storeSame = !left?.store || !right?.store || normalize(left.store) === normalize(right.store);
+  return amountSame && personSame && (labelSame || (categorySame && storeSame));
+}
+
 export default function BelfiusAudit({
   operations,
   appBelfiusBalance,
   selectedMonth,
   recurringExpenses = [],
   savingsGoals = [],
-  onSynchronizeBelfiusBalance,
   onAddBankOperation,
   onSavingsDetected,
   onAuditSnapshot,
@@ -695,7 +725,6 @@ export default function BelfiusAudit({
   const [error, setError] = useState('');
   const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
   const [confirmationMessage, setConfirmationMessage] = useState('');
-  const synchronizationKey = useRef('');
   const result = useMemo(
     () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules, savingsGoals) : null,
     [audit, learnedRules, operations, recurringExpenses, savingsGoals, selectedMonth],
@@ -705,7 +734,6 @@ export default function BelfiusAudit({
     const file = event.target.files?.[0];
     if (!file) return;
     setError('');
-    synchronizationKey.current = '';
     try {
       const buffer = await file.arrayBuffer();
       const text = new TextDecoder('windows-1252').decode(buffer);
@@ -732,6 +760,7 @@ export default function BelfiusAudit({
       structuredCommunication: bankRow.structuredCommunication || '',
       freeCommunication: bankRow.communication || '',
       target: {
+        id: appRow.id || '',
         label: appRow.label || '',
         category: appRow.category || '',
         store: appRow.store || '',
@@ -762,7 +791,8 @@ export default function BelfiusAudit({
   const monthExtra = (result?.extra || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const cutoffDate = parseBalanceDate(audit?.balanceDate);
   const futureExtra = monthExtra.filter((row) => cutoffDate && String(row.date || '') > cutoffDate);
-  const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') <= cutoffDate);
+  const matchedApps = result?.matched?.map((entry) => entry.app) || [];
+  const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') < cutoffDate).filter((row) => isTrueOrphanAppOperation(row, { cutoffDate })).filter((row) => !matchedApps.some((matched) => matched.id !== row.id && sameAppIdentity(matched, row)));
   const difference = audit ? Number(appBelfiusBalance || 0) - audit.balance : 0;
   const auditIsClean = Boolean(
     audit
@@ -773,9 +803,9 @@ export default function BelfiusAudit({
   );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
   const csvMonthOpening = calculateCsvMonthOpening(audit);
-  const canSynchronize = false; // RC2.4.6 : le CSV reste une référence de contrôle, jamais une écriture silencieuse.
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
   const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
+  const strongFingerprintCount = (audit?.rows || []).filter((row) => hasStrongCommunicationFingerprint(row, recurringExpenses)).length;
   const {
     pendingAmount,
     expectedBankBalance,
@@ -804,18 +834,6 @@ export default function BelfiusAudit({
     });
   }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, csvMonthOpening.balance, csvMonthOpening.month, difference, monthMissing.length, actionableExtra.length, pendingAmount, remainingToTreat, result?.review.length]);
 
-  useEffect(() => {
-    if (!canSynchronize || !audit) return;
-    const key = `${audit.balance}|${audit.balanceDate}|${result.auditMonth}`;
-    if (synchronizationKey.current === key) return;
-    synchronizationKey.current = key;
-    onSynchronizeBelfiusBalance({
-      balance: audit.balance,
-      balanceDate: audit.balanceDate,
-      month: result.auditMonth,
-    });
-  }, [audit, canSynchronize, onSynchronizeBelfiusBalance, result]);
-
   return (
     <section className="panel belfius-audit">
       <div className="section-title">
@@ -829,6 +847,7 @@ export default function BelfiusAudit({
       {audit && (
         <p className="hint">
           Relevé Belfius mémorisé · {audit.fileName || 'CSV Belfius'} · {remainingToTreat} opération(s) restant à traiter.
+          {strongFingerprintCount > 0 ? ` ${strongFingerprintCount} empreinte(s) bancaire(s) forte(s) reconnue(s).` : ''}
           Tu peux quitter l'application et reprendre l'audit sans recharger le fichier.
         </p>
       )}
@@ -861,12 +880,8 @@ export default function BelfiusAudit({
             <div className="audit-kpi group"><span><i className="audit-dot" />Regroupements</span><strong>{result.groups.length}</strong></div>
             <div className="audit-kpi future"><span><i className="audit-dot" />À venir</span><strong>{futureExtra.length}</strong></div>
             <div className="audit-kpi danger"><span><i className="audit-dot" />Anomalies Belfius</span><strong>{monthMissing.length}</strong></div>
-            <div className="audit-kpi danger"><span><i className="audit-dot" />À vérifier Mon Foyer</span><strong>{actionableExtra.length}</strong></div>
+            <div className="audit-kpi danger"><span><i className="audit-dot" />Écritures sans mouvement</span><strong>{actionableExtra.length}</strong></div>
           </div>
-
-          {canSynchronize && (
-            <p className="hint"><RefreshCw size={16} /> Rapprochement terminé : le solde Belfius de Mon Foyer est synchronisé automatiquement.</p>
-          )}
 
           {result.matched.length > 0 && (
             <details className="audit-details status-safe">
@@ -974,9 +989,10 @@ export default function BelfiusAudit({
 
           {actionableExtra.length > 0 && (
             <details className="audit-details status-danger" open>
-              <summary><span className="audit-dot" />Opérations Mon Foyer à vérifier ({actionableExtra.length})</summary>
+              <summary><span className="audit-dot" />Écritures Mon Foyer sans mouvement Belfius ({actionableExtra.length})</summary>
+              <p className="audit-section-note">Écritures arrivées à échéance mais sans mouvement bancaire identifié. Elles sont à contrôler, pas automatiquement considérées comme erronées.</p>
               {actionableExtra.map((row) => (
-                <article key={row.id}><strong>{row.date} · {row.label}</strong><span>{money(row.type === 'income' ? row.amount : -row.amount)}</span></article>
+                <article key={row.id} className="audit-missing-row"><strong>{row.date} · {row.label}</strong><span className="audit-missing-actions"><b>{money((row.type === 'income' || row.type === 'reimbursement') ? row.amount : -row.amount)}</b>{typeof onEditAppOperation === 'function' && (<button type="button" className="audit-pencil" title="Modifier cette écriture" aria-label={`Modifier ${row.label}`} onClick={() => onEditAppOperation(row)}><Pencil size={17} /></button>)}</span></article>
               ))}
             </details>
           )}
