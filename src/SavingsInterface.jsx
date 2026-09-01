@@ -34,6 +34,11 @@ function canonicalLabel(bucket, fallback) {
   return fallback || savingsRuleForBucket(bucket)?.label || 'Épargne';
 }
 
+const SAVINGS_DESCRIPTIONS = Object.freeze({
+  taxes: 'Tous types de taxes',
+  frais_maison: "Tous types de dépenses d’entretien",
+});
+
 function preferredGoal(current, candidate) {
   if (!current) return candidate;
   const currentWeight = Math.abs(Number(current.saved || 0)) * 100000 + Math.abs(Number(current.target || 0));
@@ -73,6 +78,7 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
       <div className="savings-op-head">
         <div>
           <strong>{label}</strong>
+          {SAVINGS_DESCRIPTIONS[bucket] && <small className="savings-op-description">{SAVINGS_DESCRIPTIONS[bucket]}</small>}
           {rule && <span className="savings-op-ref">OP {rule.op}</span>}
         </div>
         {ratio !== null && <b>{ratio}%</b>}
