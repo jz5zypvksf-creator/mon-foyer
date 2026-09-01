@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, DatabaseBackup, Download, FileCheck2, RotateCcw, Upload } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
 import {
@@ -69,6 +69,7 @@ export default function DataBackupRecovery() {
   const [status, setStatus] = useState('');
   const [statusKind, setStatusKind] = useState('');
   const [lastBackupAt, setLastBackupAt] = useState(() => localStorage.getItem(LAST_BACKUP_STORAGE_KEY) || '');
+  const [automaticBackup, setAutomaticBackup] = useState(null);
   const reminder = backupReminder(
     lastBackupAt,
     localStorage.getItem(LAST_BELFIUS_AUDIT_STORAGE_KEY) || '',
@@ -79,6 +80,40 @@ export default function DataBackupRecovery() {
       ? Object.values(candidate.counts).reduce((sum, count) => sum + count, 0)
       : 0
   ), [candidate]);
+
+  useEffect(() => {
+    let ignore = false;
+    const loadAutomaticBackup = async () => {
+      const { data, error } = await supabase
+        .from('data_backup_snapshots')
+        .select('id, created_at, backup_kind, payload, row_counts')
+        .eq('household_id', householdId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!ignore && !error) setAutomaticBackup(data || null);
+    };
+    loadAutomaticBackup();
+    return () => { ignore = true; };
+  }, []);
+
+  const downloadAutomaticBackup = async () => {
+    if (!automaticBackup?.payload || busy) return;
+    setBusy(true);
+    setStatus('Préparation de la dernière sauvegarde automatique…');
+    setStatusKind('');
+    try {
+      const envelope = await createBackupEnvelope(automaticBackup.payload);
+      downloadEnvelope(envelope, 'mon-foyer-sauvegarde-automatique');
+      setStatus('Sauvegarde automatique téléchargée et vérifiable avant restauration.');
+      setStatusKind('success');
+    } catch (error) {
+      setStatus('Téléchargement impossible : ' + error.message);
+      setStatusKind('error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const exportBackup = async () => {
     setBusy(true);
@@ -194,9 +229,26 @@ export default function DataBackupRecovery() {
       </div>
 
       <p className="hint">
-        La sauvegarde contient les données financières, Loisirs, messages et dernier audit Belfius.
+        La sauvegarde contient les données financières, Loisirs, paramètres, rappels et audits comptables.
         Elle ne contient aucun mot de passe ni donnée de Chronologie biblique.
       </p>
+
+      <div className="automatic-backup-state" role="status">
+        <DatabaseBackup size={20} />
+        <div>
+          <strong>Sauvegarde automatique quotidienne</strong>
+          <span>
+            {automaticBackup
+              ? `Dernier point récupérable : ${dateLabel(automaticBackup.created_at)}.`
+              : 'Le premier point récupérable sera créé pendant la prochaine sauvegarde planifiée.'}
+          </span>
+        </div>
+        {automaticBackup && (
+          <button type="button" onClick={downloadAutomaticBackup} disabled={busy}>
+            <Download size={17} /> Télécharger
+          </button>
+        )}
+      </div>
 
       <div className={'backup-reminder is-' + reminder.kind} role="status">
         {reminder.kind === 'current' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
