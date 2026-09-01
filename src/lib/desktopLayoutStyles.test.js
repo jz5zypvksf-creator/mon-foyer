@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8');
+const operationHistory = readFileSync(new URL('../features/operations/OperationHistory.jsx', import.meta.url), 'utf8');
 const buildIntegration = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
 
 test('la vue Accueil ordinateur reprend toujours toute la largeur disponible', () => {
@@ -32,9 +33,10 @@ test('la synthèse et les modules complémentaires occupent deux colonnes indép
   assert.match(styles, /\.home-view\s+\.desktop-insights-column\s*>\s*\.desktop-dashboard\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto;/s);
 });
 
-test('l’Historique du mois inclut les écritures futures déjà enregistrées', () => {
+test('l’Historique masque les écritures futures du mois courant', () => {
   assert.match(app, /return monthOperations\.filter\(\(operation\) => \{/);
-  assert.match(app, /planned=\{operation\.date > today\}/);
-  assert.match(app, /Prévue · déjà enregistrée/);
+  assert.match(operationHistory, /const currentMonth = today\.slice\(0, 7\);/);
+  assert.match(operationHistory, /monthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
+  assert.match(operationHistory, /filteredMonthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
   assert.doesNotMatch(app, /return effectiveMonthOperations\.filter\(\(operation\) => \{/);
 });
