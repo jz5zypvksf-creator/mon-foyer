@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Apply QA regression fixes
+      - name: Apply structural refund and history repair
         run: |
           node --input-type=module <<'EOF'
           import fs from 'node:fs';
@@ -23,16 +23,18 @@ jobs:
           const appPath = 'src/App.jsx';
           let app = fs.readFileSync(appPath, 'utf8');
 
-          const replaceOrVerify = (source, before, after, marker) => {
+          const replaceOrVerify = (source, before, after, marker = after) => {
+            if (source.includes(after)) return source;
             if (source.includes(before)) return source.replace(before, after);
-            if (source.includes(marker || after)) return source;
-            throw new Error(`Patch anchor missing: ${marker || before.slice(0, 80)}`);
+            if (source.includes(marker)) return source;
+            throw new Error(`Patch anchor missing: ${before.slice(0, 90)}`);
           };
 
+          // 1) Historique du mois courant: ne montrer que les écritures arrivées à échéance.
           app = replaceOrVerify(
             app,
             `    // L'Historique est le registre des écritures sauvegardées pour le mois choisi.\n    // Une écriture future reste visible et est distinguée comme « Prévue » dans la liste.\n    return monthOperations.filter((operation) => {`,
-            `    // Pour le mois en cours, l'historique ne reprend que les écritures arrivées à échéance.\n    // Les écritures futures restent disponibles dans les vues prévisionnelles, pas dans l'historique réalisé.\n    return monthOperations.filter((operation) => {\n      if (selectedMonth === today.slice(0, 7) && operation.date > today) return false;`,
+            `    // Pour le mois en cours, l'historique ne reprend que les écritures arrivées à échéance.\n    // Les écritures futures restent disponibles dans les vues prévisionnelles.\n    return monthOperations.filter((operation) => {\n      if (selectedMonth === today.slice(0, 7) && operation.date > today) return false;`,
             `if (selectedMonth === today.slice(0, 7) && operation.date > today) return false;`,
           );
 
@@ -43,7 +45,16 @@ jobs:
             `reviewMap, selectedMonth, showReviewOnly, today]);`,
           );
 
-          app = app.replace(`                  <option value="reimbursement">Remboursement</option>\n`, '');
+          // 2) Remboursement doit rester créable et filtrable.
+          if (!app.includes(`<option value="reimbursement">Remboursement</option>`)) {
+            throw new Error('Refund option missing from operation type selector');
+          }
+          if (!app.includes(`type: 'reimbursement'`) || !app.includes('startCareReimbursement')) {
+            throw new Error('Refund creation shortcut/state is missing');
+          }
+          if (!app.includes(`historyType !== 'all'`) || !app.includes(`operation.type !== historyType`)) {
+            throw new Error('Generic history type filter is missing');
+          }
 
           app = replaceOrVerify(
             app,
@@ -52,59 +63,35 @@ jobs:
             `operationType={draft.type}`,
           );
 
-          app = app.replace(
-            `  const startCareReimbursement = (person) => { setDraft({ ...makeEmptyOperation(), type: 'reimbursement', category: 'divers', person, paymentMethod: 'Espèces', store: '', label: \`Remboursement \${person}\` }); setEditingId(null); setOperationStatus('Remboursement : choisis Compte Belfius s’il est bancaire ou Espèces s’il est remis en cash.'); setActiveView('add'); };\n\n`,
-            '',
-          );
-
-          app = app.replace(
-            `<button type="button" className="secondary-button care-recovery-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button>`,
-            `<span className="hint">Remboursement historique uniquement</span>`,
-          );
-
-          if (app.includes('<option value="reimbursement">Remboursement</option>')) {
-            throw new Error('Obsolete reimbursement option is still exposed');
-          }
-          if (app.includes('startCareReimbursement(')) {
-            throw new Error('Obsolete reimbursement creation shortcut is still exposed');
-          }
-          if (!app.includes(`operationType={draft.type}`)) {
-            throw new Error('OperationForm refund validation wiring missing');
-          }
           fs.writeFileSync(appPath, app);
 
           const formPath = 'src/features/operations/OperationForm.jsx';
           let form = fs.readFileSync(formPath, 'utf8');
+
           form = replaceOrVerify(
             form,
             `  editingId,\n  onSubmit,`,
             `  editingId,\n  operationType,\n  onSubmit,`,
             `  operationType,`,
           );
-          form = replaceOrVerify(
-            form,
-            `}) {\n  return (`,
-            `}) {\n  const obsoleteRefundDraft = !editingId && operationType === 'reimbursement';\n  const handleSubmit = (event) => {\n    if (obsoleteRefundDraft) {\n      event.preventDefault();\n      return;\n    }\n    onSubmit(event);\n  };\n\n  return (`,
-            `const obsoleteRefundDraft = !editingId && operationType === 'reimbursement';`,
-          );
+
+          // Supprime toute ancienne logique qui considérait reimbursement comme obsolète.
+          form = form.replace(/\n  const obsoleteRefundDraft = !editingId && operationType === 'reimbursement';[\s\S]*?\n  return \(/, '\n  return (');
+          form = form.replace('onSubmit={handleSubmit}', 'onSubmit={onSubmit}');
+          form = form.replace('disabled={!isValid || obsoleteRefundDraft}', 'disabled={!isValid}');
+          form = form.replace(/\n        \{obsoleteRefundDraft && <p className="hint status-error" role="alert">[^<]*<\/p>\}/, '');
+
           form = replaceOrVerify(
             form,
             `<form className="panel form-panel" onSubmit={onSubmit}>`,
-            `<form className="panel form-panel" onSubmit={handleSubmit}>`,
-            `onSubmit={handleSubmit}`,
+            `<form className="panel form-panel" data-operation-type={operationType || undefined} onSubmit={onSubmit}>`,
+            `data-operation-type={operationType || undefined}`,
           );
-          form = replaceOrVerify(
-            form,
-            `<button className="primary-button" type="submit" disabled={!isValid}>`,
-            `<button className="primary-button" type="submit" disabled={!isValid || obsoleteRefundDraft}>`,
-            `disabled={!isValid || obsoleteRefundDraft}`,
-          );
-          form = replaceOrVerify(
-            form,
-            `        {!isValid && <p className="hint status-error" role="alert">Renseigne un libellé et un montant supérieur à zéro.</p>}\n`,
-            `        {obsoleteRefundDraft && <p className="hint status-error" role="alert">La création de nouveaux remboursements n’est plus autorisée.</p>}\n        {!isValid && <p className="hint status-error" role="alert">Renseigne un libellé et un montant supérieur à zéro.</p>}\n`,
-            `La création de nouveaux remboursements n’est plus autorisée.`,
-          );
+
+          if (form.includes('obsoleteRefundDraft') || form.includes('La création de nouveaux remboursements n’est plus autorisée')) {
+            throw new Error('Refund blocking logic still present in OperationForm');
+          }
+
           fs.writeFileSync(formPath, form);
           EOF
       - run: npm ci
@@ -112,14 +99,14 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
-      - name: Commit correction if needed
+      - name: Commit structural repair
         run: |
           if git diff --quiet -- src/App.jsx src/features/operations/OperationForm.jsx; then
-            echo "No correction changes to commit."
+            echo "No source changes to commit."
             exit 0
           fi
           git config user.name "ChatGPT Codex Connector"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/App.jsx src/features/operations/OperationForm.jsx
-          git commit -m "fix: resolve history date filtering and adjust refund validation"
+          git commit -m "fix: structural repair for operation form with complete refund and date features"
           git push origin architecture/extract-form
