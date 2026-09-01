@@ -32,10 +32,16 @@ export default function BudgetAnalysis({ analysis }) {
         <div><span>Disponible au début du mois</span><strong>{money(analysis.current.openingBalance)}</strong></div>
         <div><span>Revenus encaissés dans le mois</span><strong>{money(analysis.current.income)}</strong></div>
         <div><span>Revenus affectés au mois</span><strong>{money(analysis.current.assignedIncome)}</strong></div>
+        <div><span>Remboursements reçus</span><strong>{money(analysis.current.reimbursements)}</strong></div>
         <div><span>Transferts depuis l’épargne</span><strong>{money(analysis.current.savingsFunding)}</strong></div>
         <div><span>Ressources budgétaires cumulées</span><strong>{money(analysis.current.resources)}</strong></div>
+        <div><span>Trésorerie disponible avant dépenses</span><strong>{money(analysis.current.cashResources)}</strong></div>
         <div><span>Dépenses exécutées</span><strong>{money(analysis.current.expenses)}</strong></div>
+        <div><span>Transferts vers l’épargne</span><strong>{money(analysis.current.savingsTransfers)}</strong></div>
+        <div><span>Trésorerie après épargne</span><strong>{money(analysis.current.cashAfterSavings)}</strong></div>
         <div><span>Dépenses programmées</span><strong>{money(analysis.scheduledExpenseTotal)}</strong></div>
+        <div><span>Épargne encore programmée</span><strong>{money(analysis.scheduledSavingsTransferTotal)}</strong></div>
+        <div><span>Trésorerie prévue après épargne</span><strong>{money(analysis.cashForecastBalance)}</strong></div>
         <div><span>Nourriture encore prévue</span><strong>{money(analysis.remainingFoodBudget)}</strong></div>
       </div>
       <p className="budget-analysis-observation">{trendText(analysis.trend)}</p>
@@ -54,7 +60,8 @@ export default function BudgetAnalysis({ analysis }) {
         <p>
           Le disponible du début du mois est reconstitué depuis le solde Belfius du CSV, complété par les chèques repas. Il comprend donc déjà les salaires
           reçus en fin de mois précédent. Le champ « mois budgétaire concerné » rattache les salaires, employeurs et revenus complémentaires (par exemple l’ONEM) au bon mois sans modifier leur date bancaire.
-          Les ajustements Belfius et transferts depuis l’épargne sont exclus des revenus. Le prévisionnel déduit les dépenses exécutées et programmées,
+          Les transferts entre Belfius et l’épargne sont comptabilisés des deux côtés mais exclus des revenus et dépenses. Les remboursements reçus restaurent les ressources.
+          Le résultat prévisionnel déduit les dépenses exécutées et programmées. La trésorerie après épargne déduit séparément les transferts internes,
           mais pas le budget nourriture restant, qui demeure indicatif.
           La suggestion du fonds d’urgence exige trois mois terminés positifs. Elle retient le plus petit montant entre 10 % du revenu mensuel moyen
           et 25 % de la plus petite marge mensuelle, puis arrondit vers le bas par tranche de 5 €.
