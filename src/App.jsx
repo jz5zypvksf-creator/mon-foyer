@@ -47,6 +47,7 @@ import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
 import LeisureVacations from './LeisureVacations.jsx';
 import DuplicateAudit from './DuplicateAudit.jsx';
+import OperationHistory from './features/operations/OperationHistory.jsx';
 import './NavSix.css';
 import {
   enqueueOperationMutation,
@@ -3290,105 +3291,33 @@ export default function App() {
         )}
 
         {activeView === 'history' && (
-          <section className="view">
-            <DuplicateAudit mode="history" operations={data.operations} selectedMonth={selectedMonth} onDeleteOperation={(row) => deleteOperation(row.id)} />
-            <div className="panel">
-              <div className="section-title">
-                <h2>Historique</h2>
-                <span>{filteredMonthOperations.length} / {monthOperations.length} lignes</span>
-              </div>
-              <div className="history-tools">
-                <input
-                  value={historySearch}
-                  onChange={(event) => setHistorySearch(event.target.value)}
-                  placeholder="Rechercher"
-                />
-                <div className="filter-grid">
-                  <select value={historyType} onChange={(event) => setHistoryType(event.target.value)} aria-label="Type">
-                    <option value="all">Tous les types</option>
-                    <option value="income">Revenus</option>
-                  <option value="reimbursement">Remboursement</option>
-                    <option value="fixed">Frais fixes</option>
-                    <option value="variable">Dépenses variables</option>
-                  </select>
-                  <select value={historyPerson} onChange={(event) => setHistoryPerson(event.target.value)} aria-label="Personne">
-                    <option value="all">Toutes les personnes</option>
-                    {historyPeople.map((person) => <option key={person}>{person}</option>)}
-                  </select>
-                </div>
-                <div className="filter-grid">
-                  <select value={historyCategory} onChange={(event) => setHistoryCategory(event.target.value)} aria-label="Type de frais">
-                    <option value="all">Tous les types de frais</option>
-                    {data.categories.map((category) => (
-                      <option key={category.id} value={category.id}>{category.label}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className={showReviewOnly ? 'review-filter active' : 'review-filter'}
-                    aria-pressed={showReviewOnly}
-                    onClick={() => setShowReviewOnly((current) => !current)}
-                  >
-                    À vérifier {reviewMap.size > 0 ? `(${reviewMap.size})` : ''}
-                  </button>
-                </div>
-                <div className="filter-grid">
-                  <select value={historyPaymentMethod} onChange={(event) => setHistoryPaymentMethod(event.target.value)} aria-label="Moyen de paiement">
-                    <option value="all">Tous les moyens de paiement</option>
-                    {PAYMENT_METHODS.map((method) => (
-                      <option key={method}>{method}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="history-summary">
-                <div>
-                  <span>Total affiché</span>
-                  <strong className={historyTotals.balance >= 0 ? 'income' : 'expense'}>
-                    {formatCurrency(historyTotals.balance)}
-                  </strong>
-                </div>
-                <div>
-                  <span>Revenus budgétaires</span>
-                  <strong className="income">{formatCurrency(historyTotals.income)}</strong>
-                </div>
-                <div>
-                  <span>Dépenses</span>
-                  <strong className="expense">{formatCurrency(historyTotals.expenses)}</strong>
-                </div>
-              </div>
-              <div className="history-summary">
-                {PAYMENT_METHODS.map((method) => (
-                  <div key={method}>
-                    <span>{method}</span>
-                    <strong className={paymentBalances[method] >= 0 ? 'income' : 'expense'}>
-                      {formatCurrency(paymentBalances[method])}
-                    </strong>
-                  </div>
-                ))}
-              </div>
-              <div className="operation-list">
-                {filteredMonthOperations.length === 0 && (
-                  <p className="empty-state">
-                    {monthOperations.length > 0
-                      ? `${monthOperations.length} opération(s) enregistrée(s), mais aucune ne correspond aux filtres actifs.`
-                      : 'Aucune opération enregistrée pour ce mois.'}
-                  </p>
-                )}
-                {filteredMonthOperations.map((operation) => (
-                  <OperationRow
-                    key={operation.id}
-                    operation={operation}
-                    categories={data.categories}
-                    alerts={reviewMap.get(operation.id)}
-                    planned={operation.date > today}
-                    onEdit={editOperation}
-                    onDelete={deleteOperation}
-                  />
-                ))}
-              </div>
-            </div>
-          </section>
+          <OperationHistory
+            operations={data.operations}
+            monthOperations={monthOperations}
+            filteredMonthOperations={filteredMonthOperations}
+            categories={data.categories}
+            selectedMonth={selectedMonth}
+            historySearch={historySearch}
+            setHistorySearch={setHistorySearch}
+            historyType={historyType}
+            setHistoryType={setHistoryType}
+            historyPerson={historyPerson}
+            setHistoryPerson={setHistoryPerson}
+            historyPeople={historyPeople}
+            historyCategory={historyCategory}
+            setHistoryCategory={setHistoryCategory}
+            historyPaymentMethod={historyPaymentMethod}
+            setHistoryPaymentMethod={setHistoryPaymentMethod}
+            showReviewOnly={showReviewOnly}
+            setShowReviewOnly={setShowReviewOnly}
+            reviewMap={reviewMap}
+            historyTotals={historyTotals}
+            paymentBalances={paymentBalances}
+            today={today}
+            onEditOperation={editOperation}
+            onDeleteOperation={deleteOperation}
+            DuplicateAuditComponent={DuplicateAudit}
+          />
         )}
 
         {activeView === 'messages' && (
@@ -3854,39 +3783,6 @@ function AnnualReview({ review }) {
         ))}
       </div>
     </section>
-  );
-}
-
-function OperationRow({ operation, categories, alerts, planned = false, onEdit, onDelete }) {
-  const category = categories.find((item) => item.id === operation.category);
-  const Icon = iconMap[category?.icon] || CircleEllipsis;
-  const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';
-
-  return (
-    <article className={alerts?.length ? 'operation-row needs-review' : 'operation-row'}>
-      <span className="icon-bubble"><Icon size={18} /></span>
-      <div>
-        <strong>{operation.label}</strong>
-        <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
-        {planned && <em className="operation-planned-badge">Prévue · déjà enregistrée</em>}
-        {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
-        {operation.reviewStatus && operation.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
-          <em className={`operation-review-badge review-${operation.reviewStatus}`}>
-            {reviewStatusLabel(operation.reviewStatus)}
-            {operation.disputeReference ? ` · dossier ${operation.disputeReference}` : ''}
-          </em>
-        )}
-      </div>
-      <strong className={(operation.type === 'income' || operation.type === 'reimbursement') ? 'amount income' : 'amount'}>
-        {sign}{formatCurrency(operation.amount)}
-      </strong>
-      <button type="button" onClick={() => onEdit(operation)} aria-label="Modifier">
-        <Edit3 size={17} />
-      </button>
-      <button type="button" onClick={() => onDelete(operation.id)} aria-label="Supprimer">
-        <Trash2 size={17} />
-      </button>
-    </article>
   );
 }
 
