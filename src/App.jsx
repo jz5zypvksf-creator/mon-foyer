@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   Beef,
@@ -38,15 +38,11 @@ import {
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
 import { formatMoney, parseMoney } from './domain/money/money.js';
-import BelfiusAudit from './BelfiusAudit.jsx';
 import { budgetIncomeTotalForMonth, forecastBalances, careBalances } from './budgetMonthRules.js';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
 import MonthEndAudit from './MonthEndAudit.jsx';
 import DesktopDashboard from './DesktopDashboard.jsx';
-import DataBackupRecovery from './DataBackupRecovery.jsx';
-import ProtectedSettings from './ProtectedSettings.jsx';
 import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } from './SavingsInterface.jsx';
-import LeisureVacations from './LeisureVacations.jsx';
 import DuplicateAudit from './DuplicateAudit.jsx';
 import OperationHistory from './features/operations/OperationHistory.jsx';
 import OperationForm from './features/operations/OperationForm.jsx';
@@ -103,6 +99,11 @@ import {
   recurringStructuredCommunication,
   sortedBeneficiaryOptions,
 } from './lib/recurringExpenseRules.js';
+
+const BelfiusAudit = lazy(() => import('./BelfiusAudit.jsx'));
+const DataBackupRecovery = lazy(() => import('./DataBackupRecovery.jsx'));
+const LeisureVacations = lazy(() => import('./LeisureVacations.jsx'));
+const ProtectedSettings = lazy(() => import('./ProtectedSettings.jsx'));
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -2662,6 +2663,7 @@ export default function App() {
       )}
 
       <main className="content">
+        <Suspense fallback={<div role="status">Chargement...</div>}>
         {activeView === 'home' && (
           <section className="view home-view">
             <div className="desktop-overview-grid">
@@ -3590,6 +3592,7 @@ export default function App() {
             </section>
           </section>
         )}
+        </Suspense>
       </main>
 
       <nav className="bottom-nav" aria-label="Navigation principale">
