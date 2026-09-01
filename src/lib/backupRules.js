@@ -1,5 +1,6 @@
 export const BACKUP_FORMAT = 'mon-foyer-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
+export const SUPPORTED_BACKUP_VERSIONS = [1, BACKUP_VERSION];
 export const LAST_BACKUP_STORAGE_KEY = 'mon-foyer-last-backup-at';
 export const LAST_BELFIUS_AUDIT_STORAGE_KEY = 'mon-foyer-last-belfius-audit-at';
 
@@ -12,7 +13,22 @@ export const BACKUP_TABLES = [
   { name: 'leisure_expenses', label: 'Dépenses Loisirs', onConflict: 'id' },
   { name: 'messages', label: 'Messages', onConflict: 'id' },
   { name: 'bank_snapshots', label: 'Dernier audit Belfius', onConflict: 'household_id' },
+  { name: 'household_budget_settings', label: 'Budgets mensuels', onConflict: 'household_id,effective_month' },
+  { name: 'care_people', label: 'Personnes suivies', onConflict: 'id' },
+  { name: 'reminder_preferences', label: 'Préférences de rappel', onConflict: 'household_id,user_id' },
+  { name: 'monthly_accounting_audits', label: 'Clôtures comptables', onConflict: 'household_id,month' },
 ];
+
+const VERSION_ONE_TABLES = new Set([
+  'categories',
+  'stores',
+  'savings_goals',
+  'recurring_fixed_expenses',
+  'operations',
+  'leisure_expenses',
+  'messages',
+  'bank_snapshots',
+]);
 
 export async function sha256(value) {
   const bytes = new TextEncoder().encode(value);
@@ -74,14 +90,15 @@ export async function parseBackup(text, currentHouseholdId) {
     throw new Error('Le fichier sélectionné n’est pas un fichier JSON valide.');
   }
 
-  if (envelope?.format !== BACKUP_FORMAT || envelope?.version !== BACKUP_VERSION) {
+  if (envelope?.format !== BACKUP_FORMAT || !SUPPORTED_BACKUP_VERSIONS.includes(envelope?.version)) {
     throw new Error('Ce fichier n’est pas une sauvegarde Mon Foyer compatible.');
   }
   if (!envelope.payload || envelope.payload.householdId !== currentHouseholdId) {
     throw new Error('Cette sauvegarde appartient à un autre foyer.');
   }
   for (const { name } of BACKUP_TABLES) {
-    if (!Array.isArray(envelope.payload.tables?.[name])) {
+    const requiredForVersion = envelope.version >= 2 || VERSION_ONE_TABLES.has(name);
+    if (requiredForVersion && !Array.isArray(envelope.payload.tables?.[name])) {
       throw new Error('Sauvegarde incomplète : ' + name + ' est absent.');
     }
   }
@@ -91,8 +108,14 @@ export async function parseBackup(text, currentHouseholdId) {
     throw new Error('Le fichier a été modifié ou endommagé depuis sa création.');
   }
 
+  const normalizedTables = Object.fromEntries(BACKUP_TABLES.map(({ name }) => [
+    name,
+    Array.isArray(envelope.payload.tables?.[name]) ? envelope.payload.tables[name] : [],
+  ]));
+
   return {
     ...envelope,
-    counts: backupCounts(envelope.payload.tables),
+    payload: { ...envelope.payload, tables: normalizedTables },
+    counts: backupCounts(normalizedTables),
   };
 }
