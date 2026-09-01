@@ -31,3 +31,17 @@ test('la synthèse et les modules complémentaires occupent deux colonnes indép
   assert.match(styles, /\.home-view\s*>\s*\.desktop-overview-grid\s*\{[^}]*grid-column:\s*1\s*\/\s*13;[^}]*grid-template-columns:\s*minmax\(320px,\s*4fr\)\s*minmax\(0,\s*8fr\);/s);
   assert.match(styles, /\.home-view\s+\.desktop-insights-column\s*>\s*\.desktop-dashboard\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto;/s);
 });
+
+test('le formulaire Ajouter peut être vidé sans quitter l’écran', () => {
+  assert.match(app, /const cancelOperationDraft = \(\) => \{/);
+  assert.match(app, /className="operation-form-actions"/);
+  assert.match(app, /type="button" onClick=\{cancelOperationDraft\}[\s\S]*?Annuler/);
+  assert.match(styles, /\.operation-form-actions\s*\{[^}]*display:\s*grid;/s);
+});
+
+test('l’Historique du mois inclut les écritures futures déjà enregistrées', () => {
+  assert.match(app, /return monthOperations\.filter\(\(operation\) => \{/);
+  assert.match(app, /planned=\{operation\.date > today\}/);
+  assert.match(app, /Prévue · déjà enregistrée/);
+  assert.doesNotMatch(app, /return effectiveMonthOperations\.filter\(\(operation\) => \{/);
+});
