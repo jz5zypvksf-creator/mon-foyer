@@ -48,6 +48,8 @@ import SavingsInterface, { REQUIRED_SAVINGS_GOALS, savingsBucketForDisplay } fro
 import LeisureVacations from './LeisureVacations.jsx';
 import DuplicateAudit from './DuplicateAudit.jsx';
 import OperationHistory from './features/operations/OperationHistory.jsx';
+import OperationForm from './features/operations/OperationForm.jsx';
+import useOperationDraft from './features/operations/useOperationDraft.js';
 import './NavSix.css';
 import {
   enqueueOperationMutation,
@@ -586,10 +588,9 @@ export default function App() {
   const [monthEndAudit, setMonthEndAudit] = useState(null);
   const [monthEndAuditRunning, setMonthEndAuditRunning] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
-  const [draft, setDraft] = useState(makeEmptyOperation);
+  const { draft, setDraft, editingId, setEditingId, resetDraft } = useOperationDraft({ createEmptyDraft: makeEmptyOperation });
   const [recurringDraft, setRecurringDraft] = useState(makeEmptyRecurringFixedExpense);
   const [recurringEditingId, setRecurringEditingId] = useState(null);
-  const [editingId, setEditingId] = useState(null);
   const [newStore, setNewStore] = useState('');
   const [newCategory, setNewCategory] = useState('');
   const [newCategoryType, setNewCategoryType] = useState('variable');
@@ -2977,16 +2978,7 @@ export default function App() {
         )}
 
         {activeView === 'add' && (
-          <section className="view">
-            <form className="panel form-panel" onSubmit={handleSubmit}>
-              <div className="section-title">
-                <h2>{editingId ? 'Modifier' : 'Ajouter'} une operation</h2>
-                {editingId && (
-                  <button type="button" className="text-button" onClick={cancelOperationDraft}>
-                    Annuler
-                  </button>
-                )}
-              </div>
+          <OperationForm editingId={editingId} onSubmit={handleSubmit} onCancel={cancelOperationDraft} isValid={operationDraftIsValid} status={operationStatus}>
 
               <label>
                 Type
@@ -3271,23 +3263,7 @@ export default function App() {
                 </section>
               )}
 
-              <div className="operation-form-actions">
-                <button className="secondary-button" type="button" onClick={cancelOperationDraft}>
-                  Annuler
-                </button>
-                <button className="primary-button" type="submit" disabled={!operationDraftIsValid}>
-                  <Plus size={20} />
-                  Enregistrer
-                </button>
-              </div>
-              {!operationDraftIsValid && (
-                <p className="hint status-error" role="alert">Renseigne un libellé et un montant supérieur à zéro.</p>
-              )}
-              {operationStatus && operationStatus !== 'Renseigne un libellé et un montant supérieur à zéro.' && (
-                <p className="hint status-error" role="status">{operationStatus}</p>
-              )}
-            </form>
-          </section>
+          </OperationForm>
         )}
 
         {activeView === 'history' && (
