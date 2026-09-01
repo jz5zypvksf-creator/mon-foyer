@@ -18,12 +18,12 @@ jobs:
           cache: npm
       - name: Wire OperationForm
         run: node scripts/apply-extract-form.mjs
-      - name: Commit wiring
+      - name: Commit permanent extraction
         run: |
           git config user.name "ChatGPT Codex Connector"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/App.jsx
-          git commit -m "arch: wire OperationForm and draft hook"
+          git add src/App.jsx src/features/operations/OperationForm.jsx src/features/operations/useOperationDraft.js
+          git commit -m "arch: extract operation form and hook to dedicated features"
           git push origin architecture/extract-form
       - run: npm ci
       - name: Test
