@@ -9,15 +9,8 @@ import {
   LineChart,
   ReceiptText,
 } from 'lucide-react';
+import { formatMoney } from './domain/money/money.js';
 import './DesktopDashboard.css';
-
-const money = (value) => new Intl.NumberFormat('fr-BE', {
-  style: 'currency', currency: 'EUR', maximumFractionDigits: 2,
-}).format(Number(value) || 0);
-
-const shortMoney = (value) => new Intl.NumberFormat('fr-BE', {
-  style: 'currency', currency: 'EUR', notation: 'compact', maximumFractionDigits: 1,
-}).format(Number(value) || 0);
 
 const monthLabel = (month) => new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric' })
   .format(new Date(`${month}-01T12:00:00`));
@@ -70,7 +63,7 @@ export default function DesktopDashboard({
         </div>
         <div className={forecastBalance >= 0 ? 'desktop-forecast positive' : 'desktop-forecast negative'}>
           <span>Prévision fin de mois</span>
-          <strong>{money(forecastBalance)}</strong>
+          <strong>{formatMoney(forecastBalance)}</strong>
         </div>
       </div>
 
@@ -100,7 +93,7 @@ export default function DesktopDashboard({
                     return (
                       <g key={`${tick}-${index}`}>
                         <line className="desktop-grid-line" x1={geometry.padding.left} x2={geometry.width - geometry.padding.right} y1={y} y2={y} />
-                        <text className="desktop-axis-label" x={geometry.padding.left - 10} y={y + 4} textAnchor="end">{shortMoney(tick)}</text>
+                        <text className="desktop-axis-label" x={geometry.padding.left - 10} y={y + 4} textAnchor="end">{formatMoney(tick)}</text>
                       </g>
                     );
                   })}
@@ -115,7 +108,7 @@ export default function DesktopDashboard({
                         key={`${row.date}-${index}`}
                         role="button"
                         tabIndex="0"
-                        aria-label={`${row.date}, disponible ${money(row.available)}, dépenses cumulées ${money(row.cumulativeExpenses)}`}
+                        aria-label={`${row.date}, disponible ${formatMoney(row.available)}, dépenses cumulées ${formatMoney(row.cumulativeExpenses)}`}
                         onClick={() => selectPoint(row)}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' || event.key === ' ') selectPoint(row);
@@ -135,9 +128,9 @@ export default function DesktopDashboard({
               <div className="desktop-point-detail" aria-live="polite">
                 {selectedPoint ? (
                   <>
-                    <div><span>{selectedPoint.projected ? 'Prévision au' : 'Situation au'} {selectedPoint.date.split('-').reverse().join('/')}</span><strong>{money(selectedPoint.available)}</strong></div>
-                    <div><span>Dépenses du jour</span><strong>{money(selectedPoint.expenses)}</strong></div>
-                    <div><span>Dépenses cumulées</span><strong>{money(selectedPoint.cumulativeExpenses)}</strong></div>
+                    <div><span>{selectedPoint.projected ? 'Prévision au' : 'Situation au'} {selectedPoint.date.split('-').reverse().join('/')}</span><strong>{formatMoney(selectedPoint.available)}</strong></div>
+                    <div><span>Dépenses du jour</span><strong>{formatMoney(selectedPoint.expenses)}</strong></div>
+                    <div><span>Dépenses cumulées</span><strong>{formatMoney(selectedPoint.cumulativeExpenses)}</strong></div>
                   </>
                 ) : (
                   <span>Sélectionnez un point de la courbe pour afficher son détail.</span>
@@ -164,7 +157,7 @@ export default function DesktopDashboard({
           <div className="desktop-scheduled-summary">
             <ReceiptText size={19} />
             <span>Dépenses encore programmées</span>
-            <strong>{money(scheduledTotal)}</strong>
+            <strong>{formatMoney(scheduledTotal)}</strong>
           </div>
         </aside>
 
@@ -178,7 +171,7 @@ export default function DesktopDashboard({
               <button type="button" className="desktop-category-row" key={category.id} onClick={() => onCategorySelect?.(category.id)}>
                 <span>{category.label}</span>
                 <span className="desktop-category-track"><i style={{ width: `${Math.max((category.total / maxCategory) * 100, 3)}%` }} /></span>
-                <strong>{money(category.total)}</strong>
+                <strong>{formatMoney(category.total)}</strong>
                 <ChevronRight size={16} />
               </button>
             ))}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, Hotel, MapPin, Pencil, Plane, ReceiptText, Save, Utensils, X } from 'lucide-react';
 import BeobankStatementImport from './BeobankStatementImport.jsx';
-import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
+import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
+import { formatMoney, parseMoney } from './domain/money/money.js';
 import { isRetryableSyncError } from './lib/syncOutbox.js';
 import { leisureSyncFailureMessage } from './lib/leisureSyncStatus.js';
 import {
@@ -24,10 +25,6 @@ const CATEGORIES = [
 ];
 
 const MONTH_NAMES = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
-
-function money(value) {
-  return new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
-}
 
 function today() {
   const now = new Date();
@@ -326,7 +323,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
 
   const submitExpense = async (event) => {
     event.preventDefault();
-    const amount = Number(String(draft.amount).replace(',', '.'));
+    const amount = parseMoney(draft.amount);
     if (!amount || amount <= 0 || !draft.vendor.trim() || !draft.place.trim() || !draft.date) {
       setStatus('Indique la date, le montant, le vendeur et le lieu.');
       return;
@@ -336,7 +333,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     const previousAmount = Number(existing?.amount || 0);
     const availableForEdit = balance + previousAmount;
     if (amount > availableForEdit) {
-      setStatus(`Cette dépense dépasse le solde disponible après correction (${money(availableForEdit)}).`);
+      setStatus(`Cette dépense dépasse le solde disponible après correction (${formatMoney(availableForEdit)}).`);
       return;
     }
 
@@ -363,7 +360,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     }
 
     if (amount > balance) {
-      setStatus(`Cette dépense dépasse le solde disponible (${money(balance)}).`);
+      setStatus(`Cette dépense dépasse le solde disponible (${formatMoney(balance)}).`);
       return;
     }
 
@@ -388,7 +385,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   };
 
   const applyManualBalance = async () => {
-    const value = Number(String(manualBalance).replace(',', '.'));
+    const value = parseMoney(manualBalance);
     if (!Number.isFinite(value) || value < 0) {
       setStatus('Indique un solde Beobank valide.');
       return;
@@ -435,7 +432,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       <section className="leisure-hero">
         <div>
           <span>Solde disponible Beobank</span>
-          <strong>{money(balance)}</strong>
+          <strong>{formatMoney(balance)}</strong>
           <small>Synchronisé avec Épargne · Vacances/Loisirs</small>
         </div>
         <Plane size={42} />
@@ -452,7 +449,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         </section>
 
         <section className="panel leisure-summary-card">
-          <div><span>Dépenses du mois</span><strong>{money(monthlySpent)}</strong><small>{selectedMonth}</small></div>
+          <div><span>Dépenses du mois</span><strong>{formatMoney(monthlySpent)}</strong><small>{selectedMonth}</small></div>
           <div><span>Nombre de dépenses</span><strong>{selectedMonthEntries.length}</strong><small>ce mois</small></div>
         </section>
       </div>
@@ -486,21 +483,21 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         {historyMode === 'month' ? (
           <div className="leisure-period-summary">
             <label>Mois<input type="month" value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setSelectedYear(e.target.value.slice(0, 4)); }} /></label>
-            <div><span>Total du mois</span><strong>{money(monthlySpent)}</strong></div>
+            <div><span>Total du mois</span><strong>{formatMoney(monthlySpent)}</strong></div>
             <div><span>Dépenses</span><strong>{selectedMonthEntries.length}</strong></div>
           </div>
         ) : (
           <>
             <div className="leisure-period-summary leisure-year-summary">
               <label>Année<input type="number" min="2000" max="2100" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value.slice(0, 4))} /></label>
-              <div><span>Total annuel</span><strong>{money(annualSpent)}</strong></div>
+              <div><span>Total annuel</span><strong>{formatMoney(annualSpent)}</strong></div>
               <div><span>Dépenses</span><strong>{selectedYearEntries.length}</strong></div>
             </div>
             <div className="leisure-month-grid">
               {annualMonths.map((month) => (
                 <button type="button" key={month.key} className={month.total > 0 ? 'has-spend' : ''} onClick={() => { setSelectedMonth(month.key); setHistoryMode('month'); }}>
                   <span>{month.label}</span>
-                  <strong>{money(month.total)}</strong>
+                  <strong>{formatMoney(month.total)}</strong>
                   <small>{month.count} dépense{month.count === 1 ? '' : 's'}</small>
                 </button>
               ))}
@@ -521,7 +518,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
                 <span>{category.label}{row.note ? ` · ${row.note}` : ''}</span>
               </div>
               <div className="leisure-history-amount">
-                <strong>-{money(row.amount)}</strong>
+                <strong>-{formatMoney(row.amount)}</strong>
                 <div className="leisure-row-actions">
                   <button type="button" className="edit" onClick={() => startEdit(row)}><Pencil size={15} /> Modifier</button>
                   <button type="button" className="delete" onClick={() => removeEntry(row)}>Supprimer</button>

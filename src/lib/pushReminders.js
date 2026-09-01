@@ -1,4 +1,4 @@
-import { householdId, isSupabaseConfigured, supabase } from './supabase';
+import { householdId, isSupabaseConfigured, supabase } from '../infrastructure/supabase/supabaseClient.js';
 
 export const VAPID_PUBLIC_KEY = 'BIpAhkVcn54rJHbk3zyUqNYGLgzaHy84d_vX36-6V6CkEtDtGgrmuR2GQ3jB0OF2kp4Xdr0TXiQtkKksghVP8aQ';
 

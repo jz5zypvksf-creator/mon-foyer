@@ -5,7 +5,7 @@ import App from './App.jsx';
 
 const { supabaseFrom } = vi.hoisted(() => ({ supabaseFrom: vi.fn() }));
 
-vi.mock('./lib/supabase', () => ({
+vi.mock('./infrastructure/supabase/supabaseClient.js', () => ({
   householdId: '',
   isSupabaseConfigured: false,
   supabase: { from: supabaseFrom },

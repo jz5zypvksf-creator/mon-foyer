@@ -36,7 +36,8 @@ import {
   Zap,
   WalletCards,
 } from 'lucide-react';
-import { householdId, isSupabaseConfigured, supabase } from './lib/supabase';
+import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
+import { formatMoney, parseMoney } from './domain/money/money.js';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import { budgetIncomeTotalForMonth, forecastBalances, careBalances } from './budgetMonthRules.js';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
@@ -305,11 +306,6 @@ function formatSupabaseRecurringError(error) {
   return `Frais fixe non envoyé: ${error.message}`;
 }
 
-function parseDecimal(value) {
-  if (typeof value === 'number') return value;
-  return Number(String(value).replace(',', '.').trim());
-}
-
 /**
  * Convertit une ligne Supabase ou locale vers le modèle unique utilisé par l’interface.
  * Cette frontière protège le reste de l’application des noms snake_case de la base.
@@ -355,10 +351,6 @@ function formatSupabaseOperationError(error) {
     return "Opération non envoyée: la colonne Supabase 'payment_method' n'existe pas encore. Lance le script supabase-payment-method.sql dans Supabase.";
   }
   return `Supabase refuse l'opération: ${error.message}`;
-}
-
-function formatCurrency(value) {
-  return new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(value || 0);
 }
 
 function currentMonth() {
@@ -1411,7 +1403,7 @@ export default function App() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const amount = parseDecimal(draft.amount);
+    const amount = parseMoney(draft.amount);
     if (!draft.label.trim() || !amount) {
       setOperationStatus('Renseigne un libellé et un montant supérieur à zéro.');
       return;
@@ -1420,7 +1412,7 @@ export default function App() {
     setOperationStatus('');
     const savingsSourceGoal = draft.type === 'income' && draft.savingsSource ? data.savingsGoals.find((goal) => goal.id === draft.savingsSource) : null;
     const savingsTargetGoal = draft.type === 'savings_transfer' && draft.savingsGoalId ? data.savingsGoals.find((goal) => goal.id === draft.savingsGoalId) : null;
-    if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatCurrency(savingsSourceGoal.saved) + '.'); return; }
+    if (savingsSourceGoal && amount > Number(savingsSourceGoal.saved || 0)) { setOperationStatus('Épargne insuffisante : solde disponible ' + formatMoney(savingsSourceGoal.saved) + '.'); return; }
     if (draft.type === 'savings_transfer' && !savingsTargetGoal) { setOperationStatus('Choisis le poste d’épargne à créditer.'); return; }
     if (operationRequiresStore(draft.type) && !draft.store) {
       setOperationStatus('Choisis un bénéficiaire ou un point de vente.');
@@ -1445,7 +1437,7 @@ export default function App() {
         setOperationStatus(
           'Attention : cette dépense récurrente existe déjà — '
           + identicalRecurring.label + ', '
-          + formatCurrency(identicalRecurring.amount) + ', jour '
+          + formatMoney(identicalRecurring.amount) + ', jour '
           + identicalRecurring.day + ', '
           + (category?.label || 'Frais fixe') + ', '
           + identicalRecurring.person + '.',
@@ -1506,7 +1498,7 @@ export default function App() {
     if (operation.type !== 'income' && operation.type !== 'reimbursement' && !canPaymentMethodGoNegative(operation.paymentMethod)) {
       const availableBalance = getAvailablePaymentBalance(operation.paymentMethod, operation.date);
       if (amount > availableBalance) {
-        setOperationStatus(`${operation.paymentMethod}: solde disponible ${formatCurrency(availableBalance)}. Paiement impossible.`);
+        setOperationStatus(`${operation.paymentMethod}: solde disponible ${formatMoney(availableBalance)}. Paiement impossible.`);
         return;
       }
     }
@@ -1518,7 +1510,7 @@ export default function App() {
       const proceed = window.confirm(
         `Attention : doublon ${duplicateKind} détecté.\n\n`
         + `${existing.date} · ${existing.store || existing.label}\n`
-        + `${formatCurrency(existing.amount)} · ${existing.person || 'Foyer'} · ${existing.paymentMethod || 'Compte Belfius'}\n\n`
+        + `${formatMoney(existing.amount)} · ${existing.person || 'Foyer'} · ${existing.paymentMethod || 'Compte Belfius'}\n\n`
         + 'Annuler : revenir à la saisie.\n'
         + 'OK : enregistrer quand même cette nouvelle opération.',
       );
@@ -1670,7 +1662,7 @@ export default function App() {
     setOperationStatus('Saisie effacée. Aucune opération n’a été enregistrée.');
   };
 
-  const operationDraftIsValid = Boolean(draft.label.trim() && parseDecimal(draft.amount) > 0);
+  const operationDraftIsValid = Boolean(draft.label.trim() && parseMoney(draft.amount) > 0);
 
 
   const addBankOperationFromAudit = (bankRow) => {
@@ -1866,7 +1858,7 @@ export default function App() {
   };
 
   const updateGoal = async (id, field, value) => {
-    const numericValue = parseDecimal(value);
+    const numericValue = parseMoney(value);
     setData((current) => {
       const nextData = {
         ...current,
@@ -1917,7 +1909,7 @@ export default function App() {
 
   const addRecurringFixedExpense = async (event) => {
     event.preventDefault();
-    const amount = parseDecimal(recurringDraft.amount);
+    const amount = parseMoney(recurringDraft.amount);
     const label = recurringDraft.label.trim();
 
     if (!label || !amount) {
@@ -1954,7 +1946,7 @@ export default function App() {
       const category = data.categories.find((item) => item.id === identicalRecurring.category);
       setRecurringStatus(
         'Attention : cette récurrence existe déjà — ' + identicalRecurring.label + ', '
-        + formatCurrency(identicalRecurring.amount) + ', jour ' + identicalRecurring.day + ', '
+        + formatMoney(identicalRecurring.amount) + ', jour ' + identicalRecurring.day + ', '
         + (category?.label || 'Frais fixe') + ', ' + identicalRecurring.person + '.',
       );
       return;
@@ -2081,7 +2073,7 @@ export default function App() {
           ? mastercardSettlementDate(dateInMonth(selectedMonth, expense.day))
           : '',
         label: expense.label,
-        amount: parseDecimal(expense.amount),
+        amount: parseMoney(expense.amount),
         accountingNature: expense.accountingNature || expense.accounting_nature || accountingNature({ type: 'fixed', ...expense }),
       }))
       .filter((operation) => !existing.has(fixedExpenseSignature(operation)));
@@ -2411,7 +2403,7 @@ export default function App() {
 
     const recurringSignature = (expense) => [
       expense.label.trim().toLowerCase(),
-      parseDecimal(expense.amount).toFixed(2),
+      parseMoney(expense.amount).toFixed(2),
       Number(expense.day),
       expense.person,
       expense.category,
@@ -2434,7 +2426,7 @@ export default function App() {
       .map((expense) => ({
         household_id: householdId,
         label: expense.label,
-        amount: parseDecimal(expense.amount),
+        amount: parseMoney(expense.amount),
         day: Math.min(Math.max(Number(expense.day) || 1, 1), 31),
         person: expense.person,
         category: expense.category,
@@ -2677,7 +2669,7 @@ export default function App() {
                 <div className="hero-panel">
               <div>
                 <span>Disponible total actuel</span>
-                <strong>{formatCurrency(availableForPayments)}</strong>
+                <strong>{formatMoney(availableForPayments)}</strong>
                 <div className="hero-balance-grid">
                   {PAYMENT_METHODS.filter((method) => method !== MASTERCARD_PAYMENT_METHOD).map((method) => (
                     <div key={method}>
@@ -2688,7 +2680,7 @@ export default function App() {
                           : Number(paymentBalances[method] || 0);
                         return (
                           <em className={displayedBalance >= 0 ? 'positive' : 'negative'}>
-                            {formatCurrency(displayedBalance)}
+                            {formatMoney(displayedBalance)}
                           </em>
                         );
                       })()}
@@ -2699,7 +2691,7 @@ export default function App() {
                       <div>
                         <span>{liveBelfiusSnapshot.balanceSource === 'Application Belfius' ? 'Mouvements depuis le solde certifié' : 'Mouvements depuis le relevé'}</span>
                         <em className={Number(liveBelfiusSnapshot.pendingAmount || 0) >= 0 ? 'positive' : 'negative'}>
-                          {formatCurrency(Number(liveBelfiusSnapshot.pendingAmount || 0))}
+                          {formatMoney(Number(liveBelfiusSnapshot.pendingAmount || 0))}
                         </em>
                       </div>
                     </>
@@ -2709,12 +2701,12 @@ export default function App() {
                   <details className={`belfius-real-balance ${belfiusSnapshot.clean ? 'is-clean' : 'has-gap'}`}>
                     <summary>
                       <span>Dernier solde du relevé CSV</span>
-                      <strong>{formatCurrency(belfiusSnapshot.balance)}</strong>
+                      <strong>{formatMoney(belfiusSnapshot.balance)}</strong>
                     </summary>
                     <div className="belfius-real-balance-details">
                       <span>Date du relevé : {belfiusSnapshot.balanceDate || 'dernier CSV importé'}</span>
-                      <span>Solde Mon Foyer : {formatCurrency(paymentBalances['Compte Belfius'] || 0)}</span>
-                      <span>Écart : {formatCurrency((paymentBalances['Compte Belfius'] || 0) - Number(belfiusSnapshot.balance || 0))}</span>
+                      <span>Solde Mon Foyer : {formatMoney(paymentBalances['Compte Belfius'] || 0)}</span>
+                      <span>Écart : {formatMoney((paymentBalances['Compte Belfius'] || 0) - Number(belfiusSnapshot.balance || 0))}</span>
                       <span>{belfiusSnapshot.remaining || 0} opération(s) à traiter</span>
                       <strong>{belfiusSnapshot.clean ? 'Conforme à Belfius' : 'Rapprochement en cours'}</strong>
                     </div>
@@ -2724,7 +2716,7 @@ export default function App() {
                   <div>
                     <span>Encours Mastercard {MASTERCARD_MASKED_NUMBER}</span>
                     <strong className={mastercardOutstanding > 0 ? 'negative' : 'positive'}>
-                      {formatCurrency(-mastercardOutstanding)}
+                      {formatMoney(-mastercardOutstanding)}
                     </strong>
                   </div>
                   <span>
@@ -2741,13 +2733,13 @@ export default function App() {
                 <section className="panel food-budget-panel">
               <div className="section-title">
                 <h2><ShoppingBasket size={20} /> Budget nourriture</h2>
-                <span>{formatCurrency(totals.food)} / {formatCurrency(foodBudget)}</span>
+                <span>{formatMoney(totals.food)} / {formatMoney(foodBudget)}</span>
               </div>
               <div className="progress-track">
                 <div className={`progress-fill food-progress-${foodBudgetStatus.key}`} style={{ width: `${foodRatio}%` }} />
               </div>
               <p className={`hint food-budget-text-${foodBudgetStatus.key}`}>
-                {foodOverBudget ? `${formatCurrency(totals.food - foodBudget)} au-dessus de l'idéal` : `${formatCurrency(foodBudget - totals.food)} disponibles`}
+                {foodOverBudget ? `${formatMoney(totals.food - foodBudget)} au-dessus de l'idéal` : `${formatMoney(foodBudget - totals.food)} disponibles`}
               </p>
                 </section>
 
@@ -2763,12 +2755,12 @@ export default function App() {
                 />
 
                 <div className="stats-grid">
-                  <StatCard icon={Landmark} label="Report du mois précédent" value={formatCurrency(previousMonthReport)} />
-                  <StatCard icon={Banknote} label="Revenus budgétaires" value={formatCurrency(totals.income)} />
-                  <StatCard icon={TrendingUp} label="Revenus prévus du mois" value={formatCurrency(fullMonthTotals.income)} />
-                  <StatCard icon={WalletCards} label="Dépenses exécutées" value={formatCurrency(totals.fixed + totals.variable)} />
-                  <StatCard icon={Landmark} label="Frais fixes exécutés" value={formatCurrency(totals.fixed)} />
-                  <StatCard icon={WalletCards} label="Variables exécutées" value={formatCurrency(totals.variable)} />
+                  <StatCard icon={Landmark} label="Report du mois précédent" value={formatMoney(previousMonthReport)} />
+                  <StatCard icon={Banknote} label="Revenus budgétaires" value={formatMoney(totals.income)} />
+                  <StatCard icon={TrendingUp} label="Revenus prévus du mois" value={formatMoney(fullMonthTotals.income)} />
+                  <StatCard icon={WalletCards} label="Dépenses exécutées" value={formatMoney(totals.fixed + totals.variable)} />
+                  <StatCard icon={Landmark} label="Frais fixes exécutés" value={formatMoney(totals.fixed)} />
+                  <StatCard icon={WalletCards} label="Variables exécutées" value={formatMoney(totals.variable)} />
                 </div>
               </div>
 
@@ -2795,11 +2787,11 @@ export default function App() {
 
             {belfiusSnapshot && (
               <section className="panel balance-control-panel">
-                <div className="section-title"><h2>Contrôle de la balance Belfius</h2><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>
+                <div className="section-title"><h2>Contrôle de la balance Belfius</h2><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatMoney(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>
                 <div className="history-summary">
-                  <div><span>Solde Mon Foyer cumulé</span><strong>{formatCurrency(paymentBalances['Compte Belfius'] || 0)}</strong></div>
-                  <div><span>Solde Belfius réel</span><strong>{formatCurrency(belfiusSnapshot.balance || 0)}</strong></div>
-                  <div><span>Écart comptable</span><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatCurrency(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>
+                  <div><span>Solde Mon Foyer cumulé</span><strong>{formatMoney(paymentBalances['Compte Belfius'] || 0)}</strong></div>
+                  <div><span>Solde Belfius réel</span><strong>{formatMoney(belfiusSnapshot.balance || 0)}</strong></div>
+                  <div><span>Écart comptable</span><strong className={Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'income' : 'expense'}>{formatMoney(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0))}</strong></div>
                 </div>
                 <p className="hint">Ce contrôle bancaire est distinct du solde budgétaire mensuel. {Math.abs(Number(belfiusSnapshot.balance || 0) - Number(paymentBalances['Compte Belfius'] || 0)) < 0.01 ? 'Balance conforme au dernier relevé Belfius.' : 'Écart à auditer : il peut provenir d’un solde d’ouverture absent, d’une écriture manquante ou d’un doublon. Aucun ajustement automatique n’est effectué.'}</p>
               </section>
@@ -2808,7 +2800,7 @@ export default function App() {
             <section className="panel scheduled-panel">
               <div className="section-title">
                 <h2>Dépenses programmées</h2>
-                <strong>Total : {formatCurrency(scheduledExpenseTotal)}</strong>
+                <strong>Total : {formatMoney(scheduledExpenseTotal)}</strong>
               </div>
               <p className="scheduled-caption">Montants restant à prévoir jusqu’à la fin du mois</p>
 
@@ -2816,43 +2808,43 @@ export default function App() {
                 <div className="forecast-icon"><ShoppingBasket size={22} /></div>
                 <div className="forecast-copy">
                   <strong>Budget nourriture restant à prévoir</strong>
-                  <span>Budget mensuel : {formatCurrency(foodBudget)}</span>
-                  <span>Déjà utilisé ou programmé : {formatCurrency(Math.min(totals.food + scheduledFoodTotal, foodBudget))}</span>
+                  <span>Budget mensuel : {formatMoney(foodBudget)}</span>
+                  <span>Déjà utilisé ou programmé : {formatMoney(Math.min(totals.food + scheduledFoodTotal, foodBudget))}</span>
                 </div>
-                <strong className="forecast-amount">{formatCurrency(remainingFoodBudget)}</strong>
+                <strong className="forecast-amount">{formatMoney(remainingFoodBudget)}</strong>
               </div>
 
               <div className="forecast-card total-forecast-card">
                 <div className="forecast-icon"><ListChecks size={22} /></div>
                 <div className="forecast-copy">
                   <strong>Total restant à couvrir</strong>
-                  <span>Dépenses programmées : {formatCurrency(scheduledExpenseTotal)}</span>
-                  <span>Budget nourriture restant : {formatCurrency(remainingFoodBudget)} · indicatif, non déduit</span>
+                  <span>Dépenses programmées : {formatMoney(scheduledExpenseTotal)}</span>
+                  <span>Budget nourriture restant : {formatMoney(remainingFoodBudget)} · indicatif, non déduit</span>
                 </div>
-                <strong className="forecast-amount">{formatCurrency(totalRemainingToCover)}</strong>
+                <strong className="forecast-amount">{formatMoney(totalRemainingToCover)}</strong>
               </div>
 
               <div className={`forecast-card balance-forecast-card status-${forecastStatus.key}`}>
                 <div className="forecast-icon"><WalletCards size={22} /></div>
                 <div className="forecast-copy">
                   <strong>Solde prévisionnel fin de mois</strong>
-                  <span>Selon Mon Foyer : <b>{formatCurrency(forecastPair.appForecast)}</b></span>
-                  {belfiusSnapshot && (<span>Selon Belfius — relevé {belfiusSnapshot.balanceDate || 'importé'} : <b>{formatCurrency(forecastPair.belfiusForecast)}</b></span>)}
+                  <span>Selon Mon Foyer : <b>{formatMoney(forecastPair.appForecast)}</b></span>
+                  {belfiusSnapshot && (<span>Selon Belfius — relevé {belfiusSnapshot.balanceDate || 'importé'} : <b>{formatMoney(forecastPair.belfiusForecast)}</b></span>)}
                   <span className="forecast-status-label">{forecastStatus.label}</span>
                 </div>
                 <strong className={`forecast-amount status-text-${forecastStatus.key}`}>
-                  {formatCurrency(availableAfterPlannedExpenses)}
+                  {formatMoney(availableAfterPlannedExpenses)}
                 </strong>
               </div>
 
               <details className="forecast-details">
                 <summary>Détail du calcul</summary>
-                <div><span>Disponible total actuel</span><strong>{formatCurrency(availableForPayments)}</strong></div>
-                <div><span>− Dépenses programmées</span><strong>− {formatCurrency(scheduledExpenseTotal)}</strong></div>
-                <div><span>Budget nourriture restant (indicatif)</span><strong>{formatCurrency(remainingFoodBudget)}</strong></div>
+                <div><span>Disponible total actuel</span><strong>{formatMoney(availableForPayments)}</strong></div>
+                <div><span>− Dépenses programmées</span><strong>− {formatMoney(scheduledExpenseTotal)}</strong></div>
+                <div><span>Budget nourriture restant (indicatif)</span><strong>{formatMoney(remainingFoodBudget)}</strong></div>
                 <div className="forecast-details-total">
                   <span>= Solde prévisionnel fin de mois</span>
-                  <strong className={availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}>{formatCurrency(availableAfterPlannedExpenses)}</strong>
+                  <strong className={availableAfterPlannedExpenses >= 0 ? 'positive' : 'negative'}>{formatMoney(availableAfterPlannedExpenses)}</strong>
                 </div>
               </details>
 
@@ -2888,7 +2880,7 @@ export default function App() {
                           {operation.date} · {category?.label || 'Frais fixe'} · {operation.paymentMethod || 'Compte Belfius'} · Prévue
                         </span>
                       </div>
-                      <strong className="scheduled-row-amount">{formatCurrency(operation.amount)}</strong>
+                      <strong className="scheduled-row-amount">{formatMoney(operation.amount)}</strong>
                       {operation.projectedRecurring && operation.recurringExpenseId && (
                         <button
                           type="button"
@@ -2906,9 +2898,9 @@ export default function App() {
             </section>
 
             <section className="panel care-summary-panel">
-              <div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatCurrency(careTotalToRecover)}</strong></div><p className="scheduled-caption">{reimbursablePeople.join(' & ')}</p>
+              <div className="section-title"><h2>Dépenses à récupérer</h2><strong>Total : {formatMoney(careTotalToRecover)}</strong></div><p className="scheduled-caption">{reimbursablePeople.join(' & ')}</p>
               <p className="hint">Un remboursement en espèces est comptabilisé ici sans créer de mouvement Belfius.</p>
-              {careSummary.map((item) => (<div key={item.person} className="forecast-card care-recovery-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Dépenses : {formatCurrency(item.expenses)}</span><span>Remboursé : {formatCurrency(item.reimbursed)}</span></div><div className="care-recovery-actions"><strong className={item.balance > 0 ? 'expense' : 'income'}>{formatCurrency(item.balance)}</strong><button type="button" className="secondary-button care-recovery-button" onClick={() => { setHistoryPerson(item.person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); }}>Voir le détail</button><button type="button" className="secondary-button care-recovery-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}
+              {careSummary.map((item) => (<div key={item.person} className="forecast-card care-recovery-card"><div className="forecast-copy"><strong>{item.person}</strong><span>Dépenses : {formatMoney(item.expenses)}</span><span>Remboursé : {formatMoney(item.reimbursed)}</span></div><div className="care-recovery-actions"><strong className={item.balance > 0 ? 'expense' : 'income'}>{formatMoney(item.balance)}</strong><button type="button" className="secondary-button care-recovery-button" onClick={() => { setHistoryPerson(item.person); setHistoryType('all'); setHistoryCategory('all'); setHistoryPaymentMethod('all'); setHistorySearch(''); setShowReviewOnly(false); setActiveView('history'); }}>Voir le détail</button><button type="button" className="secondary-button care-recovery-button" onClick={() => startCareReimbursement(item.person)}>Remboursement</button></div></div>))}
             </section>
 
             <ExpenseChart categories={categoryTotals} />
@@ -3052,7 +3044,7 @@ export default function App() {
 
                     return (
                       <option key={method} value={method} disabled={disabled}>
-                        {method}{draft.type !== 'income' && !canPaymentMethodGoNegative(method) ? ` (${formatCurrency(availableBalance)} dispo)` : ''}
+                        {method}{draft.type !== 'income' && !canPaymentMethodGoNegative(method) ? ` (${formatMoney(availableBalance)} dispo)` : ''}
                       </option>
                     );
                   })}
@@ -3079,7 +3071,7 @@ export default function App() {
                     {draft.savingsSource ? 'Compte épargne source' : 'Source du revenu'}
                     <select value={draft.savingsSource || ''} onChange={(event) => setDraft({ ...draft, savingsSource: event.target.value })}>
                       {!draft.savingsSource && <option value="">Revenu du foyer</option>}
-                      {transferSavingsGoals(data.savingsGoals).map((goal) => (<option key={goal.id} value={goal.id}>{goal.transferLabel} · {formatCurrency(goal.saved || 0)}</option>))}
+                      {transferSavingsGoals(data.savingsGoals).map((goal) => (<option key={goal.id} value={goal.id}>{goal.transferLabel} · {formatMoney(goal.saved || 0)}</option>))}
                     </select>
                     {draft.savingsSource && <span className="hint">Transfert interne : augmente le compte courant et diminue cette épargne. Il n'est pas compté comme revenu budgétaire.</span>}
                   </label>
@@ -3103,7 +3095,7 @@ export default function App() {
                   Poste d’épargne à créditer
                   <select value={draft.savingsGoalId || ''} onChange={(event) => setDraft({ ...draft, savingsGoalId: event.target.value })}>
                     <option value="">Choisir un poste d’épargne</option>
-                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>{goal.label} · {formatCurrency(goal.saved || 0)}</option>))}
+                    {data.savingsGoals.map((goal) => (<option key={goal.id} value={goal.id}>{goal.label} · {formatMoney(goal.saved || 0)}</option>))}
                   </select>
                   <span className="hint">Transfert interne : diminue Belfius et augmente ce poste d’épargne. Il n’est pas compté comme une dépense du foyer.</span>
                 </label>
@@ -3542,7 +3534,7 @@ export default function App() {
                     <article className="recurring-row" key={expense.id}>
                       <div>
                         <strong>{expense.label}</strong>
-                        <span>{formatCurrency(expense.amount)} · jour {expense.day} · {recurrenceLabel(expense.frequency)} · {expense.person} · {category?.label || 'Frais fixe'} · {expense.paymentMethod || expense.payment_method || 'Compte Belfius'}</span>
+                        <span>{formatMoney(expense.amount)} · jour {expense.day} · {recurrenceLabel(expense.frequency)} · {expense.person} · {category?.label || 'Frais fixe'} · {expense.paymentMethod || expense.payment_method || 'Compte Belfius'}</span>
                       </div>
                       <div className="row-actions">
                         <button type="button" onClick={() => editRecurringFixedExpense(expense)} aria-label="Modifier" title="Modifier">
@@ -3628,7 +3620,7 @@ function CategoryRow({ category }) {
     <div className="category-row">
       <span className="icon-bubble"><Icon size={18} /></span>
       <span>{category.label}</span>
-      <strong>{formatCurrency(category.total)}</strong>
+      <strong>{formatMoney(category.total)}</strong>
     </div>
   );
 }
@@ -3646,7 +3638,7 @@ function ExpenseChart({ categories }) {
     <section className="panel expense-chart-panel">
       <div className="section-title">
         <h2>Répartition des dépenses</h2>
-        <span>{formatCurrency(total)}</span>
+        <span>{formatMoney(total)}</span>
       </div>
 
       {rows.length === 0 ? (
@@ -3676,7 +3668,7 @@ function ExpenseChart({ categories }) {
               })}
             </svg>
             <div className="donut-center">
-              <strong>{formatCurrency(total)}</strong>
+              <strong>{formatMoney(total)}</strong>
               <span>Dépenses</span>
             </div>
           </div>
@@ -3688,7 +3680,7 @@ function ExpenseChart({ categories }) {
                 <div className="legend-row" key={category.id}>
                   <span className="legend-dot" style={{ background: categoryColors[category.id] || categoryColors.divers }} />
                   <span>{category.label}</span>
-                  <strong>{formatCurrency(category.total)}</strong>
+                  <strong>{formatMoney(category.total)}</strong>
                   <em>{percentage}%</em>
                 </div>
               );
@@ -3706,44 +3698,44 @@ function AnnualReview({ review }) {
     .sort((left, right) => right.total - left.total)
     .slice(0, 4);
   const comparisonText = review.hasPreviousYear
-    ? `${review.difference >= 0 ? '+' : ''}${formatCurrency(review.difference)} vs ${review.previousYear}`
+    ? `${review.difference >= 0 ? '+' : ''}${formatMoney(review.difference)} vs ${review.previousYear}`
     : 'Comparaison disponible après une année complète';
 
   return (
     <section className="panel annual-panel">
       <div className="section-title">
         <h2>Bilan annuel {review.year}</h2>
-        <span>{formatCurrency(review.expenses)}</span>
+        <span>{formatMoney(review.expenses)}</span>
       </div>
 
       <div className="annual-summary">
         <div>
           <span>Revenus</span>
-          <strong>{formatCurrency(review.totals.income)}</strong>
+          <strong>{formatMoney(review.totals.income)}</strong>
         </div>
         <div>
           <span>Frais fixes</span>
-          <strong>{formatCurrency(review.totals.fixed)}</strong>
+          <strong>{formatMoney(review.totals.fixed)}</strong>
         </div>
         <div>
           <span>Variables</span>
-          <strong>{formatCurrency(review.totals.variable)}</strong>
+          <strong>{formatMoney(review.totals.variable)}</strong>
         </div>
         <div>
           <span>Solde</span>
-          <strong>{formatCurrency(review.totals.balance)}</strong>
+          <strong>{formatMoney(review.totals.balance)}</strong>
         </div>
       </div>
 
       <p className="hint">
-        Nourriture: {formatCurrency(review.totals.food)} / {formatCurrency(review.foodBudgetAnnual)} sur l'année. {comparisonText}.
+        Nourriture: {formatMoney(review.totals.food)} / {formatMoney(review.foodBudgetAnnual)} sur l'année. {comparisonText}.
       </p>
 
       {topCategories.length > 0 && (
         <div className="annual-categories">
           {topCategories.map((category) => (
             <span key={category.id}>
-              {category.label}: <strong>{formatCurrency(category.total)}</strong>
+              {category.label}: <strong>{formatMoney(category.total)}</strong>
             </span>
           ))}
         </div>
@@ -3753,8 +3745,8 @@ function AnnualReview({ review }) {
         {review.months.map((month) => (
           <div className="annual-month-row" key={month.monthKey}>
             <span>{month.label}</span>
-            <strong>{formatCurrency(month.expenses)}</strong>
-            <em>{formatCurrency(month.balance)}</em>
+            <strong>{formatMoney(month.expenses)}</strong>
+            <em>{formatMoney(month.balance)}</em>
           </div>
         ))}
       </div>

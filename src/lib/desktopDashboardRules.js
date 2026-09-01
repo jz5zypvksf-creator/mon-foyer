@@ -1,3 +1,5 @@
+import { formatMoney } from '../domain/money/money.js';
+
 const amount = (value) => {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
@@ -121,8 +123,8 @@ export function buildMonthClosingChecks({
       detail: reconciliation.purchases === 0
         ? 'Aucun règlement à rapprocher pour ce mois'
         : reconciliation.reconciled
-          ? `${reconciliation.purchases.toFixed(2).replace('.', ',')} € entièrement rapprochés`
-          : `Écart de ${Math.abs(reconciliation.difference).toFixed(2).replace('.', ',')} € à contrôler`,
+          ? `${formatMoney(reconciliation.purchases)} entièrement rapprochés`
+          : `Écart de ${formatMoney(Math.abs(reconciliation.difference))} à contrôler`,
       status: reconciliation.reconciled ? 'done' : 'warning',
     },
     {

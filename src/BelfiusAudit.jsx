@@ -8,10 +8,7 @@ import {
   mastercardStatementMatchEvidence,
 } from './lib/mastercardStatementRules.js';
 import { bankPersonAliasMatch, isBankCreditAppOperation } from './belfiusMatchingRules.js';
-
-const money = (value) => new Intl.NumberFormat('fr-BE', {
-  style: 'currency', currency: 'EUR',
-}).format(Number(value) || 0);
+import { formatMoney, parseMoney } from './domain/money/money.js';
 
 const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
@@ -77,11 +74,8 @@ const BELFIUS_ALIASES = [
 ];
 
 function parseAmount(value) {
-  return Number(String(value || '')
-    .replace(/\s/g, '')
-    .replace(/EUR/gi, '')
-    .replace(/\./g, '')
-    .replace(',', '.')) || 0;
+  const parsed = parseMoney(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function parseDate(value) {
@@ -869,10 +863,10 @@ export default function BelfiusAudit({
           </div>
 
           <div className="audit-summary-grid">
-            <div><span>Solde bancaire relevé</span><strong>{money(audit.balance)}</strong></div>
-            <div><span>Opérations enregistrées en attente</span><strong className={pendingAmount < 0 ? 'negative' : 'positive'}>{money(pendingAmount)}</strong></div>
-            <div><span>Solde bancaire attendu</span><strong>{money(expectedBankBalance)}</strong></div>
-            <div><span>Écart inexpliqué</span><strong className={Math.abs(unexplainedAmount) < 0.01 ? 'positive' : 'negative'}>{money(unexplainedAmount)}</strong></div>
+            <div><span>Solde bancaire relevé</span><strong>{formatMoney(audit.balance)}</strong></div>
+            <div><span>Opérations enregistrées en attente</span><strong className={pendingAmount < 0 ? 'negative' : 'positive'}>{formatMoney(pendingAmount)}</strong></div>
+            <div><span>Solde bancaire attendu</span><strong>{formatMoney(expectedBankBalance)}</strong></div>
+            <div><span>Écart inexpliqué</span><strong className={Math.abs(unexplainedAmount) < 0.01 ? 'positive' : 'negative'}>{formatMoney(unexplainedAmount)}</strong></div>
             <div><span>Opérations du mois</span><strong>{result.bankRows.length}</strong></div>
             <div className="audit-kpi safe"><span><i className="audit-dot" />Correspondances sûres</span><strong>{result.matched.length}</strong></div>
             <div className="audit-kpi review"><span><i className="audit-dot" />À confirmer</span><strong>{result.review.length}</strong></div>
@@ -888,7 +882,7 @@ export default function BelfiusAudit({
               <summary><span className="audit-dot" />Correspondances sûres ({result.matched.length})</summary>
               {result.matched.map(({ bank, app, confidence, reason }) => (
                 <article key={bank.id}>
-                  <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
+                  <strong>{bank.date} · {bank.label} · {formatMoney(bank.amount)}</strong>
                   <span>→ {app.label} · confiance {confidence}% · {reason}</span>
                 </article>
               ))}
@@ -900,7 +894,7 @@ export default function BelfiusAudit({
               <summary><span className="audit-dot" />Correspondances à confirmer ({result.review.length})</summary>
               {result.review.map(({ bank, candidates, reason }) => (
                 <article key={`review-${bank.id}`}>
-                  <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
+                  <strong>{bank.date} · {bank.label} · {formatMoney(bank.amount)}</strong>
                   <div className="audit-review-proposals">
                     <span>{reason}</span>
                     {candidates.map((candidate) => (
@@ -928,8 +922,8 @@ export default function BelfiusAudit({
               <summary><span className="audit-dot" />Regroupements reconnus ({result.groups.length})</summary>
               {result.groups.map(({ bank, app, confidence, reason }) => (
                 <article key={`${app.id}-${bank.map((row) => row.id).join('-')}`}>
-                  <strong>{bank[0]?.date} · {bank[0]?.label} · {bank.map((row) => money(row.amount)).join(' + ')}</strong>
-                  <span>→ {app.label} ({money(app.amount)}) · confiance {confidence}% · {reason}</span>
+                  <strong>{bank[0]?.date} · {bank[0]?.label} · {bank.map((row) => formatMoney(row.amount)).join(' + ')}</strong>
+                  <span>→ {app.label} ({formatMoney(app.amount)}) · confiance {confidence}% · {reason}</span>
                 </article>
               ))}
             </details>
@@ -940,8 +934,8 @@ export default function BelfiusAudit({
               <summary><span className="audit-dot" />Ventilations reconnues ({result.splits.length})</summary>
               {result.splits.map(({ bank, app, confidence, reason }) => (
                 <article key={bank.id}>
-                  <strong>{bank.date} · {bank.label} · {money(bank.amount)}</strong>
-                  <span>{app.map((row) => `${row.label} (${money(row.amount)})`).join(' + ')} · confiance {confidence}% · {reason}</span>
+                  <strong>{bank.date} · {bank.label} · {formatMoney(bank.amount)}</strong>
+                  <span>{app.map((row) => `${row.label} (${formatMoney(row.amount)})`).join(' + ')} · confiance {confidence}% · {reason}</span>
                 </article>
               ))}
             </details>
@@ -964,7 +958,7 @@ export default function BelfiusAudit({
                 <article key={row.id} className="audit-missing-row">
                   <strong>{row.date} · {row.label}</strong>
                   <span className="audit-missing-actions">
-                    <b>{money(row.amount)}</b>
+                    <b>{formatMoney(row.amount)}</b>
                     {typeof onAddBankOperation === 'function' && (
                       <button type="button" className="audit-pencil" title="Enregistrer dans Mon Foyer" aria-label={`Enregistrer ${row.label} dans Mon Foyer`} onClick={() => onAddBankOperation({ ...row, learnedSuggestion: suggestionForBankRow(row, learnedRules) })}>
                         <Pencil size={17} />
@@ -982,7 +976,7 @@ export default function BelfiusAudit({
               <summary><span className="audit-dot" />Opérations programmées — en attente du prochain relevé ({futureExtra.length})</summary>
               <p className="audit-section-note">Déjà enregistrées dans Mon Foyer, mais postérieures au dernier solde Belfius importé.</p>
               {futureExtra.map((row) => (
-                <article key={row.id}><strong>{row.date} · {row.label}</strong><span className="audit-badge future">À venir · {money(row.type === 'income' ? row.amount : -row.amount)}</span></article>
+                <article key={row.id}><strong>{row.date} · {row.label}</strong><span className="audit-badge future">À venir · {formatMoney(row.type === 'income' ? row.amount : -row.amount)}</span></article>
               ))}
             </details>
           )}
@@ -992,7 +986,7 @@ export default function BelfiusAudit({
               <summary><span className="audit-dot" />Écritures Mon Foyer sans mouvement Belfius ({actionableExtra.length})</summary>
               <p className="audit-section-note">Écritures arrivées à échéance mais sans mouvement bancaire identifié. Elles sont à contrôler, pas automatiquement considérées comme erronées.</p>
               {actionableExtra.map((row) => (
-                <article key={row.id} className="audit-missing-row"><strong>{row.date} · {row.label}</strong><span className="audit-missing-actions"><b>{money((row.type === 'income' || row.type === 'reimbursement') ? row.amount : -row.amount)}</b>{typeof onEditAppOperation === 'function' && (<button type="button" className="audit-pencil" title="Modifier cette écriture" aria-label={`Modifier ${row.label}`} onClick={() => onEditAppOperation(row)}><Pencil size={17} /></button>)}</span></article>
+                <article key={row.id} className="audit-missing-row"><strong>{row.date} · {row.label}</strong><span className="audit-missing-actions"><b>{formatMoney((row.type === 'income' || row.type === 'reimbursement') ? row.amount : -row.amount)}</b>{typeof onEditAppOperation === 'function' && (<button type="button" className="audit-pencil" title="Modifier cette écriture" aria-label={`Modifier ${row.label}`} onClick={() => onEditAppOperation(row)}><Pencil size={17} /></button>)}</span></article>
               ))}
             </details>
           )}

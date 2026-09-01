@@ -10,12 +10,12 @@ import {
   ShoppingBasket,
   UserRoundCog,
 } from 'lucide-react';
-import { householdId, supabase } from './lib/supabase.js';
+import { householdId, supabase } from './infrastructure/supabase/supabaseClient.js';
+import { parseMoney } from './domain/money/money.js';
 import { normalizeStandingOrderReference, standingOrderAlreadyAssigned } from './lib/configurationRules.js';
 import './ProtectedSettings.css';
 
 const moneyInput = (value) => Number(value || 0).toFixed(2).replace('.', ',');
-const parseMoney = (value) => Number(String(value || '').replace(',', '.'));
 
 function friendlyAuthError(error) {
   const code = error?.code || '';

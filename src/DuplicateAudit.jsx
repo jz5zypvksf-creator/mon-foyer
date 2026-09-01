@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, Copy, Trash2 } from 'lucide-react';
+import { formatMoney } from './domain/money/money.js';
 import './DuplicateAudit.css';
-
-const money = (value) => new Intl.NumberFormat('fr-BE', { style: 'currency', currency: 'EUR' }).format(Number(value || 0));
 
 function normalize(value) {
   return String(value || '')
@@ -127,7 +126,7 @@ function DuplicateGroup({ title, groups, kind, onDelete }) {
                     {fingerprint && <span className="duplicate-bank-fingerprint">{fingerprint}</span>}
                   </div>
                   <div className="duplicate-row-actions">
-                    <strong>{money(row.amount)}</strong>
+                    <strong>{formatMoney(row.amount)}</strong>
                     {onDelete && <button type="button" className="duplicate-delete" title="Supprimer cette ligne" aria-label={`Supprimer ${row.label}`} onClick={() => onDelete(row)}><Trash2 size={16} /></button>}
                   </div>
                 </div>
