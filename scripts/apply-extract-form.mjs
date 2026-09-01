@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+const path='src/App.jsx';
+let s=fs.readFileSync(path,'utf8');
+const anchor="import OperationHistory from './features/operations/OperationHistory.jsx';";
+const imports=`${anchor}\nimport OperationForm from './features/operations/OperationForm.jsx';\nimport useOperationDraft from './features/operations/useOperationDraft.js';`;
+if(!s.includes("import OperationForm from './features/operations/OperationForm.jsx';")) s=s.replace(anchor,imports);
+s=s.replace("  const [draft, setDraft] = useState(makeEmptyOperation);", "  const { draft, setDraft, editingId, setEditingId, resetDraft } = useOperationDraft({ createEmptyDraft: makeEmptyOperation });");
+s=s.replace("  const [editingId, setEditingId] = useState(null);\n",'');
+const open=`        {activeView === 'add' && (\n          <section className="view">\n            <form className="panel form-panel" onSubmit={handleSubmit}>\n              <div className="section-title">\n                <h2>{editingId ? 'Modifier' : 'Ajouter'} une operation</h2>\n                {editingId && (\n                  <button type="button" className="text-button" onClick={cancelOperationDraft}>\n                    Annuler\n                  </button>\n                )}\n              </div>\n`;
+const newOpen=`        {activeView === 'add' && (\n          <OperationForm editingId={editingId} onSubmit={handleSubmit} onCancel={cancelOperationDraft} isValid={operationDraftIsValid} status={operationStatus}>\n`;
+if(!s.includes(open)) throw new Error('form opening anchor missing');
+s=s.replace(open,newOpen);
+const close=`              <div className="operation-form-actions">\n                <button className="secondary-button" type="button" onClick={cancelOperationDraft}>\n                  Annuler\n                </button>\n                <button className="primary-button" type="submit" disabled={!operationDraftIsValid}>\n                  <Plus size={20} />\n                  Enregistrer\n                </button>\n              </div>\n              {!operationDraftIsValid && (\n                <p className="hint status-error" role="alert">Renseigne un libellé et un montant supérieur à zéro.</p>\n              )}\n              {operationStatus && operationStatus !== 'Renseigne un libellé et un montant supérieur à zéro.' && (\n                <p className="hint status-error" role="status">{operationStatus}</p>\n              )}\n            </form>\n          </section>\n        )}`;
+if(!s.includes(close)) throw new Error('form closing anchor missing');
+s=s.replace(close,`          </OperationForm>\n        )}`);
+if(!s.includes('<OperationForm')) throw new Error('OperationForm wiring missing');
+fs.writeFileSync(path,s);
