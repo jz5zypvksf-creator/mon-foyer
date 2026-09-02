@@ -22,7 +22,6 @@ import {
   Plus,
   ReceiptText,
   Repeat2,
-  Send,
   Settings,
   ShieldCheck,
   ShoppingBasket,
@@ -47,6 +46,7 @@ import DuplicateAudit from './DuplicateAudit.jsx';
 import OperationHistory from './features/operations/OperationHistory.jsx';
 import OperationForm from './features/operations/OperationForm.jsx';
 import useOperationDraft from './features/operations/useOperationDraft.js';
+import MessagingErrorBoundary from './features/messaging/MessagingErrorBoundary.jsx';
 import './NavSix.css';
 import {
   enqueueOperationMutation,
@@ -54,7 +54,7 @@ import {
   readOperationOutbox,
   writeOperationOutbox,
 } from './lib/syncOutbox.js';
-import { analyzeBudget } from './lib/budgetAnalysisRules.js';
+import { analyzeBudget, findOutstandingRecurringExpenses } from './lib/budgetAnalysisRules.js';
 import { accountingNature, isBudgetExpense, isInternalTransfer } from './lib/accountingClassification.js';
 import { belongsToHouseholdFoodBudget, foodBudgetVisualStatus } from './lib/foodBudgetRules.js';
 import {
@@ -87,7 +87,11 @@ import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
 import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
 import { incomeReceivedForNextMonth } from './lib/monthlyAccountingPresentation.js';
 import { findPotentialOperationDuplicate } from './lib/operationDuplicateRules.js';
-import { operationRequiresStore, operationStoreValue } from './lib/operationFormRules.js';
+import {
+  operationRequiresStore,
+  operationStoreValue,
+  replaceOperationById,
+} from './lib/operationFormRules.js';
 import {
   OPERATION_REVIEW_STATUSES,
   normalizeReviewStatus,
@@ -104,6 +108,9 @@ const BelfiusAudit = lazy(() => import('./BelfiusAudit.jsx'));
 const DataBackupRecovery = lazy(() => import('./DataBackupRecovery.jsx'));
 const LeisureVacations = lazy(() => import('./LeisureVacations.jsx'));
 const ProtectedSettings = lazy(() => import('./ProtectedSettings.jsx'));
+const MessagingDashboard = lazy(() => import('./features/messaging/components/MessagingDashboard.jsx'));
+const BudgetIntelligenceDashboard = lazy(() => import('./features/budget-intelligence/components/BudgetIntelligenceDashboard.jsx'));
+const FoodBudgetInsightsContainer = lazy(() => import('./features/budget-intelligence/components/FoodBudgetInsightsContainer.jsx'));
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -118,6 +125,8 @@ const RECURRENCE_OPTIONS = [
   { value: 'annual', label: 'Annuelle', months: 12 },
 ];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius', MASTERCARD_PAYMENT_METHOD];
+const ALAIN_USER_ID = import.meta.env.VITE_ALAIN_USER_ID || '';
+const ESTHER_USER_ID = import.meta.env.VITE_ESTHER_USER_ID || '';
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, settles_payment_method, settlement_date, savings_goal_id, savings_direction, accounting_nature, budget_month, income_kind, income_source, review_status, review_note, reviewed_by, reviewed_at, dispute_reference, resolved_at, created_at';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
@@ -588,10 +597,6 @@ export default function App() {
   const [newCategory, setNewCategory] = useState('');
   const [newCategoryType, setNewCategoryType] = useState('variable');
   const [categoryStatus, setCategoryStatus] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [chatDraft, setChatDraft] = useState('');
-  const [chatAuthor, setChatAuthor] = useState('Alain');
-  const [chatStatus, setChatStatus] = useState('');
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [messageNotice, setMessageNotice] = useState('');
   const [historySearch, setHistorySearch] = useState('');
@@ -612,7 +617,6 @@ export default function App() {
   const [budgetSettings, setBudgetSettings] = useState([{ effective_month: '2026-08', food_budget: FOOD_BUDGET }]);
   const [carePeople, setCarePeople] = useState(DEFAULT_CARE_PEOPLE.map((name) => ({ name, active: true, tracks_reimbursements: true, exclude_from_food_budget: true })));
   const automaticMonthEndAuditRef = useRef('');
-  const activeViewRef = useRef(activeView);
 
   useEffect(() => {
     const updateConnectionState = () => {
@@ -759,10 +763,20 @@ export default function App() {
     [liveBelfiusSnapshot, paymentBalances],
   );
 
+  const outstandingRecurringExpenses = useMemo(() => findOutstandingRecurringExpenses({
+    recurringExpenses: data.recurringFixedExpenses || [],
+    operations: data.operations,
+    selectedMonth,
+    currentDate: today,
+  }), [data.operations, data.recurringFixedExpenses, selectedMonth, today]);
+
   const scheduledExpenses = useMemo(() => {
-    const scheduleCutoff = selectedMonth === today.slice(0, 7) && today > balanceCutoff ? today : balanceCutoff;
     const explicitScheduledExpenses = monthOperations
       .filter((operation) => operation.type !== 'income' && operation.date > today);
+
+    const outstandingByRecurringId = new Map(
+      outstandingRecurringExpenses.map((operation) => [operation.recurringExpenseId, operation]),
+    );
 
     const existingFixedSignatures = new Set(
       monthOperations
@@ -779,6 +793,7 @@ export default function App() {
         const settlementDate = isMastercardPaymentMethod(paymentMethod)
           ? mastercardSettlementDate(purchaseDate)
           : '';
+        const outstanding = outstandingByRecurringId.get(expense.id);
         return {
         id: `recurring-${expense.id}-${selectedMonth}`,
         date: purchaseDate,
@@ -794,11 +809,16 @@ export default function App() {
         recurringExpenseId: expense.id,
         frequency: expense.frequency || 'monthly',
         accountingNature: expense.accountingNature || expense.accounting_nature || accountingNature({ type: 'fixed', ...expense }),
+        ...(outstanding ? {
+          virtualRecurring: true,
+          pendingCsvImport: true,
+          statusLabel: outstanding.statusLabel,
+        } : {}),
         };
       })
       .filter(Boolean)
       .filter((operation) => (
-        (operation.settlementDate || operation.date) > balanceCutoff
+        ((operation.settlementDate || operation.date) > balanceCutoff || operation.pendingCsvImport)
         && (operation.settlementDate || operation.date).slice(0, 7) === selectedMonth
         && !existingFixedSignatures.has(fixedExpenseSignature(operation))
       ));
@@ -809,6 +829,7 @@ export default function App() {
     balanceCutoff,
     data.recurringFixedExpenses,
     monthOperations,
+    outstandingRecurringExpenses,
     selectedMonth,
     today,
   ]);
@@ -1016,11 +1037,22 @@ export default function App() {
     }, new Map());
   }, [monthOperations]);
 
+  const anomalySummary = useMemo(() => ({
+    total: reviewMap.size,
+    items: [...reviewMap.entries()].map(([operationId, reasons]) => ({ operationId, reasons })),
+  }), [reviewMap]);
+
+  const historyMonthOperations = useMemo(
+    () => [...monthOperations, ...outstandingRecurringExpenses]
+      .sort((left, right) => right.date.localeCompare(left.date)),
+    [monthOperations, outstandingRecurringExpenses],
+  );
+
   const filteredMonthOperations = useMemo(() => {
     const search = historySearch.trim().toLowerCase();
     // L'Historique est le registre des écritures sauvegardées pour le mois choisi.
     // Une écriture future reste visible et est distinguée comme « Prévue » dans la liste.
-    return monthOperations.filter((operation) => {
+    return historyMonthOperations.filter((operation) => {
       const category = data.categories.find((item) => item.id === operation.category);
       const haystack = [
         operation.label,
@@ -1039,7 +1071,7 @@ export default function App() {
       if (search && !haystack.includes(search)) return false;
       return true;
     });
-  }, [data.categories, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
+  }, [data.categories, historyCategory, historyMonthOperations, historyPaymentMethod, historyPerson, historySearch, historyType, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => { const filteredTotals = calculateTotals(filteredMonthOperations, foodBudgetExcluded); const defaultBudgetView = historyType === 'all' && historyPerson === 'all' && historyCategory === 'all' && historyPaymentMethod === 'all' && !historySearch.trim() && !showReviewOnly; const income = defaultBudgetView ? budgetIncomeTotal : filteredTotals.income; return { ...filteredTotals, income, balance: income - filteredTotals.fixed - filteredTotals.variable, expenses: filteredTotals.fixed + filteredTotals.variable }; }, [budgetIncomeTotal, filteredMonthOperations, foodBudgetExcluded, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, showReviewOnly]);
 
@@ -1100,7 +1132,6 @@ export default function App() {
   }, [budgetSettings, data.operations, data.categories, foodBudgetExcluded, selectedMonth]);
 
   useEffect(() => {
-    activeViewRef.current = activeView;
     if (activeView === 'messages') {
       setUnreadMessages(0);
       setMessageNotice('');
@@ -1577,6 +1608,7 @@ export default function App() {
             .from('operations')
             .update(payload)
             .eq('id', editingId)
+            .eq('household_id', householdId)
             .select(OPERATION_COLUMNS)
             .single()
           : await supabase
@@ -1603,10 +1635,6 @@ export default function App() {
       return;
     }
 
-    const operations = editingId
-      ? data.operations.map((item) => (item.id === editingId ? operation : item))
-      : [operation, ...data.operations];
-
     let recurringFixedExpenses = data.recurringFixedExpenses || [];
     if (draft.recurrence !== 'once' && operation.type !== 'income') {
       try {
@@ -1632,8 +1660,25 @@ export default function App() {
       }
     }
 
-    const savingsGoals = applySavingsOperationChange(data.savingsGoals, editingOperation, operation);
-    saveData({ ...data, operations, recurringFixedExpenses, savingsGoals });
+    // L'appel réseau peut déclencher Realtime avant d'arriver ici. Une mise à jour
+    // fonctionnelle évite de réinjecter la copie `data` devenue obsolète et garantit
+    // que l'historique affiche immédiatement la ligne confirmée par Supabase.
+    setData((current) => {
+      const previousOperation = editingId
+        ? current.operations.find((item) => item.id === editingId) || editingOperation
+        : null;
+      const operations = editingId
+        ? replaceOperationById(current.operations, editingId, operation)
+        : [operation, ...current.operations];
+      const savingsGoals = applySavingsOperationChange(
+        current.savingsGoals,
+        previousOperation,
+        operation,
+      );
+      const nextData = { ...current, operations, recurringFixedExpenses, savingsGoals };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      return nextData;
+    });
     setDraft(makeEmptyOperation());
     setEditingId(null);
     if (!USE_REMOTE_BUDGET) setActiveView('history');
@@ -2512,83 +2557,6 @@ export default function App() {
     setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais, ${migratedRecurringExpenses} frais fixe(s) récurrent(s) et ${migratedLeisureExpenses} dépense(s) Loisirs envoyé(s) vers Supabase. Les éléments déjà présents ont été conservés sans doublon.`);
   };
 
-  useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) {
-      setChatStatus('Supabase non configuré.');
-      return undefined;
-    }
-
-    if (!session) return undefined;
-
-    let ignore = false;
-
-    async function loadMessages() {
-      const { data: rows, error } = await supabase
-        .from('messages')
-        .select('id, author, content, created_at')
-        .eq('household_id', householdId)
-        .order('created_at', { ascending: true })
-        .limit(100);
-
-      if (ignore) return;
-      if (error) {
-        setChatStatus("Impossible de charger les messages.");
-        return;
-      }
-
-      setMessages(rows || []);
-      setChatStatus('');
-    }
-
-    loadMessages();
-
-    const channel = supabase
-      .channel('messages-live')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          if (payload.new.household_id !== householdId) return;
-          setMessages((current) => {
-            if (current.some((message) => message.id === payload.new.id)) return current;
-            if (activeViewRef.current !== 'messages') {
-              setUnreadMessages((count) => count + 1);
-              setMessageNotice(`Nouveau message de ${payload.new.author}`);
-            }
-            return [...current, payload.new];
-          });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      ignore = true;
-      supabase.removeChannel(channel);
-    };
-  }, [session]);
-
-  const sendMessage = async (event) => {
-    event.preventDefault();
-    const content = chatDraft.trim();
-    if (!content || !supabase || !householdId) return;
-
-    setChatStatus('Envoi...');
-    const { data: row, error } = await supabase
-      .from('messages')
-      .insert({ household_id: householdId, author: chatAuthor, content })
-      .select('id, author, content, created_at')
-      .single();
-
-    if (error) {
-      setChatStatus("Le message n'a pas pu être envoyé.");
-      return;
-    }
-
-    setMessages((current) => (current.some((message) => message.id === row.id) ? current : [...current, row]));
-    setChatDraft('');
-    setChatStatus('');
-  };
-
   const openHistoryFromDashboard = ({ date = '', category = '', reviewOnly = false } = {}) => {
     setHistorySearch(date);
     setHistoryType('all');
@@ -2745,6 +2713,18 @@ export default function App() {
               </p>
                 </section>
 
+                <Suspense fallback={<section className="panel" role="status">Chargement de l’analyse nourriture…</section>}>
+                  <FoodBudgetInsightsContainer
+                    operations={data.operations}
+                    budgetSettings={budgetSettings}
+                    selectedMonth={selectedMonth}
+                    currentBudget={foodBudget}
+                    spent={totals.food}
+                    excludedPeople={foodBudgetExcluded}
+                    currentDate={today}
+                  />
+                </Suspense>
+
                 <BudgetAnalysis analysis={budgetAnalysis} />
 
                 <MonthEndAudit
@@ -2783,6 +2763,10 @@ export default function App() {
             <div className="leisure-launch-card">
               <div><strong>Loisirs / Vacances</strong><span>Suivre le solde Beobank et enregistrer restaurants, hôtels et voyages.</span></div>
               <button type="button" onClick={() => setActiveView('leisure')}>Ouvrir</button>
+            </div>
+            <div className="leisure-launch-card">
+              <div><strong>Intelligence budgétaire</strong><span>Comprendre les résultats certifiés sur un, trois ou six mois.</span></div>
+              <button type="button" onClick={() => setActiveView('budget-intelligence')}>Analyser</button>
             </div>
               </div>
             </div>
@@ -3263,7 +3247,7 @@ export default function App() {
         {activeView === 'history' && (
           <OperationHistory
             operations={data.operations}
-            monthOperations={monthOperations}
+            monthOperations={historyMonthOperations}
             filteredMonthOperations={filteredMonthOperations}
             categories={data.categories}
             selectedMonth={selectedMonth}
@@ -3292,46 +3276,26 @@ export default function App() {
 
         {activeView === 'messages' && (
           <section className="view chat-view">
-            <section className="panel chat-panel">
-              <div className="section-title">
-                <h2>Messages du foyer</h2>
-                <span>{messages.length} messages</span>
-              </div>
+            <MessagingErrorBoundary>
+              <MessagingDashboard
+                supabase={supabase}
+                currentUserId={session?.user?.id || ''}
+                currentUserName={session?.user?.id === ESTHER_USER_ID ? 'Esther' : 'Alain'}
+                peerId={session?.user?.id === ALAIN_USER_ID ? ESTHER_USER_ID : ALAIN_USER_ID}
+                peerName={session?.user?.id === ALAIN_USER_ID ? 'Esther' : 'Alain'}
+              />
+            </MessagingErrorBoundary>
+          </section>
+        )}
 
-              <div className="message-list">
-                {messages.length === 0 && (
-                  <p className="empty-state">Aucun message pour le moment.</p>
-                )}
-                {messages.map((message) => (
-                  <article
-                    className={message.author === chatAuthor ? 'message-bubble mine' : 'message-bubble'}
-                    key={message.id}
-                  >
-                    <div>
-                      <strong>{message.author}</strong>
-                      <span>{new Date(message.created_at).toLocaleString('fr-BE', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                    </div>
-                    <p>{message.content}</p>
-                  </article>
-                ))}
-              </div>
-
-              <form className="chat-form" onSubmit={sendMessage}>
-                <select value={chatAuthor} onChange={(event) => setChatAuthor(event.target.value)} aria-label="Auteur">
-                  <option>Alain</option>
-                  <option>Esther</option>
-                </select>
-                <input
-                  value={chatDraft}
-                  onChange={(event) => setChatDraft(event.target.value)}
-                  placeholder="Ecrire un message"
-                />
-                <button type="submit" aria-label="Envoyer">
-                  <Send size={19} />
-                </button>
-              </form>
-              {chatStatus && <p className="hint">{chatStatus}</p>}
-            </section>
+        {activeView === 'budget-intelligence' && (
+          <section className="view">
+            <BudgetIntelligenceDashboard
+              monthlyAudit={monthEndAudit}
+              budgetAnalysis={budgetAnalysis}
+              anomalySummary={anomalySummary}
+              onBack={() => setActiveView('home')}
+            />
           </section>
         )}
 

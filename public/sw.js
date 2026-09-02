@@ -49,6 +49,32 @@ self.addEventListener('push', (event) => {
     payload = { body: event.data?.text() || 'Un rappel Mon Foyer est arrivé.' };
   }
 
+  if (payload.type === 'message') {
+    const unreadCount = Math.max(0, Number(payload.unreadCount) || 0);
+    const tasks = [self.registration.showNotification(
+      payload.title || 'Nouveau message • Mon Foyer',
+      {
+        body: payload.body || 'Vous avez reçu un nouveau message.',
+        tag: payload.tag || `message-${payload.messageId || 'new'}`,
+        renotify: true,
+        icon: payload.icon || '/icon.svg',
+        badge: payload.badge || '/icon.svg',
+        vibrate: [180, 80, 180, 80, 260],
+        data: {
+          url: payload.url || '/?view=messages',
+          kind: 'message',
+          messageId: payload.messageId || '',
+        },
+      },
+    )];
+
+    if (unreadCount > 0 && 'setAppBadge' in self.navigator) {
+      tasks.push(self.navigator.setAppBadge(unreadCount));
+    }
+    event.waitUntil(Promise.all(tasks));
+    return;
+  }
+
   event.waitUntil(self.registration.showNotification(
     payload.title || 'Mon Foyer',
     {
@@ -88,7 +114,9 @@ self.addEventListener('notificationclick', (event) => {
         if (sameOrigin) {
           await sameOrigin.focus();
           if ('navigate' in sameOrigin) await sameOrigin.navigate(target);
-          sameOrigin.postMessage({ type: 'OPEN_QUICK_ADD', person });
+          if (data.kind === 'daily-purchase') {
+            sameOrigin.postMessage({ type: 'OPEN_QUICK_ADD', person });
+          }
           return sameOrigin;
         }
         return self.clients.openWindow(target);

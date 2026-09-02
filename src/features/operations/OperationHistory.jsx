@@ -55,12 +55,19 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
   const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';
 
   return (
-    <article className={alerts?.length ? 'operation-row needs-review' : 'operation-row'}>
+    <article className={[
+      'operation-row',
+      alerts?.length ? 'needs-review' : '',
+      operation.virtualRecurring ? 'virtual-recurring' : '',
+    ].filter(Boolean).join(' ')}>
       <span className="icon-bubble"><Icon size={18} /></span>
       <div>
         <strong>{operation.label}</strong>
         <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
         {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
+        {operation.pendingCsvImport && (
+          <em className="virtual-recurring-status">{operation.statusLabel}</em>
+        )}
         {operation.reviewStatus && operation.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
           <em className={`operation-review-badge review-${operation.reviewStatus}`}>
             {reviewStatusLabel(operation.reviewStatus)}
@@ -71,12 +78,16 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
       <strong className={(operation.type === 'income' || operation.type === 'reimbursement') ? 'amount income' : 'amount'}>
         {sign}{formatMoney(operation.amount)}
       </strong>
-      <button type="button" onClick={() => onEdit(operation)} aria-label="Modifier">
-        <Edit3 size={17} />
-      </button>
-      <button type="button" onClick={() => onDelete(operation.id)} aria-label="Supprimer">
-        <Trash2 size={17} />
-      </button>
+      {!operation.virtualRecurring && (
+        <>
+          <button type="button" onClick={() => onEdit(operation)} aria-label="Modifier">
+            <Edit3 size={17} />
+          </button>
+          <button type="button" onClick={() => onDelete(operation.id)} aria-label="Supprimer">
+            <Trash2 size={17} />
+          </button>
+        </>
+      )}
     </article>
   );
 }

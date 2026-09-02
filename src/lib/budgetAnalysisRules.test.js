@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeBudget } from './budgetAnalysisRules.js';
+import { analyzeBudget, findOutstandingRecurringExpenses } from './budgetAnalysisRules.js';
 
 function rows(month, income, expenses) {
   return [
@@ -145,4 +145,68 @@ test('aucun versement n’est conseillé si un mois terminé est déficitaire', 
   });
   assert.equal(analysis.emergency.key, 'not-recommended');
   assert.equal(analysis.emergency.monthlySuggestion, null);
+});
+
+test('une récurrence passée sans import reste due dans le mois courant', () => {
+  const outstanding = findOutstandingRecurringExpenses({
+    recurringExpenses: [{
+      id: 'ethias-maison', label: 'Ethias nv / Ethias SA - Maison 1', amount: 125.40,
+      day: 1, person: 'Foyer', category: 'assurances', paymentMethod: 'Compte Belfius',
+      frequency: 'monthly', startDate: '2026-01-01',
+    }],
+    operations: [],
+    selectedMonth: '2026-09',
+    currentDate: '2026-09-02',
+  });
+
+  assert.equal(outstanding.length, 1);
+  assert.equal(outstanding[0].amount, 125.40);
+  assert.equal(outstanding[0].pendingCsvImport, true);
+  assert.equal(outstanding[0].statusLabel, "Débité en banque - En attente d'import CSV");
+});
+
+test('la ligne virtuelle disparaît dès qu’un libellé bancaire similaire est importé', () => {
+  const outstanding = findOutstandingRecurringExpenses({
+    recurringExpenses: [{
+      id: 'ethias-maison', label: 'Ethias nv / Ethias SA - Maison 1', amount: 125.40,
+      day: 1, paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01',
+    }],
+    operations: [{
+      id: 'csv-row', date: '2026-09-01', label: 'ETHIAS ASSURANCES', amount: 126,
+      type: 'fixed', paymentMethod: 'Compte Belfius',
+    }],
+    selectedMonth: '2026-09',
+    currentDate: '2026-09-02',
+  });
+
+  assert.equal(outstanding.length, 0);
+});
+
+test('un montant bancaire identique résorbe la projection même si le libellé diffère', () => {
+  const recurringExpense = {
+    id: 'provider', label: 'Fournisseur historique', amount: 87.65,
+    day: 1, paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01',
+  };
+  const imported = {
+    id: 'csv-row', date: '2026-09-01', label: 'Nouveau libellé bancaire', amount: 87.65,
+    type: 'fixed', paymentMethod: 'Compte Belfius',
+  };
+
+  assert.equal(findOutstandingRecurringExpenses({
+    recurringExpenses: [recurringExpense], operations: [imported],
+    selectedMonth: '2026-09', currentDate: '2026-09-02',
+  }).length, 0);
+});
+
+test('une échéance future ne devient jamais une ligne virtuelle passée', () => {
+  const outstanding = findOutstandingRecurringExpenses({
+    recurringExpenses: [{
+      id: 'future', label: 'Échéance future', amount: 50, day: 3,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01',
+    }],
+    selectedMonth: '2026-09',
+    currentDate: '2026-09-02',
+  });
+
+  assert.equal(outstanding.length, 0);
 });

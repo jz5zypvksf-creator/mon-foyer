@@ -1,4 +1,9 @@
 import { ACCOUNTING_NATURES, accountingNature } from './accountingClassification.js';
+import {
+  isMastercardPaymentMethod,
+  mastercardSettlementDate,
+  recurringSourceMonthForBudget,
+} from './cardPaymentRules.js';
 
 function amount(value) {
   const number = Number(value || 0);
@@ -71,6 +76,124 @@ function completedMonthsWithData(operations, selectedMonth, todayMonth) {
 
 function roundDownFive(value) {
   return Math.floor(Math.max(0, value) / 5) * 5;
+}
+
+const RECURRENCE_MONTHS = Object.freeze({ monthly: 1, quarterly: 3, semiannual: 6, annual: 12 });
+const IGNORED_LABEL_TOKENS = new Set(['sa', 'nv', 'sprl', 'srl', 'scrl', 'the', 'and', 'pour']);
+
+function dateInMonth(month, day) {
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (!year || !monthNumber) return '';
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const safeDay = Math.min(Math.max(Number(day) || 1, 1), lastDay);
+  return `${month}-${String(safeDay).padStart(2, '0')}`;
+}
+
+function recurringIsDueInMonth(expense, month) {
+  const interval = RECURRENCE_MONTHS[expense?.frequency || 'monthly'] || 1;
+  const start = String(expense?.startDate || expense?.start_date || `${month}-01`).slice(0, 7);
+  const [startYear, startMonth] = start.split('-').map(Number);
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (![startYear, startMonth, year, monthNumber].every(Number.isFinite)) return false;
+  const distance = (year - startYear) * 12 + monthNumber - startMonth;
+  return distance >= 0 && distance % interval === 0;
+}
+
+function normalizedLabel(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function labelsAreSimilar(left, right) {
+  const normalizedLeft = normalizedLabel(left);
+  const normalizedRight = normalizedLabel(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight || normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) return true;
+
+  const leftTokens = new Set(normalizedLeft.split(' ').filter((token) => token.length >= 3 && !IGNORED_LABEL_TOKENS.has(token)));
+  const rightTokens = new Set(normalizedRight.split(' ').filter((token) => token.length >= 3 && !IGNORED_LABEL_TOKENS.has(token)));
+  const commonTokens = [...leftTokens].filter((token) => rightTokens.has(token));
+  return commonTokens.some((token) => token.length >= 6) || commonTokens.length >= 2;
+}
+
+function operationMonth(operation) {
+  if (isMastercardPaymentMethod(operation?.paymentMethod || operation?.payment_method)) {
+    return String(operation?.settlementDate || operation?.settlement_date || operation?.date || '').slice(0, 7);
+  }
+  return String(operation?.date || '').slice(0, 7);
+}
+
+function operationEffectiveDate(operation) {
+  return isMastercardPaymentMethod(operation?.paymentMethod || operation?.payment_method)
+    ? String(operation?.settlementDate || operation?.settlement_date || operation?.date || '')
+    : String(operation?.date || '');
+}
+
+export function recurringHasExecutedMatch(expense, operations = [], selectedMonth = '', currentDate = '') {
+  const expectedAmount = Math.abs(amount(expense?.amount));
+  const expectedPaymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
+
+  return operations.some((operation) => {
+    if (operation?.projectedRecurring || operation?.pendingCsvImport) return false;
+    if (operationMonth(operation) !== selectedMonth) return false;
+    if (currentDate && operationEffectiveDate(operation) > currentDate) return false;
+    const nature = accountingNature(operation);
+    if (nature !== ACCOUNTING_NATURES.EXPENSE && nature !== ACCOUNTING_NATURES.CARD_PURCHASE) return false;
+
+    const labelMatch = labelsAreSimilar(expense?.label, operation?.label);
+    const amountMatch = Math.abs(Math.abs(amount(operation?.amount)) - expectedAmount) <= 0.01;
+    const actualPaymentMethod = operation?.paymentMethod || operation?.payment_method || 'Compte Belfius';
+    return labelMatch || (amountMatch && actualPaymentMethod === expectedPaymentMethod);
+  });
+}
+
+/**
+ * Retourne les échéances récurrentes déjà dues mais absentes des écritures importées.
+ * Ces lignes sont des projections de lecture : elles ne doivent jamais être persistées.
+ */
+export function findOutstandingRecurringExpenses({
+  recurringExpenses = [], operations = [], selectedMonth = '', currentDate = '',
+} = {}) {
+  if (!selectedMonth || selectedMonth !== String(currentDate || '').slice(0, 7)) return [];
+
+  return recurringExpenses.flatMap((expense) => {
+    const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
+    const sourceMonth = recurringSourceMonthForBudget(paymentMethod, selectedMonth);
+    if (!recurringIsDueInMonth(expense, sourceMonth)) return [];
+
+    const purchaseDate = dateInMonth(sourceMonth, expense?.day);
+    const settlementDate = isMastercardPaymentMethod(paymentMethod)
+      ? mastercardSettlementDate(purchaseDate)
+      : '';
+    const dueDate = settlementDate || purchaseDate;
+    if (!dueDate || dueDate.slice(0, 7) !== selectedMonth || dueDate > currentDate) return [];
+    if (amount(expense.amount) <= 0) return [];
+    if (recurringHasExecutedMatch(expense, operations, selectedMonth, currentDate)) return [];
+
+    return [{
+      id: `outstanding-recurring-${expense.id}-${selectedMonth}`,
+      date: dueDate,
+      person: expense.person || 'Foyer',
+      type: 'fixed',
+      category: expense.category || 'divers',
+      store: '',
+      paymentMethod,
+      settlementDate,
+      label: expense.label,
+      amount: amount(expense.amount),
+      projectedRecurring: true,
+      virtualRecurring: true,
+      pendingCsvImport: true,
+      recurringExpenseId: expense.id,
+      frequency: expense.frequency || 'monthly',
+      accountingNature: expense.accountingNature || expense.accounting_nature || ACCOUNTING_NATURES.EXPENSE,
+      statusLabel: "Débité en banque - En attente d'import CSV",
+    }];
+  });
 }
 
 export function analyzeBudget({
