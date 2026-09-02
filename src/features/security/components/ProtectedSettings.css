@@ -1,3 +1,4 @@
+/* Paramètres sensibles isolés du reste de l'interface. */
 .protected-settings h2,
 .protected-settings h3 {
   display: flex;
