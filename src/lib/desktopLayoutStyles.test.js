@@ -29,6 +29,9 @@ test('la synthèse et les modules complémentaires occupent deux colonnes indép
   assert.match(app, /className="desktop-overview-grid"/);
   assert.match(app, /className="desktop-summary-column"/);
   assert.match(app, /className="desktop-insights-column"/);
+  assert.match(styles, /\.leisure-launch-card\s*\{[^}]*display:\s*flex;[^}]*border-radius:\s*18px;[^}]*background:\s*#f5faf7;/s);
+  assert.match(styles, /\.leisure-launch-card button\s*\{[^}]*min-height:\s*44px;[^}]*border-radius:\s*999px;[^}]*background:\s*#24577f;/s);
+  assert.match(styles, /\.leisure-launch-card button:focus-visible\s*\{/);
   assert.match(styles, /\.home-view\s*>\s*\.desktop-overview-grid\s*\{[^}]*grid-column:\s*1\s*\/\s*13;[^}]*grid-template-columns:\s*minmax\(320px,\s*4fr\)\s*minmax\(0,\s*8fr\);/s);
   assert.match(styles, /\.home-view\s+\.desktop-insights-column\s*>\s*\.desktop-dashboard\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto;/s);
 });

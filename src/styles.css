@@ -180,6 +180,80 @@ h2 {
   color: #dff3e7;
 }
 
+.leisure-launch-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 1px solid #cfe0d8;
+  border-radius: 18px;
+  background: #f5faf7;
+  box-shadow: 0 8px 20px rgba(21, 63, 103, 0.06);
+}
+
+.leisure-launch-card > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.leisure-launch-card strong {
+  color: #153f67;
+  font-size: 1.05rem;
+}
+
+.leisure-launch-card span {
+  color: #637789;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.leisure-launch-card button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #24577f;
+  color: white;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.leisure-launch-card button:hover {
+  background: #153f67;
+  box-shadow: 0 6px 14px rgba(21, 63, 103, 0.18);
+  transform: translateY(-1px);
+}
+
+.leisure-launch-card button:active {
+  box-shadow: none;
+  transform: translateY(0);
+}
+
+.leisure-launch-card button:focus-visible {
+  outline: 3px solid rgba(36, 87, 127, 0.28);
+  outline-offset: 3px;
+}
+
+@media (max-width: 760px) {
+  .leisure-launch-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .leisure-launch-card button {
+    align-self: flex-start;
+  }
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
