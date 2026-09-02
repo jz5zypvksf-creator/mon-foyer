@@ -87,7 +87,11 @@ import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
 import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
 import { incomeReceivedForNextMonth } from './lib/monthlyAccountingPresentation.js';
 import { findPotentialOperationDuplicate } from './lib/operationDuplicateRules.js';
-import { operationRequiresStore, operationStoreValue } from './lib/operationFormRules.js';
+import {
+  operationRequiresStore,
+  operationStoreValue,
+  replaceOperationById,
+} from './lib/operationFormRules.js';
 import {
   OPERATION_REVIEW_STATUSES,
   normalizeReviewStatus,
@@ -1574,6 +1578,7 @@ export default function App() {
             .from('operations')
             .update(payload)
             .eq('id', editingId)
+            .eq('household_id', householdId)
             .select(OPERATION_COLUMNS)
             .single()
           : await supabase
@@ -1600,10 +1605,6 @@ export default function App() {
       return;
     }
 
-    const operations = editingId
-      ? data.operations.map((item) => (item.id === editingId ? operation : item))
-      : [operation, ...data.operations];
-
     let recurringFixedExpenses = data.recurringFixedExpenses || [];
     if (draft.recurrence !== 'once' && operation.type !== 'income') {
       try {
@@ -1629,8 +1630,25 @@ export default function App() {
       }
     }
 
-    const savingsGoals = applySavingsOperationChange(data.savingsGoals, editingOperation, operation);
-    saveData({ ...data, operations, recurringFixedExpenses, savingsGoals });
+    // L'appel réseau peut déclencher Realtime avant d'arriver ici. Une mise à jour
+    // fonctionnelle évite de réinjecter la copie `data` devenue obsolète et garantit
+    // que l'historique affiche immédiatement la ligne confirmée par Supabase.
+    setData((current) => {
+      const previousOperation = editingId
+        ? current.operations.find((item) => item.id === editingId) || editingOperation
+        : null;
+      const operations = editingId
+        ? replaceOperationById(current.operations, editingId, operation)
+        : [operation, ...current.operations];
+      const savingsGoals = applySavingsOperationChange(
+        current.savingsGoals,
+        previousOperation,
+        operation,
+      );
+      const nextData = { ...current, operations, recurringFixedExpenses, savingsGoals };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      return nextData;
+    });
     setDraft(makeEmptyOperation());
     setEditingId(null);
     if (!USE_REMOTE_BUDGET) setActiveView('history');
