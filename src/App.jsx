@@ -22,7 +22,6 @@ import {
   Plus,
   ReceiptText,
   Repeat2,
-  Send,
   Settings,
   ShieldCheck,
   ShoppingBasket,
@@ -47,6 +46,7 @@ import DuplicateAudit from './DuplicateAudit.jsx';
 import OperationHistory from './features/operations/OperationHistory.jsx';
 import OperationForm from './features/operations/OperationForm.jsx';
 import useOperationDraft from './features/operations/useOperationDraft.js';
+import MessagingErrorBoundary from './features/messaging/MessagingErrorBoundary.jsx';
 import './NavSix.css';
 import {
   enqueueOperationMutation,
@@ -104,6 +104,7 @@ const BelfiusAudit = lazy(() => import('./BelfiusAudit.jsx'));
 const DataBackupRecovery = lazy(() => import('./DataBackupRecovery.jsx'));
 const LeisureVacations = lazy(() => import('./LeisureVacations.jsx'));
 const ProtectedSettings = lazy(() => import('./ProtectedSettings.jsx'));
+const MessagingDashboard = lazy(() => import('./features/messaging/components/MessagingDashboard.jsx'));
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -118,6 +119,8 @@ const RECURRENCE_OPTIONS = [
   { value: 'annual', label: 'Annuelle', months: 12 },
 ];
 const OVERDRAFT_PAYMENT_METHODS = ['Compte Belfius', MASTERCARD_PAYMENT_METHOD];
+const ALAIN_USER_ID = import.meta.env.VITE_ALAIN_USER_ID || '';
+const ESTHER_USER_ID = import.meta.env.VITE_ESTHER_USER_ID || '';
 const OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount, payment_method, settles_payment_method, settlement_date, savings_goal_id, savings_direction, accounting_nature, budget_month, income_kind, income_source, review_status, review_note, reviewed_by, reviewed_at, dispute_reference, resolved_at, created_at';
 const LEGACY_OPERATION_COLUMNS = 'id, date, person, type, category, store, label, amount';
 const APPLIED_SAVINGS_STORAGE_KEY = 'mon-foyer-belfius-savings-applied-v1';
@@ -588,10 +591,6 @@ export default function App() {
   const [newCategory, setNewCategory] = useState('');
   const [newCategoryType, setNewCategoryType] = useState('variable');
   const [categoryStatus, setCategoryStatus] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [chatDraft, setChatDraft] = useState('');
-  const [chatAuthor, setChatAuthor] = useState('Alain');
-  const [chatStatus, setChatStatus] = useState('');
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [messageNotice, setMessageNotice] = useState('');
   const [historySearch, setHistorySearch] = useState('');
@@ -612,7 +611,6 @@ export default function App() {
   const [budgetSettings, setBudgetSettings] = useState([{ effective_month: '2026-08', food_budget: FOOD_BUDGET }]);
   const [carePeople, setCarePeople] = useState(DEFAULT_CARE_PEOPLE.map((name) => ({ name, active: true, tracks_reimbursements: true, exclude_from_food_budget: true })));
   const automaticMonthEndAuditRef = useRef('');
-  const activeViewRef = useRef(activeView);
 
   useEffect(() => {
     const updateConnectionState = () => {
@@ -1100,7 +1098,6 @@ export default function App() {
   }, [budgetSettings, data.operations, data.categories, foodBudgetExcluded, selectedMonth]);
 
   useEffect(() => {
-    activeViewRef.current = activeView;
     if (activeView === 'messages') {
       setUnreadMessages(0);
       setMessageNotice('');
@@ -2512,83 +2509,6 @@ export default function App() {
     setMigrationStatus(`${missingOperations.length} opération(s), ${missingStores.length} point(s) de vente, ${missingGoals.length} objectif(s), ${missingCategories.length} type(s) de frais, ${migratedRecurringExpenses} frais fixe(s) récurrent(s) et ${migratedLeisureExpenses} dépense(s) Loisirs envoyé(s) vers Supabase. Les éléments déjà présents ont été conservés sans doublon.`);
   };
 
-  useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) {
-      setChatStatus('Supabase non configuré.');
-      return undefined;
-    }
-
-    if (!session) return undefined;
-
-    let ignore = false;
-
-    async function loadMessages() {
-      const { data: rows, error } = await supabase
-        .from('messages')
-        .select('id, author, content, created_at')
-        .eq('household_id', householdId)
-        .order('created_at', { ascending: true })
-        .limit(100);
-
-      if (ignore) return;
-      if (error) {
-        setChatStatus("Impossible de charger les messages.");
-        return;
-      }
-
-      setMessages(rows || []);
-      setChatStatus('');
-    }
-
-    loadMessages();
-
-    const channel = supabase
-      .channel('messages-live')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          if (payload.new.household_id !== householdId) return;
-          setMessages((current) => {
-            if (current.some((message) => message.id === payload.new.id)) return current;
-            if (activeViewRef.current !== 'messages') {
-              setUnreadMessages((count) => count + 1);
-              setMessageNotice(`Nouveau message de ${payload.new.author}`);
-            }
-            return [...current, payload.new];
-          });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      ignore = true;
-      supabase.removeChannel(channel);
-    };
-  }, [session]);
-
-  const sendMessage = async (event) => {
-    event.preventDefault();
-    const content = chatDraft.trim();
-    if (!content || !supabase || !householdId) return;
-
-    setChatStatus('Envoi...');
-    const { data: row, error } = await supabase
-      .from('messages')
-      .insert({ household_id: householdId, author: chatAuthor, content })
-      .select('id, author, content, created_at')
-      .single();
-
-    if (error) {
-      setChatStatus("Le message n'a pas pu être envoyé.");
-      return;
-    }
-
-    setMessages((current) => (current.some((message) => message.id === row.id) ? current : [...current, row]));
-    setChatDraft('');
-    setChatStatus('');
-  };
-
   const openHistoryFromDashboard = ({ date = '', category = '', reviewOnly = false } = {}) => {
     setHistorySearch(date);
     setHistoryType('all');
@@ -3292,46 +3212,15 @@ export default function App() {
 
         {activeView === 'messages' && (
           <section className="view chat-view">
-            <section className="panel chat-panel">
-              <div className="section-title">
-                <h2>Messages du foyer</h2>
-                <span>{messages.length} messages</span>
-              </div>
-
-              <div className="message-list">
-                {messages.length === 0 && (
-                  <p className="empty-state">Aucun message pour le moment.</p>
-                )}
-                {messages.map((message) => (
-                  <article
-                    className={message.author === chatAuthor ? 'message-bubble mine' : 'message-bubble'}
-                    key={message.id}
-                  >
-                    <div>
-                      <strong>{message.author}</strong>
-                      <span>{new Date(message.created_at).toLocaleString('fr-BE', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                    </div>
-                    <p>{message.content}</p>
-                  </article>
-                ))}
-              </div>
-
-              <form className="chat-form" onSubmit={sendMessage}>
-                <select value={chatAuthor} onChange={(event) => setChatAuthor(event.target.value)} aria-label="Auteur">
-                  <option>Alain</option>
-                  <option>Esther</option>
-                </select>
-                <input
-                  value={chatDraft}
-                  onChange={(event) => setChatDraft(event.target.value)}
-                  placeholder="Ecrire un message"
-                />
-                <button type="submit" aria-label="Envoyer">
-                  <Send size={19} />
-                </button>
-              </form>
-              {chatStatus && <p className="hint">{chatStatus}</p>}
-            </section>
+            <MessagingErrorBoundary>
+              <MessagingDashboard
+                supabase={supabase}
+                currentUserId={session?.user?.id || ''}
+                currentUserName={session?.user?.id === ESTHER_USER_ID ? 'Esther' : 'Alain'}
+                peerId={session?.user?.id === ALAIN_USER_ID ? ESTHER_USER_ID : ALAIN_USER_ID}
+                peerName={session?.user?.id === ALAIN_USER_ID ? 'Esther' : 'Alain'}
+              />
+            </MessagingErrorBoundary>
           </section>
         )}
 
