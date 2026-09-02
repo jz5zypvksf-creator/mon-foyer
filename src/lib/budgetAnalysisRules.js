@@ -5,6 +5,8 @@ import {
   recurringSourceMonthForBudget,
 } from './cardPaymentRules.js';
 
+export const PENDING_CSV_IMPORT_STATUS = "Débité en banque - En attente d'import CSV";
+
 function amount(value) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
@@ -191,7 +193,7 @@ export function findOutstandingRecurringExpenses({
       recurringExpenseId: expense.id,
       frequency: expense.frequency || 'monthly',
       accountingNature: expense.accountingNature || expense.accounting_nature || ACCOUNTING_NATURES.EXPENSE,
-      statusLabel: "Débité en banque - En attente d'import CSV",
+      statusLabel: PENDING_CSV_IMPORT_STATUS,
     }];
   });
 }

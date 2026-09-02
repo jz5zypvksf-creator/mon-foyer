@@ -54,7 +54,11 @@ import {
   readOperationOutbox,
   writeOperationOutbox,
 } from './lib/syncOutbox.js';
-import { analyzeBudget, findOutstandingRecurringExpenses } from './lib/budgetAnalysisRules.js';
+import {
+  analyzeBudget,
+  findOutstandingRecurringExpenses,
+  PENDING_CSV_IMPORT_STATUS,
+} from './lib/budgetAnalysisRules.js';
 import { accountingNature, isBudgetExpense, isInternalTransfer } from './lib/accountingClassification.js';
 import { belongsToHouseholdFoodBudget, foodBudgetVisualStatus } from './lib/foodBudgetRules.js';
 import {
@@ -769,6 +773,16 @@ export default function App() {
     selectedMonth,
     currentDate: today,
   }), [data.operations, data.recurringFixedExpenses, selectedMonth, today]);
+
+  const pendingCsvImportTotal = useMemo(
+    () => outstandingRecurringExpenses.reduce((sum, operation) => (
+      operation.pendingCsvImport && operation.statusLabel === PENDING_CSV_IMPORT_STATUS
+        ? sum + Number(operation.amount || 0)
+        : sum
+    ), 0),
+    [outstandingRecurringExpenses],
+  );
+  const anticipatedNetBalance = availableForPayments - pendingCsvImportTotal;
 
   const scheduledExpenses = useMemo(() => {
     const explicitScheduledExpenses = monthOperations
@@ -2640,6 +2654,11 @@ export default function App() {
               <div>
                 <span>Disponible total actuel</span>
                 <strong>{formatMoney(availableForPayments)}</strong>
+                {pendingCsvImportTotal > 0 ? (
+                  <small className="hero-anticipated-balance">
+                    Solde net anticipé : {formatMoney(anticipatedNetBalance)}
+                  </small>
+                ) : null}
                 <div className="hero-balance-grid">
                   {PAYMENT_METHODS.filter((method) => method !== MASTERCARD_PAYMENT_METHOD).map((method) => (
                     <div key={method}>

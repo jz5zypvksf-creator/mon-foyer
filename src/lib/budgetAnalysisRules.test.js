@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeBudget, findOutstandingRecurringExpenses } from './budgetAnalysisRules.js';
+import {
+  analyzeBudget,
+  findOutstandingRecurringExpenses,
+  PENDING_CSV_IMPORT_STATUS,
+} from './budgetAnalysisRules.js';
 
 function rows(month, income, expenses) {
   return [
@@ -162,7 +166,7 @@ test('une récurrence passée sans import reste due dans le mois courant', () =>
   assert.equal(outstanding.length, 1);
   assert.equal(outstanding[0].amount, 125.40);
   assert.equal(outstanding[0].pendingCsvImport, true);
-  assert.equal(outstanding[0].statusLabel, "Débité en banque - En attente d'import CSV");
+  assert.equal(outstanding[0].statusLabel, PENDING_CSV_IMPORT_STATUS);
 });
 
 test('la ligne virtuelle disparaît dès qu’un libellé bancaire similaire est importé', () => {
