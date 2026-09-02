@@ -27,8 +27,8 @@ revoke all on function private.bank_snapshot_date(text) from public, anon, authe
 create or replace function private.preserve_newest_bank_snapshot()
 returns trigger
 language plpgsql
-security invoker
-set search_path = ''
+security definer
+set search_path = pg_catalog
 as $$
 begin
   if private.bank_snapshot_date(new.balance_date)
@@ -50,6 +50,11 @@ begin
   return new;
 end;
 $$;
+
+revoke all on function private.preserve_newest_bank_snapshot() from public, anon, authenticated;
+
+comment on function private.preserve_newest_bank_snapshot() is
+  'Trigger interne SECURITY DEFINER protégeant le snapshot Belfius le plus récent; search_path verrouillé sur pg_catalog.';
 
 drop trigger if exists preserve_newest_bank_snapshot on public.bank_snapshots;
 create trigger preserve_newest_bank_snapshot
