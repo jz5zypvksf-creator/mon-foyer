@@ -54,7 +54,7 @@ import {
   readOperationOutbox,
   writeOperationOutbox,
 } from './lib/syncOutbox.js';
-import { analyzeBudget } from './lib/budgetAnalysisRules.js';
+import { analyzeBudget, findOutstandingRecurringExpenses } from './lib/budgetAnalysisRules.js';
 import { accountingNature, isBudgetExpense, isInternalTransfer } from './lib/accountingClassification.js';
 import { belongsToHouseholdFoodBudget, foodBudgetVisualStatus } from './lib/foodBudgetRules.js';
 import {
@@ -763,10 +763,20 @@ export default function App() {
     [liveBelfiusSnapshot, paymentBalances],
   );
 
+  const outstandingRecurringExpenses = useMemo(() => findOutstandingRecurringExpenses({
+    recurringExpenses: data.recurringFixedExpenses || [],
+    operations: data.operations,
+    selectedMonth,
+    currentDate: today,
+  }), [data.operations, data.recurringFixedExpenses, selectedMonth, today]);
+
   const scheduledExpenses = useMemo(() => {
-    const scheduleCutoff = selectedMonth === today.slice(0, 7) && today > balanceCutoff ? today : balanceCutoff;
     const explicitScheduledExpenses = monthOperations
       .filter((operation) => operation.type !== 'income' && operation.date > today);
+
+    const outstandingByRecurringId = new Map(
+      outstandingRecurringExpenses.map((operation) => [operation.recurringExpenseId, operation]),
+    );
 
     const existingFixedSignatures = new Set(
       monthOperations
@@ -783,6 +793,7 @@ export default function App() {
         const settlementDate = isMastercardPaymentMethod(paymentMethod)
           ? mastercardSettlementDate(purchaseDate)
           : '';
+        const outstanding = outstandingByRecurringId.get(expense.id);
         return {
         id: `recurring-${expense.id}-${selectedMonth}`,
         date: purchaseDate,
@@ -798,11 +809,16 @@ export default function App() {
         recurringExpenseId: expense.id,
         frequency: expense.frequency || 'monthly',
         accountingNature: expense.accountingNature || expense.accounting_nature || accountingNature({ type: 'fixed', ...expense }),
+        ...(outstanding ? {
+          virtualRecurring: true,
+          pendingCsvImport: true,
+          statusLabel: outstanding.statusLabel,
+        } : {}),
         };
       })
       .filter(Boolean)
       .filter((operation) => (
-        (operation.settlementDate || operation.date) > balanceCutoff
+        ((operation.settlementDate || operation.date) > balanceCutoff || operation.pendingCsvImport)
         && (operation.settlementDate || operation.date).slice(0, 7) === selectedMonth
         && !existingFixedSignatures.has(fixedExpenseSignature(operation))
       ));
@@ -813,6 +829,7 @@ export default function App() {
     balanceCutoff,
     data.recurringFixedExpenses,
     monthOperations,
+    outstandingRecurringExpenses,
     selectedMonth,
     today,
   ]);
@@ -1025,11 +1042,17 @@ export default function App() {
     items: [...reviewMap.entries()].map(([operationId, reasons]) => ({ operationId, reasons })),
   }), [reviewMap]);
 
+  const historyMonthOperations = useMemo(
+    () => [...monthOperations, ...outstandingRecurringExpenses]
+      .sort((left, right) => right.date.localeCompare(left.date)),
+    [monthOperations, outstandingRecurringExpenses],
+  );
+
   const filteredMonthOperations = useMemo(() => {
     const search = historySearch.trim().toLowerCase();
     // L'Historique est le registre des écritures sauvegardées pour le mois choisi.
     // Une écriture future reste visible et est distinguée comme « Prévue » dans la liste.
-    return monthOperations.filter((operation) => {
+    return historyMonthOperations.filter((operation) => {
       const category = data.categories.find((item) => item.id === operation.category);
       const haystack = [
         operation.label,
@@ -1048,7 +1071,7 @@ export default function App() {
       if (search && !haystack.includes(search)) return false;
       return true;
     });
-  }, [data.categories, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, monthOperations, reviewMap, showReviewOnly]);
+  }, [data.categories, historyCategory, historyMonthOperations, historyPaymentMethod, historyPerson, historySearch, historyType, reviewMap, showReviewOnly]);
 
   const historyTotals = useMemo(() => { const filteredTotals = calculateTotals(filteredMonthOperations, foodBudgetExcluded); const defaultBudgetView = historyType === 'all' && historyPerson === 'all' && historyCategory === 'all' && historyPaymentMethod === 'all' && !historySearch.trim() && !showReviewOnly; const income = defaultBudgetView ? budgetIncomeTotal : filteredTotals.income; return { ...filteredTotals, income, balance: income - filteredTotals.fixed - filteredTotals.variable, expenses: filteredTotals.fixed + filteredTotals.variable }; }, [budgetIncomeTotal, filteredMonthOperations, foodBudgetExcluded, historyCategory, historyPaymentMethod, historyPerson, historySearch, historyType, showReviewOnly]);
 
@@ -3224,7 +3247,7 @@ export default function App() {
         {activeView === 'history' && (
           <OperationHistory
             operations={data.operations}
-            monthOperations={monthOperations}
+            monthOperations={historyMonthOperations}
             filteredMonthOperations={filteredMonthOperations}
             categories={data.categories}
             selectedMonth={selectedMonth}

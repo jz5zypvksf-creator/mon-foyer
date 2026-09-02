@@ -34,7 +34,8 @@ test('la synthèse et les modules complémentaires occupent deux colonnes indép
 });
 
 test('l’Historique masque les écritures futures du mois courant', () => {
-  assert.match(app, /return monthOperations\.filter\(\(operation\) => \{/);
+  assert.match(app, /return historyMonthOperations\.filter\(\(operation\) => \{/);
+  assert.match(app, /\.\.\.monthOperations, \.\.\.outstandingRecurringExpenses/);
   assert.match(operationHistory, /const currentMonth = today\.slice\(0, 7\);/);
   assert.match(operationHistory, /monthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
   assert.match(operationHistory, /filteredMonthOperations\.filter\(\(operation\) => operation\.date <= today\)/);

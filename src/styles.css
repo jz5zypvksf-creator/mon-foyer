@@ -487,6 +487,25 @@ h2 {
   background: rgba(179, 75, 75, 0.06);
 }
 
+.operation-row.virtual-recurring {
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  padding-inline: 10px;
+  border: 1px dashed #aeb8b3;
+  border-radius: 14px;
+  background: #f2f4f3;
+  color: #65706b;
+  filter: grayscale(0.35);
+}
+
+.operation-row.virtual-recurring .icon-bubble {
+  background: #dfe4e1;
+  color: #65706b;
+}
+
+.operation-row em.virtual-recurring-status {
+  color: #65706b;
+}
+
 .operation-row button {
   display: grid;
   place-items: center;
