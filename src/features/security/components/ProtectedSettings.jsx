@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Fingerprint,
   KeyRound,
@@ -10,21 +10,13 @@ import {
   ShoppingBasket,
   UserRoundCog,
 } from 'lucide-react';
-import { householdId, supabase } from './infrastructure/supabase/supabaseClient.js';
-import { parseMoney } from './domain/money/money.js';
-import { normalizeStandingOrderReference, standingOrderAlreadyAssigned } from './lib/configurationRules.js';
+import { householdId, supabase } from '../../../infrastructure/supabase/supabaseClient.js';
+import { parseMoney } from '../../../domain/money/money.js';
+import { normalizeStandingOrderReference, standingOrderAlreadyAssigned } from '../../../lib/configurationRules.js';
+import useBiometricAuth from '../hooks/useBiometricAuth.js';
 import './ProtectedSettings.css';
 
 const moneyInput = (value) => Number(value || 0).toFixed(2).replace('.', ',');
-
-function friendlyAuthError(error) {
-  const code = error?.code || '';
-  if (code === 'passkey_disabled') return 'Face ID doit encore être activé dans la configuration sécurisée Supabase.';
-  if (code === 'webauthn_credential_not_found') return 'Aucune passkey Face ID n’est encore enregistrée pour ce compte.';
-  if (code === 'webauthn_credential_exists') return 'Face ID est déjà configuré sur cet appareil.';
-  if (String(error?.message || '').toLowerCase().includes('cancel')) return 'Identification Face ID annulée.';
-  return error?.message || 'Identification impossible.';
-}
 
 function SavingsSettingRow({ goal, savingsGoals, onSaved }) {
   const [draft, setDraft] = useState(() => ({
@@ -147,10 +139,17 @@ export default function ProtectedSettings({
   const [newPerson, setNewPerson] = useState('');
   const [newSavings, setNewSavings] = useState({ label: '', saved: '0,00', target: '0,00', monthlyAmount: '0,00', op: '', day: '' });
   const [sectionStatus, setSectionStatus] = useState('');
-
-  const passkeySupported = useMemo(() => (
-    Boolean(window.PublicKeyCredential && supabase?.auth?.registerPasskey && supabase?.auth?.signInWithPasskey)
-  ), []);
+  const {
+    authenticateBiometrics,
+    biometricLabel,
+    clearBiometricStatus,
+    configurationRequired,
+    hasRegisteredBiometrics,
+    isBusy: biometricBusy,
+    isSupported: biometricSupported,
+    registerBiometrics,
+    status: biometricStatus,
+  } = useBiometricAuth(session?.user?.id);
 
   useEffect(() => {
     setEffectiveMonth(selectedMonth);
@@ -177,12 +176,13 @@ export default function ProtectedSettings({
   const unlockWithPassword = async (event) => {
     event.preventDefault();
     if (!session?.user?.email || !password) return;
+    clearBiometricStatus();
     setAuthStatus('Vérification…');
     const previousUserId = session.user.id;
     const { data, error } = await supabase.auth.signInWithPassword({ email: session.user.email, password });
     setPassword('');
     if (error || data.user?.id !== previousUserId) {
-      setAuthStatus(error ? `Accès refusé : ${friendlyAuthError(error)}` : 'Accès refusé.');
+      setAuthStatus(error ? `Accès refusé : ${error.message}` : 'Accès refusé.');
       return;
     }
     setUnlocked(true);
@@ -190,21 +190,13 @@ export default function ProtectedSettings({
   };
 
   const unlockWithFaceId = async () => {
-    setAuthStatus('Identification Face ID…');
-    const expectedUserId = session?.user?.id;
-    const { data, error } = await supabase.auth.signInWithPasskey();
-    if (error || data.user?.id !== expectedUserId) {
-      setAuthStatus(error ? friendlyAuthError(error) : 'La passkey ne correspond pas au compte connecté.');
-      return;
-    }
-    setUnlocked(true);
-    setAuthStatus('Face ID confirmé.');
+    setAuthStatus('');
+    if (await authenticateBiometrics()) setUnlocked(true);
   };
 
   const registerFaceId = async () => {
-    setAuthStatus('Configuration de Face ID…');
-    const { error } = await supabase.auth.registerPasskey();
-    setAuthStatus(error ? friendlyAuthError(error) : 'Face ID est maintenant associé à Mon Foyer sur cet appareil.');
+    setAuthStatus('');
+    await registerBiometrics();
   };
 
   const saveFoodBudget = async () => {
@@ -284,8 +276,15 @@ export default function ProtectedSettings({
           </label>
           <button className="primary-button" type="submit"><KeyRound size={18} /> Déverrouiller</button>
         </form>
-        {passkeySupported && <button className="secondary-button" type="button" onClick={unlockWithFaceId}><Fingerprint size={19} /> Utiliser Face ID</button>}
-        {authStatus && <p className="protected-status">{authStatus}</p>}
+        {biometricSupported && hasRegisteredBiometrics && !configurationRequired ? (
+          <button className="secondary-button" type="button" disabled={biometricBusy} onClick={unlockWithFaceId}>
+            <Fingerprint size={19} /> Utiliser {biometricLabel}
+          </button>
+        ) : null}
+        {biometricSupported && !hasRegisteredBiometrics && !configurationRequired ? (
+          <p className="hint">Déverrouille d’abord avec le mot de passe pour associer cet appareil à {biometricLabel}.</p>
+        ) : null}
+        {(authStatus || biometricStatus) && <p className="protected-status">{authStatus || biometricStatus}</p>}
       </section>
     );
   }
@@ -295,9 +294,14 @@ export default function ProtectedSettings({
       <div className="section-title"><h2><ShieldCheck size={21} /> Paramètres protégés</h2><span>Déverrouillés</span></div>
       <div className="protected-security-actions">
         <button className="secondary-button" type="button" onClick={() => setUnlocked(false)}><LockKeyhole size={17} /> Reverrouiller</button>
-        {passkeySupported && <button className="secondary-button" type="button" onClick={registerFaceId}><Fingerprint size={19} /> Configurer Face ID</button>}
+        {biometricSupported && !configurationRequired ? (
+          <button className="secondary-button" type="button" disabled={biometricBusy} onClick={registerFaceId}>
+            <Fingerprint size={19} />
+            {hasRegisteredBiometrics ? `Associer une autre passkey ${biometricLabel}` : `Associer cet appareil à ${biometricLabel}`}
+          </button>
+        ) : null}
       </div>
-      {authStatus && <p className="protected-status">{authStatus}</p>}
+      {(authStatus || biometricStatus) && <p className="protected-status">{authStatus || biometricStatus}</p>}
 
       <div className="protected-subsection">
         <h3><ShoppingBasket size={19} /> Budget nourriture</h3>
