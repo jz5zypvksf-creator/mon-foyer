@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
       - name: Wire Beobank statement importer
-        shell: python
+        shell: python {0}
         run: |
           from pathlib import Path
           p = Path('src/App.jsx')
