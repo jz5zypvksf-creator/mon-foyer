@@ -109,6 +109,8 @@ const DataBackupRecovery = lazy(() => import('./DataBackupRecovery.jsx'));
 const LeisureVacations = lazy(() => import('./LeisureVacations.jsx'));
 const ProtectedSettings = lazy(() => import('./ProtectedSettings.jsx'));
 const MessagingDashboard = lazy(() => import('./features/messaging/components/MessagingDashboard.jsx'));
+const BudgetIntelligenceDashboard = lazy(() => import('./features/budget-intelligence/components/BudgetIntelligenceDashboard.jsx'));
+const FoodBudgetInsightsContainer = lazy(() => import('./features/budget-intelligence/components/FoodBudgetInsightsContainer.jsx'));
 
 const FOOD_BUDGET = DEFAULT_FOOD_BUDGET;
 const STORAGE_KEY = 'mon-foyer-v1';
@@ -1017,6 +1019,11 @@ export default function App() {
       return alerts;
     }, new Map());
   }, [monthOperations]);
+
+  const anomalySummary = useMemo(() => ({
+    total: reviewMap.size,
+    items: [...reviewMap.entries()].map(([operationId, reasons]) => ({ operationId, reasons })),
+  }), [reviewMap]);
 
   const filteredMonthOperations = useMemo(() => {
     const search = historySearch.trim().toLowerCase();
@@ -2683,6 +2690,18 @@ export default function App() {
               </p>
                 </section>
 
+                <Suspense fallback={<section className="panel" role="status">Chargement de l’analyse nourriture…</section>}>
+                  <FoodBudgetInsightsContainer
+                    operations={data.operations}
+                    budgetSettings={budgetSettings}
+                    selectedMonth={selectedMonth}
+                    currentBudget={foodBudget}
+                    spent={totals.food}
+                    excludedPeople={foodBudgetExcluded}
+                    currentDate={today}
+                  />
+                </Suspense>
+
                 <BudgetAnalysis analysis={budgetAnalysis} />
 
                 <MonthEndAudit
@@ -2721,6 +2740,10 @@ export default function App() {
             <div className="leisure-launch-card">
               <div><strong>Loisirs / Vacances</strong><span>Suivre le solde Beobank et enregistrer restaurants, hôtels et voyages.</span></div>
               <button type="button" onClick={() => setActiveView('leisure')}>Ouvrir</button>
+            </div>
+            <div className="leisure-launch-card">
+              <div><strong>Intelligence budgétaire</strong><span>Comprendre les résultats certifiés sur un, trois ou six mois.</span></div>
+              <button type="button" onClick={() => setActiveView('budget-intelligence')}>Analyser</button>
             </div>
               </div>
             </div>
@@ -3239,6 +3262,17 @@ export default function App() {
                 peerName={session?.user?.id === ALAIN_USER_ID ? 'Esther' : 'Alain'}
               />
             </MessagingErrorBoundary>
+          </section>
+        )}
+
+        {activeView === 'budget-intelligence' && (
+          <section className="view">
+            <BudgetIntelligenceDashboard
+              monthlyAudit={monthEndAudit}
+              budgetAnalysis={budgetAnalysis}
+              anomalySummary={anomalySummary}
+              onBack={() => setActiveView('home')}
+            />
           </section>
         )}
 
