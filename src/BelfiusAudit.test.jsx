@@ -24,6 +24,42 @@ const appRow = (id, overrides = {}) => ({
 });
 
 describe('rapprochement bancaire Belfius', () => {
+  it('reconnaît universellement un débit comptabilisé après la date d’achat, même au changement de mois', () => {
+    const result = reconcileBelfiusRows([
+      bankRow('delhaize-bank', {
+        date: '2026-09-01', amount: -47.72, label: 'DELHAIZE HERSTAL',
+      }),
+    ], [
+      appRow('delhaize-app', {
+        date: '2026-08-30', amount: 47.72, label: 'Delhaize Herstal - nourriture',
+        category: 'nourriture',
+      }),
+    ], '2026-09', []);
+
+    expect(result.matched).toHaveLength(1);
+    expect(result.matched[0].bank.id).toBe('delhaize-bank');
+    expect(result.matched[0].app.id).toBe('delhaize-app');
+    expect(result.missing).toHaveLength(0);
+    expect(result.extra).toHaveLength(0);
+  });
+
+  it('ne rapproche pas un débit retardé sur le seul critère du montant', () => {
+    const result = reconcileBelfiusRows([
+      bankRow('unrelated-bank', {
+        date: '2026-09-01', amount: -47.72, label: 'AUTRE COMMERCANT',
+      }),
+    ], [
+      appRow('delhaize-app', {
+        date: '2026-08-30', amount: 47.72, label: 'Delhaize Herstal - nourriture',
+        category: 'nourriture',
+      }),
+    ], '2026-09', []);
+
+    expect(result.matched).toHaveLength(0);
+    expect(result.review).toHaveLength(1);
+    expect(result.missing).toHaveLength(0);
+  });
+
   it('ventile un débit MEGA unique entre les lignes Électricité et Gaz', () => {
     const result = reconcileBelfiusRows([
       bankRow('mega-bank', {
