@@ -30,13 +30,13 @@ describe('rapprochement bancaire Belfius', () => {
         date: '2026-09-01', amount: -350, label: 'MEGA (POWER ONLINE SA)',
         details: 'Domiciliation européenne MEGA',
       }),
-    ], [
-      appRow('electricity', { date: '2026-09-01', amount: 210, category: 'habitation', label: 'Électricité' }),
-      appRow('gas', { date: '2026-09-01', amount: 140, category: 'habitation', label: 'Gaz' }),
-    ], '2026-09', []);
+    ], [], '2026-09', [
+      { id: 'electricity', day: 3, amount: 220, category: 'electricite', person: 'Foyer', label: 'MEGA (POWER ONLINE SA)', frequency: 'monthly' },
+      { id: 'gas', day: 3, amount: 130, category: 'gaz', person: 'Foyer', label: 'MEGA (POWER ONLINE SA)', frequency: 'monthly' },
+    ]);
 
     expect(result.splits).toHaveLength(1);
-    expect(result.splits[0].app.map((row) => row.id)).toEqual(['electricity', 'gas']);
+    expect(result.splits[0].app.map((row) => row.recurringExpenseId)).toEqual(['electricity', 'gas']);
     expect(result.missing).toHaveLength(0);
     expect(result.extra).toHaveLength(0);
   });
@@ -45,13 +45,14 @@ describe('rapprochement bancaire Belfius', () => {
     const banks = ['bank-1', 'bank-2', 'bank-3'].map((id) => bankRow(id, {
       label: 'DONATE.JW.ORG-CGJG', details: 'Paiement DONATE.JW.ORG',
     }));
-    const apps = ['app-1', 'app-2', 'app-3'].map((id) => appRow(id, {
-      label: 'DONATE JW', store: 'DONATE.JW.ORG',
+    const recurring = ['app-1', 'app-2', 'app-3'].map((id) => ({
+      id, day: 1, amount: 10, category: 'don', person: 'Foyer',
+      label: 'DONATE JW', frequency: 'monthly',
     }));
 
-    const result = reconcileBelfiusRows(banks, apps, '2026-09', []);
+    const result = reconcileBelfiusRows(banks, [], '2026-09', recurring);
 
-    expect(result.matched.map(({ app }) => app.id)).toEqual(['app-1', 'app-2', 'app-3']);
+    expect(result.matched.map(({ app }) => app.recurringExpenseId)).toEqual(['app-1', 'app-2', 'app-3']);
     expect(result.matched.slice(0, 2).every(({ reason }) => reason.includes('FIFO'))).toBe(true);
     expect(result.review).toHaveLength(0);
     expect(result.missing).toHaveLength(0);

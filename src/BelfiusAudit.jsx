@@ -361,6 +361,66 @@ function recurringBelongsToAppRow(expense, appRow) {
   return labelCompatible || (categoryCompatible && personCompatible);
 }
 
+const RECURRING_INTERVAL_MONTHS = Object.freeze({ monthly: 1, quarterly: 3, semiannual: 6, annual: 12 });
+
+function recurringOccursInMonth(expense, month) {
+  const interval = RECURRING_INTERVAL_MONTHS[expense?.frequency || 'monthly'] || 1;
+  const startMonth = String(expense?.startDate || expense?.start_date || `${month}-01`).slice(0, 7);
+  const [startYear, startNumber] = startMonth.split('-').map(Number);
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (![startYear, startNumber, year, monthNumber].every(Number.isFinite)) return false;
+  const distance = (year - startYear) * 12 + monthNumber - startNumber;
+  return distance >= 0 && distance % interval === 0;
+}
+
+function recurringDateInMonth(expense, month) {
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (!year || !monthNumber) return '';
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const day = Math.min(Math.max(Number(expense?.day) || 1, 1), lastDay);
+  return `${month}-${String(day).padStart(2, '0')}`;
+}
+
+function recurringAlreadyRepresented(expense, operations, expectedDate) {
+  const expectedAmount = Math.abs(Number(expense?.amount) || 0);
+  return (operations || []).some((row) => (
+    Math.abs(Math.abs(Number(row?.amount) || 0) - expectedAmount) <= AMOUNT_TOLERANCE
+    && dateDistance(row?.date, expectedDate) <= 14
+    && recurringBelongsToAppRow(expense, row)
+  ));
+}
+
+function recurringAuditCandidates(bankRows, recurringExpenses, persistedAppRows, auditMonth) {
+  return (recurringExpenses || []).flatMap((expense) => {
+    const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
+    if (expense?.active === false || paymentMethod !== 'Compte Belfius') return [];
+    if (!recurringOccursInMonth(expense, auditMonth) || Number(expense?.amount || 0) <= 0) return [];
+
+    const date = recurringDateInMonth(expense, auditMonth);
+    if (!date || recurringAlreadyRepresented(expense, persistedAppRows, date)) return [];
+    const candidate = {
+      id: `audit-recurring-${expense.id}-${auditMonth}`,
+      date,
+      amount: Math.abs(Number(expense.amount) || 0),
+      type: 'fixed',
+      category: expense.category || 'divers',
+      person: expense.person || 'Foyer',
+      paymentMethod,
+      label: expense.label || 'Frais récurrent',
+      projectedRecurring: true,
+      recurringExpenseId: expense.id,
+    };
+    const hasCompatibleBankMovement = (bankRows || []).some((bankRow) => (
+      Number(bankRow?.amount || 0) < 0
+      && dateDistance(bankRow.date, date) <= 14
+      && (aliasMatch(bankRow, candidate)
+        || labelsLikelyMatch(bankRow, candidate)
+        || Boolean(strongCommunicationMatch(bankRow, expense)))
+    ));
+    return hasCompatibleBankMovement ? [candidate] : [];
+  });
+}
+
 function findRecurringMatch(bankRow, appRow, recurringExpenses) {
   if (bankRow.amount >= 0 || appRow.type === 'income') return null;
   const operationAmount = Math.abs(Number(appRow.amount) || 0);
@@ -680,7 +740,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .filter((row) => !compensationFundingRows.has(row))
     .filter((row) => !classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching)
     .map((row) => ({ ...row }));
-  const appRows = operations
+  const persistedAppRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
     .filter((row) => !isBeobankSavingsAppRow(row))
@@ -688,6 +748,10 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .filter((row) => !compensationAppRows.has(row))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
+  const appRows = [
+    ...persistedAppRows,
+    ...recurringAuditCandidates(monthBankRows, recurringExpenses, persistedAppRows, auditMonth),
+  ];
 
   const usedBank = new Set();
   const usedApp = new Set();
