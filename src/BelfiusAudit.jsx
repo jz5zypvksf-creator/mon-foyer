@@ -60,7 +60,10 @@ const BELFIUS_ALIASES = [
   { bank: ['office national de l emploi'], app: ['onem'] },
   { bank: ['rexel belgium'], app: ['salaire esther'] },
   { bank: ['stellantis financial', 'psa finance'], app: ['psa finance'] },
-  { bank: ['mega power online', 'mega'], app: ['mega'] },
+  {
+    bank: ['mega power online', 'mega'],
+    app: ['mega', 'electricite', 'gaz', 'energie'],
+  },
   { bank: ['proximus'], app: ['proximus', 'tv internet', 'gsm'] },
   { bank: ['test achats', 'test aankoop'], app: ['test achats'] },
   { bank: ['dats24', 'q8 easy', 'total'], app: ['carburant', 'essence', 'diesel'] },
@@ -229,6 +232,99 @@ function aliasMatch(bankRow, appRow) {
   ));
 }
 
+const COMPENSATION_TOKEN_STOP_WORDS = new Set([
+  'belfius', 'mobile', 'versement', 'virement', 'instantane', 'communication',
+  'reference', 'compte', 'depuis', 'pour', 'valeur',
+]);
+
+function editDistance(left, right) {
+  if (left === right) return 0;
+  if (!left) return right.length;
+  if (!right) return left.length;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+function meaningfulTokens(value) {
+  return normalize(value).split(' ').filter((token) => (
+    token.length >= 5 && !COMPENSATION_TOKEN_STOP_WORDS.has(token) && !/^\d+$/.test(token)
+  ));
+}
+
+function compensationLabelsMatch(expenseRow, fundingRow) {
+  const expenseTokens = meaningfulTokens(expenseRow?.label || expenseRow?.communication || '');
+  const fundingTokens = meaningfulTokens(fundingRow?.communication || fundingRow?.label || '');
+  return expenseTokens.some((expenseToken) => fundingTokens.some((fundingToken) => (
+    expenseToken === fundingToken
+    || (Math.min(expenseToken.length, fundingToken.length) >= 6 && editDistance(expenseToken, fundingToken) <= 1)
+  )));
+}
+
+function isLikelySavingsFunding(row) {
+  if (Number(row?.amount || 0) <= 0) return false;
+  const text = normalize(`${row?.details || ''} ${row?.rawDetails || ''}`);
+  return text.includes('versement du') || text.includes('transfert depuis');
+}
+
+function isSavingsWithdrawalAppRow(row) {
+  const direction = row?.savingsDirection || row?.savings_direction || '';
+  return direction === 'out' || normalize(row?.label || '').startsWith('transfert depuis epargne');
+}
+
+function findSavingsCompensations(bankRows, auditMonth) {
+  const usedFunding = new Set();
+  const expenses = (bankRows || []).filter((row) => (
+    Number(row?.amount || 0) < 0 && String(row?.date || '').slice(0, 7) === auditMonth
+  ));
+  const fundingRows = (bankRows || [])
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => isLikelySavingsFunding(row));
+
+  return expenses.flatMap((expense) => {
+    const selected = fundingRows.find(({ row, index }) => (
+      !usedFunding.has(index)
+      && dateDistance(row.date, expense.date) <= 5
+      && Math.abs(Math.abs(Number(row.amount) || 0) - Math.abs(Number(expense.amount) || 0)) <= AMOUNT_TOLERANCE
+      && compensationLabelsMatch(expense, row)
+    ));
+    if (!selected) return [];
+    usedFunding.add(selected.index);
+    return [{
+      funding: selected.row,
+      expense,
+      amount: Math.abs(Number(expense.amount) || 0),
+      confidence: 99,
+      reason: 'Retrait d’épargne compensatoire + facture bancaire, sans double dépense',
+    }];
+  });
+}
+
+function attachSavingsAppRows(compensations, operations, auditMonth) {
+  const usedApp = new Set();
+  return compensations.map((compensation) => {
+    const candidate = (operations || []).find((row) => {
+      if (usedApp.has(row.id) || !isSavingsWithdrawalAppRow(row)) return false;
+      const budgetMonth = row?.budgetMonth || row?.budget_month || String(row?.date || '').slice(0, 7);
+      return budgetMonth === auditMonth
+        && dateDistance(row.date, compensation.funding.date) <= DATE_TOLERANCE_DAYS
+        && Math.abs(Math.abs(Number(row.amount) || 0) - compensation.amount) <= AMOUNT_TOLERANCE;
+    });
+    if (candidate?.id) usedApp.add(candidate.id);
+    return { ...compensation, appFunding: candidate || null };
+  });
+}
+
 function bankHasKnownAlias(bankRow) {
   const bankLabel = labelText(bankRow);
   return BELFIUS_ALIASES.some((alias) => alias.bank.some((needle) => bankLabel.includes(needle)));
@@ -263,6 +359,66 @@ function recurringBelongsToAppRow(expense, appRow) {
   const categoryCompatible = expense.category && appRow.category && expense.category === appRow.category;
   const personCompatible = expense.person && appRow.person && expense.person === appRow.person;
   return labelCompatible || (categoryCompatible && personCompatible);
+}
+
+const RECURRING_INTERVAL_MONTHS = Object.freeze({ monthly: 1, quarterly: 3, semiannual: 6, annual: 12 });
+
+function recurringOccursInMonth(expense, month) {
+  const interval = RECURRING_INTERVAL_MONTHS[expense?.frequency || 'monthly'] || 1;
+  const startMonth = String(expense?.startDate || expense?.start_date || `${month}-01`).slice(0, 7);
+  const [startYear, startNumber] = startMonth.split('-').map(Number);
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (![startYear, startNumber, year, monthNumber].every(Number.isFinite)) return false;
+  const distance = (year - startYear) * 12 + monthNumber - startNumber;
+  return distance >= 0 && distance % interval === 0;
+}
+
+function recurringDateInMonth(expense, month) {
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (!year || !monthNumber) return '';
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const day = Math.min(Math.max(Number(expense?.day) || 1, 1), lastDay);
+  return `${month}-${String(day).padStart(2, '0')}`;
+}
+
+function recurringAlreadyRepresented(expense, operations, expectedDate) {
+  const expectedAmount = Math.abs(Number(expense?.amount) || 0);
+  return (operations || []).some((row) => (
+    Math.abs(Math.abs(Number(row?.amount) || 0) - expectedAmount) <= AMOUNT_TOLERANCE
+    && dateDistance(row?.date, expectedDate) <= 14
+    && recurringBelongsToAppRow(expense, row)
+  ));
+}
+
+function recurringAuditCandidates(bankRows, recurringExpenses, persistedAppRows, auditMonth) {
+  return (recurringExpenses || []).flatMap((expense) => {
+    const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
+    if (expense?.active === false || paymentMethod !== 'Compte Belfius') return [];
+    if (!recurringOccursInMonth(expense, auditMonth) || Number(expense?.amount || 0) <= 0) return [];
+
+    const date = recurringDateInMonth(expense, auditMonth);
+    if (!date || recurringAlreadyRepresented(expense, persistedAppRows, date)) return [];
+    const candidate = {
+      id: `audit-recurring-${expense.id}-${auditMonth}`,
+      date,
+      amount: Math.abs(Number(expense.amount) || 0),
+      type: 'fixed',
+      category: expense.category || 'divers',
+      person: expense.person || 'Foyer',
+      paymentMethod,
+      label: expense.label || 'Frais récurrent',
+      projectedRecurring: true,
+      recurringExpenseId: expense.id,
+    };
+    const hasCompatibleBankMovement = (bankRows || []).some((bankRow) => (
+      Number(bankRow?.amount || 0) < 0
+      && dateDistance(bankRow.date, date) <= 14
+      && (aliasMatch(bankRow, candidate)
+        || labelsLikelyMatch(bankRow, candidate)
+        || Boolean(strongCommunicationMatch(bankRow, expense)))
+    ));
+    return hasCompatibleBankMovement ? [candidate] : [];
+  });
 }
 
 function findRecurringMatch(bankRow, appRow, recurringExpenses) {
@@ -457,12 +613,30 @@ function possibleSplit(bankRow, indexedAppRows, recurringExpenses) {
     .filter(({ row }) => row.type !== 'income')
     .filter(({ row }) => dateDistance(row.date, bankRow.date) <= DATE_TOLERANCE_DAYS)
     .filter(({ row }) => {
+      const recurringIdentity = (recurringExpenses || []).some((expense) => (
+        recurringBelongsToAppRow(expense, row) && Boolean(strongCommunicationMatch(bankRow, expense))
+      ));
       // Un bénéficiaire connu ne peut être ventilé que vers une famille compatible.
-      if (bankHasKnownAlias(bankRow)) return aliasMatch(bankRow, row) || labelsLikelyMatch(bankRow, row);
+      if (bankHasKnownAlias(bankRow)) return aliasMatch(bankRow, row) || labelsLikelyMatch(bankRow, row) || recurringIdentity;
       const recurring = findRecurringMatch(bankRow, row, recurringExpenses);
-      return labelsLikelyMatch(bankRow, row) || Boolean(recurring);
+      return labelsLikelyMatch(bankRow, row) || Boolean(recurring) || recurringIdentity;
     });
   return findSubsetByAmount(candidates, Math.abs(bankRow.amount), ({ row }) => row.amount);
+}
+
+function fifoIdentity(row) {
+  return [
+    normalize(row?.label || ''),
+    normalize(row?.store || ''),
+    row?.type || '',
+    row?.category || '',
+    row?.person || 'Foyer',
+    Math.abs(Number(row?.amount) || 0).toFixed(2),
+  ].join('|');
+}
+
+function candidatesAreFifoEquivalent(candidates) {
+  return candidates.length > 1 && new Set(candidates.map(({ row }) => fifoIdentity(row))).size === 1;
 }
 
 function bankBeneficiaryKey(row) {
@@ -553,22 +727,31 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
  * Les correspondances automatiques exigent une preuve forte ; les cas ambigus restent
  * proposés à l’utilisateur pour confirmation explicite.
  */
-function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
+export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
+  const compensations = attachSavingsAppRows(findSavingsCompensations(bankRows, auditMonth), operations, auditMonth);
+  const compensationFundingRows = new Set(compensations.map(({ funding }) => funding));
+  const compensationAppRows = new Set(compensations.map(({ appFunding }) => appFunding).filter(Boolean));
   // Les transferts vers Beobank sont des transferts internes d'épargne Vacances/Loisirs.
   // Ils sont pris en charge par detectSavingsTransfers et ne participent jamais au moteur
   // de correspondances de dépenses/revenus (sinon un même montant peut proposer Mega, etc.).
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    .filter((row) => !compensationFundingRows.has(row))
     .filter((row) => !classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching)
     .map((row) => ({ ...row }));
-  const appRows = operations
+  const persistedAppRows = operations
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
     .filter((row) => !isBeobankSavingsAppRow(row))
     .filter((row) => !normalize(row.label || '').startsWith('epargne '))
+    .filter((row) => !compensationAppRows.has(row))
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
+  const appRows = [
+    ...persistedAppRows,
+    ...recurringAuditCandidates(monthBankRows, recurringExpenses, persistedAppRows, auditMonth),
+  ];
 
   const usedBank = new Set();
   const usedApp = new Set();
@@ -603,6 +786,18 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
     }
 
     if (automatic.length > 1) {
+      if (candidatesAreFifoEquivalent(automatic)) {
+        const selected = automatic[0];
+        usedBank.add(bankIndex);
+        usedApp.add(selected.index);
+        matched.push({
+          bank: bankRow,
+          app: selected.row,
+          ...selected.evidence,
+          reason: `${selected.evidence.reason} · consommation FIFO`,
+        });
+        return;
+      }
       // Plusieurs candidats forts : ne pas choisir arbitrairement.
       pendingBank.add(bankIndex);
       automatic.forEach(({ index }) => pendingApp.add(index));
@@ -684,6 +879,7 @@ function reconcile(bankRows, operations, selectedMonth, recurringExpenses, learn
     review,
     splits,
     groups,
+    compensations,
     missing,
     extra,
     bankRows: monthBankRows,
@@ -720,7 +916,7 @@ export default function BelfiusAudit({
   const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
   const [confirmationMessage, setConfirmationMessage] = useState('');
   const result = useMemo(
-    () => audit ? reconcile(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules, savingsGoals) : null,
+    () => audit ? reconcileBelfiusRows(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules, savingsGoals) : null,
     [audit, learnedRules, operations, recurringExpenses, savingsGoals, selectedMonth],
   );
 
@@ -872,6 +1068,7 @@ export default function BelfiusAudit({
             <div className="audit-kpi review"><span><i className="audit-dot" />À confirmer</span><strong>{result.review.length}</strong></div>
             <div className="audit-kpi split"><span><i className="audit-dot" />Ventilations</span><strong>{result.splits.length}</strong></div>
             <div className="audit-kpi group"><span><i className="audit-dot" />Regroupements</span><strong>{result.groups.length}</strong></div>
+            <div className="audit-kpi group"><span><i className="audit-dot" />Flux compensatoires</span><strong>{result.compensations.length}</strong></div>
             <div className="audit-kpi future"><span><i className="audit-dot" />À venir</span><strong>{futureExtra.length}</strong></div>
             <div className="audit-kpi danger"><span><i className="audit-dot" />Anomalies Belfius</span><strong>{monthMissing.length}</strong></div>
             <div className="audit-kpi danger"><span><i className="audit-dot" />Écritures sans mouvement</span><strong>{actionableExtra.length}</strong></div>
@@ -936,6 +1133,23 @@ export default function BelfiusAudit({
                 <article key={bank.id}>
                   <strong>{bank.date} · {bank.label} · {formatMoney(bank.amount)}</strong>
                   <span>{app.map((row) => `${row.label} (${formatMoney(row.amount)})`).join(' + ')} · confiance {confidence}% · {reason}</span>
+                </article>
+              ))}
+            </details>
+          )}
+
+          {result.compensations.length > 0 && (
+            <details className="audit-details status-group" open>
+              <summary><span className="audit-dot" />Flux d’épargne compensatoires ({result.compensations.length})</summary>
+              {result.compensations.map(({ funding, expense, appFunding, confidence, reason }) => (
+                <article key={`${funding.id}-${expense.id}`}>
+                  <strong>
+                    {funding.date} · {funding.label} · +{formatMoney(Math.abs(funding.amount))}
+                    {' → '}{expense.date} · {expense.label} · −{formatMoney(Math.abs(expense.amount))}
+                  </strong>
+                  <span>
+                    {appFunding ? `→ ${appFunding.label} · ` : ''}confiance {confidence}% · {reason}
+                  </span>
                 </article>
               ))}
             </details>
