@@ -12,6 +12,7 @@ import { formatMoney, parseMoney } from './domain/money/money.js';
 
 const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
+const BANK_POSTING_GRACE_DAYS = 5;
 const DAY_MS = 86400000;
 const AUDIT_STORAGE_KEY = 'mon-foyer-belfius-audit-v1';
 const LEARNING_STORAGE_KEY = 'mon-foyer-belfius-learning-v1';
@@ -99,6 +100,20 @@ function parseBalanceMonth(value) {
 function dateDistance(left, right) {
   if (!left || !right) return Number.POSITIVE_INFINITY;
   return Math.abs(Date.parse(`${left}T12:00:00Z`) - Date.parse(`${right}T12:00:00Z`)) / DAY_MS;
+}
+
+function ledgerRowCanPostDuringAudit(row, auditMonth, bankRows) {
+  const operationDate = String(row?.date || '');
+  if (operationDate.slice(0, 7) === auditMonth) return true;
+  if (!operationDate) return false;
+
+  const operationIsCredit = isBankCreditAppOperation(row);
+  return (bankRows || []).some((bankRow) => (
+    String(bankRow?.date || '').slice(0, 7) === auditMonth
+    && bankRow.date >= operationDate
+    && dateDistance(bankRow.date, operationDate) <= BANK_POSTING_GRACE_DAYS
+    && (Number(bankRow.amount || 0) > 0) === operationIsCredit
+  ));
 }
 
 function normalize(value) {
@@ -746,7 +761,10 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .filter((row) => !isBeobankSavingsAppRow(row))
     .filter((row) => !normalize(row.label || '').startsWith('epargne '))
     .filter((row) => !compensationAppRows.has(row))
-    .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
+    // Une opération saisie en fin de mois peut n'être comptabilisée par Belfius
+    // que quelques jours plus tard. Elle reste candidate au rapprochement du mois
+    // bancaire suivant, sans être déplacée dans le grand livre ni comptée comme extra.
+    .filter((row) => ledgerRowCanPostDuringAudit(row, auditMonth, monthBankRows))
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
   const appRows = [
     ...persistedAppRows,
