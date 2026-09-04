@@ -398,10 +398,28 @@ function recurringDateInMonth(expense, month) {
 
 function recurringAlreadyRepresented(expense, operations, expectedDate) {
   const expectedAmount = Math.abs(Number(expense?.amount) || 0);
-  return (operations || []).some((row) => (
-    Math.abs(Math.abs(Number(row?.amount) || 0) - expectedAmount) <= AMOUNT_TOLERANCE
+  const compatibleRows = (operations || []).filter((row) => (
+    row?.type !== 'income'
+    && row?.type !== 'reimbursement'
     && dateDistance(row?.date, expectedDate) <= 14
     && recurringBelongsToAppRow(expense, row)
+  ));
+  const directlyRepresented = compatibleRows.some((row) => (
+    Math.abs(Math.abs(Number(row?.amount) || 0) - expectedAmount) <= AMOUNT_TOLERANCE
+  ));
+  if (directlyRepresented) return true;
+
+  // Une récurrence globale peut déjà être ventilée en plusieurs écritures réelles
+  // dans l'historique. Leur somme exacte neutralise alors la projection globale,
+  // à condition que chaque ligne appartienne clairement au même bénéficiaire.
+  const stronglyRelatedRows = compatibleRows.filter((row) => (
+    labelsLikelyMatch({ label: expense?.label || '', details: '' }, row)
+    || aliasMatch({ label: expense?.label || '', details: '' }, row)
+  ));
+  return Boolean(findSubsetByAmount(
+    stronglyRelatedRows,
+    expectedAmount,
+    (row) => row.amount,
   ));
 }
 

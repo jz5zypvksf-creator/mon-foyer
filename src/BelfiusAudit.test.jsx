@@ -24,6 +24,45 @@ const appRow = (id, overrides = {}) => ({
 });
 
 describe('rapprochement bancaire Belfius', () => {
+  it('rapproche les débits DONATE ventilés avec le total récurrent', () => {
+    const amounts = [10, 10, 30, 10, 30, 10];
+    const banks = amounts.map((amount, index) => bankRow(`donate-bank-${index}`, {
+      date: '2026-09-02', amount: -amount, label: 'DONATE.JW.ORG-CGJG',
+      details: `Paiement DONATE.JW.ORG référence ${index + 1}`,
+    }));
+
+    const result = reconcileBelfiusRows(banks, [], '2026-09', [{
+      id: 'donate-total', day: 1, amount: 100, category: 'don', person: 'Foyer',
+      label: 'DONATE.JW.ORG-CGJG - Dons', frequency: 'monthly',
+    }]);
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].bank.map((row) => Math.abs(row.amount)).reduce((sum, amount) => sum + amount, 0)).toBe(100);
+    expect(result.missing).toHaveLength(0);
+    expect(result.extra).toHaveLength(0);
+  });
+
+  it('ne reprojette pas le total récurrent lorsque l’historique contient déjà toute sa ventilation', () => {
+    const amounts = [10, 10, 30, 10, 30, 10];
+    const banks = amounts.map((amount, index) => bankRow(`donate-bank-${index}`, {
+      date: '2026-09-02', amount: -amount, label: 'DONATE.JW.ORG-CGJG',
+      details: `Paiement DONATE.JW.ORG référence ${index + 1}`,
+    }));
+    const operations = amounts.map((amount, index) => appRow(`donate-app-${index}`, {
+      date: '2026-09-01', amount, label: 'DONATE.JW.ORG-CGJG - Dons', category: 'don',
+    }));
+
+    const result = reconcileBelfiusRows(banks, operations, '2026-09', [{
+      id: 'donate-total', day: 1, amount: 100, category: 'don', person: 'Foyer',
+      label: 'DONATE.JW.ORG-CGJG - Dons', frequency: 'monthly',
+    }]);
+
+    expect(result.matched).toHaveLength(6);
+    expect(result.groups).toHaveLength(0);
+    expect(result.missing).toHaveLength(0);
+    expect(result.extra).toHaveLength(0);
+  });
+
   it('reconnaît universellement un débit comptabilisé après la date d’achat, même au changement de mois', () => {
     const result = reconcileBelfiusRows([
       bankRow('delhaize-bank', {
