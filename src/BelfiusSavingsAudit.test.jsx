@@ -105,6 +105,17 @@ describe('ordres permanents mensuels dans l’audit', () => {
     expect(result.review[0].candidates).toHaveLength(2);
   });
 
+  it('un montant exact ne remplace pas une référence bancaire plus forte', () => {
+    const result = reconcileBelfiusRows([{
+      id: 'bank', date: '2026-09-02', amount: -15.65, label: 'PHARMACIE ALLEUR', details: 'Référence ABC123',
+    }], [
+      { id: 'mandate', date: '2026-09-02', amount: 15.70, type: 'fixed', label: 'Contrat récurrent' },
+      { id: 'pharmacy', date: '2026-09-02', amount: 15.65, type: 'variable', label: 'Pharmacie Alleur' },
+    ], '2026-09', [{ id: 'contract', label: 'Contrat récurrent', amount: 15.70, day: 2, directDebitReference: 'ABC123' }]);
+    expect(result.matched).toHaveLength(0);
+    expect(result.review).toHaveLength(1);
+  });
+
   it('ventile le ticket partagé et conserve le remboursement cash hors de Belfius', () => {
     const result = reconcileBelfiusRows([{
       id: 'ticket', date: '2026-09-14', amount: -33.17, label: 'DELHAIZE HERSTAL',

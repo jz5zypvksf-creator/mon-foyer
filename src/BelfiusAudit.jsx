@@ -832,7 +832,8 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     const exactAmountAutomatic = automatic.filter(({ row }) => (
       Math.round(Math.abs(Number(row.amount)) * 100) === Math.round(Math.abs(Number(bankRow.amount)) * 100)
     ));
-    if (automatic.length > 1 && exactAmountAutomatic.length === 1) {
+    if (automatic.length > 1 && exactAmountAutomatic.length === 1
+      && automatic.every(candidate => candidate.evidence.confidence <= exactAmountAutomatic[0].evidence.confidence)) {
       const selected = exactAmountAutomatic[0];
       usedBank.add(bankIndex);
       usedApp.add(selected.index);
