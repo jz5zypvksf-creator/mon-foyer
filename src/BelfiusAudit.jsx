@@ -9,6 +9,7 @@ import {
 } from './lib/mastercardStatementRules.js';
 import { bankPersonAliasMatch, isBankCreditAppOperation } from './belfiusMatchingRules.js';
 import { formatMoney, parseMoney } from './domain/money/money.js';
+import { auditMonthlySavings, isSavingsAuditEntry } from './lib/monthlySavingsAudit.js';
 
 const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
@@ -158,7 +159,7 @@ function parseCsvLine(line) {
   return cells;
 }
 
-function parseBelfius(text) {
+export function parseBelfius(text) {
   const lines = text.replace(/\r/g, '').split('\n');
   const balanceLine = lines.find((line) => normalize(line).startsWith('dernier solde'));
   const balanceDateLine = lines.find((line) => normalize(line).startsWith('date heure du dernier solde'));
@@ -762,6 +763,17 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
  */
 export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
+  const savingsExpenses = recurringExpenses.filter(expense => (
+    expense.active !== false
+    && (expense.paymentMethod || expense.payment_method || 'Compte Belfius') === 'Compte Belfius'
+    && recurringOccursInMonth(expense, auditMonth)
+    && Number(expense.amount) > 0
+    && isSavingsAuditEntry(expense, savingsGoals)
+  ));
+  const savingsAudit = auditMonthlySavings(bankRows, savingsExpenses, auditMonth);
+  // Savings are audited before expense filtering, using OP + month, not shared words.
+  const savingsBankRows = new Set(savingsAudit.flatMap(entry => entry.bank));
+  const expenseRecurrences = recurringExpenses.filter(expense => !isSavingsAuditEntry(expense, savingsGoals));
   const compensations = attachSavingsAppRows(findSavingsCompensations(bankRows, auditMonth), operations, auditMonth);
   const compensationFundingRows = new Set(compensations.map(({ funding }) => funding));
   const compensationAppRows = new Set(compensations.map(({ appFunding }) => appFunding).filter(Boolean));
@@ -771,6 +783,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
   const monthBankRows = bankRows
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .filter((row) => !compensationFundingRows.has(row))
+    .filter((row) => !savingsBankRows.has(row))
     .filter((row) => !classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching)
     .map((row) => ({ ...row }));
   const persistedAppRows = operations
@@ -778,6 +791,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
     .filter((row) => !isBeobankSavingsAppRow(row))
     .filter((row) => !normalize(row.label || '').startsWith('epargne '))
+    .filter((row) => !isSavingsAuditEntry(row, savingsGoals))
     .filter((row) => !compensationAppRows.has(row))
     // Une opération saisie en fin de mois peut n'être comptabilisée par Belfius
     // que quelques jours plus tard. Elle reste candidate au rapprochement du mois
@@ -786,7 +800,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
   const appRows = [
     ...persistedAppRows,
-    ...recurringAuditCandidates(monthBankRows, recurringExpenses, persistedAppRows, auditMonth),
+    ...recurringAuditCandidates(monthBankRows, expenseRecurrences, persistedAppRows, auditMonth),
   ];
 
   const usedBank = new Set();
@@ -804,7 +818,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
       .map((row, index) => ({
         row,
         index,
-        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, recurringExpenses, learnedRules),
+        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, expenseRecurrences, learnedRules),
       }))
       .filter(({ evidence }) => evidence)
       .sort((left, right) => right.evidence.confidence - left.evidence.confidence
@@ -813,6 +827,19 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     const automatic = candidates.filter(({ evidence }) => evidence.auto);
     const learnedAutomatic = automatic.filter(({ evidence }) => evidence.learned || String(evidence.reason || '').toLowerCase().includes('apprise'));
     if (learnedAutomatic.length === 1) { const selected = learnedAutomatic[0]; usedBank.add(bankIndex); usedApp.add(selected.index); matched.push({ bank: bankRow, app: selected.row, ...selected.evidence }); return; }
+    // A five-cent tolerance must not make an exact purchase ambiguous with a nearby one.
+    // This preference only applies after semantic evidence has established both candidates.
+    const exactAmountAutomatic = automatic.filter(({ row }) => (
+      Math.round(Math.abs(Number(row.amount)) * 100) === Math.round(Math.abs(Number(bankRow.amount)) * 100)
+    ));
+    if (automatic.length > 1 && exactAmountAutomatic.length === 1) {
+      const selected = exactAmountAutomatic[0];
+      usedBank.add(bankIndex);
+      usedApp.add(selected.index);
+      matched.push({ bank: bankRow, app: selected.row, ...selected.evidence,
+        reason: `${selected.evidence.reason} · montant exact au centime` });
+      return;
+    }
     if (automatic.length === 1) {
       const selected = automatic[0];
       usedBank.add(bankIndex);
@@ -867,7 +894,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     const availableBank = monthBankRows
       .map((row, index) => ({ row, index }))
       .filter(({ index }) => !usedBank.has(index));
-    const group = possibleBankGroup(appRow, availableBank, recurringExpenses);
+    const group = possibleBankGroup(appRow, availableBank, expenseRecurrences);
     if (!group) return;
 
     group.rows.forEach(({ index }) => { usedBank.add(index); pendingBank.delete(index); });
@@ -890,7 +917,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     const availableApp = appRows
       .map((row, index) => ({ row, index }))
       .filter(({ index }) => !usedApp.has(index) && !pendingApp.has(index));
-    const split = possibleSplit(bankRow, availableApp, recurringExpenses);
+    const split = possibleSplit(bankRow, availableApp, expenseRecurrences);
     if (!split) return;
 
     usedBank.add(bankIndex);
@@ -916,6 +943,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     splits,
     groups,
     compensations,
+    savingsAudit,
     missing,
     extra,
     bankRows: monthBankRows,
@@ -1016,6 +1044,10 @@ export default function BelfiusAudit({
   const missingMastercardStatements = monthMissing.filter(isMastercardStatementRow);
   const monthExtra = (result?.extra || []).filter((row) => String(row.date || '').slice(0, 7) === safeMonth);
   const cutoffDate = parseBalanceDate(audit?.balanceDate);
+  const savingsIssues = (result?.savingsAudit || []).filter(entry => entry.status !== 'matched'
+    && (entry.status !== 'pending' || safeMonth < cutoffDate.slice(0, 7)));
+  const savingsPending = (result?.savingsAudit || []).filter(entry => entry.status === 'pending'
+    && safeMonth >= cutoffDate.slice(0, 7));
   const futureExtra = monthExtra.filter((row) => cutoffDate && String(row.date || '') > cutoffDate);
   const matchedApps = result?.matched?.map((entry) => entry.app) || [];
   const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') < cutoffDate).filter((row) => isTrueOrphanAppOperation(row, { cutoffDate })).filter((row) => !matchedApps.some((matched) => matched.id !== row.id && sameAppIdentity(matched, row)));
@@ -1025,12 +1057,14 @@ export default function BelfiusAudit({
     && result
     && monthMissing.length === 0
     && actionableExtra.length === 0
+    && savingsIssues.length === 0
+    && savingsPending.length === 0
     && result.review.length === 0,
   );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
   const csvMonthOpening = calculateCsvMonthOpening(audit);
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
-  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length;
+  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length + savingsIssues.length + savingsPending.length;
   const strongFingerprintCount = (audit?.rows || []).filter((row) => hasStrongCommunicationFingerprint(row, recurringExpenses)).length;
   const {
     pendingAmount,
@@ -1052,13 +1086,13 @@ export default function BelfiusAudit({
       pendingAmount,
       remaining: remainingToTreat,
       confirmations: result?.review.length || 0,
-      anomalies: monthMissing.length + actionableExtra.length,
+      anomalies: monthMissing.length + actionableExtra.length + savingsIssues.length,
       clean: auditIsClean && Math.abs(difference) < 0.01,
       sourceFile: audit.fileName || 'CSV Belfius',
       openingMonth: csvMonthOpening.month,
       openingBalance: csvMonthOpening.balance,
     });
-  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, csvMonthOpening.balance, csvMonthOpening.month, difference, monthMissing.length, actionableExtra.length, pendingAmount, remainingToTreat, result?.review.length]);
+  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, csvMonthOpening.balance, csvMonthOpening.month, difference, monthMissing.length, actionableExtra.length, savingsIssues.length, pendingAmount, remainingToTreat, result?.review.length]);
 
   return (
     <section className="panel belfius-audit">
@@ -1109,6 +1143,26 @@ export default function BelfiusAudit({
             <div className="audit-kpi danger"><span><i className="audit-dot" />Anomalies Belfius</span><strong>{monthMissing.length}</strong></div>
             <div className="audit-kpi danger"><span><i className="audit-dot" />Écritures sans mouvement</span><strong>{actionableExtra.length}</strong></div>
           </div>
+
+          {result.savingsAudit.length > 0 && (
+            <details className={`audit-details ${savingsIssues.length ? 'status-danger' : result.savingsAudit.some(entry => entry.status !== 'matched') ? 'status-review' : 'status-safe'}`} open>
+              <summary>Ordres permanents d’épargne — contrôle du mois ({result.savingsAudit.length})</summary>
+              <p className="audit-section-note">Le N° OP identifie le virement du mois. Le jour de débit est indicatif ; le montant est contrôlé séparément.</p>
+              {result.savingsAudit.map((entry, index) => (
+                <article key={entry.reference || index} className="audit-missing-row">
+                  <div><strong>{entry.label}</strong><div>N° OP {entry.reference || 'non renseigné'} · Prévu : {formatMoney(entry.expected)}</div>
+                    <div>{entry.status === 'matched' ? 'Mouvement retrouvé'
+                      : entry.status === 'amount-mismatch' ? 'Mouvement retrouvé — montant différent'
+                        : entry.status === 'ambiguous' ? 'Plusieurs configurations ou débits pour cet OP — à vérifier'
+                          : entry.status === 'unconfigured' ? 'N° OP à renseigner'
+                            : safeMonth < cutoffDate.slice(0, 7) ? 'Aucun mouvement retrouvé sur ce mois terminé'
+                              : 'Pas encore retrouvé dans le relevé de ce mois'}</div>
+                    {entry.bank.map((row, bankIndex) => <div key={row.id || bankIndex}>{row.date} · Débit : {formatMoney(Math.abs(row.amount))}</div>)}
+                  </div>
+                </article>
+              ))}
+            </details>
+          )}
 
           {result.matched.length > 0 && (
             <details className="audit-details status-safe">
@@ -1235,6 +1289,7 @@ export default function BelfiusAudit({
             <details className="audit-details status-danger" open>
               <summary><span className="audit-dot" />Écritures Mon Foyer sans mouvement Belfius ({actionableExtra.length})</summary>
               <p className="audit-section-note">Écritures arrivées à échéance mais sans mouvement bancaire identifié. Elles sont à contrôler, pas automatiquement considérées comme erronées.</p>
+              <p className="audit-section-note">Ce contrôle porte sur le paiement initial. Un remboursement reçu en espèces ne supprime pas le débit attendu d’un achat payé par carte. Pour un ticket partagé, la somme des parts doit correspondre au débit bancaire.</p>
               {actionableExtra.map((row) => (
                 <article key={row.id} className="audit-missing-row"><strong>{row.date} · {row.label}</strong><span className="audit-missing-actions"><b>{formatMoney((row.type === 'income' || row.type === 'reimbursement') ? row.amount : -row.amount)}</b>{typeof onEditAppOperation === 'function' && (<button type="button" className="audit-pencil" title="Modifier cette écriture" aria-label={`Modifier ${row.label}`} onClick={() => onEditAppOperation(row)}><Pencil size={17} /></button>)}</span></article>
               ))}

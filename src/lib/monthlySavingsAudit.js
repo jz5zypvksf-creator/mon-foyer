@@ -1,0 +1,53 @@
+import { normalizeBankText } from '../belfiusMatchingRules.js';
+
+export function savingsOrderReference(row = {}) {
+  return String(row.directDebitReference || row.direct_debit_reference
+    || row.standingOrderReference || row.standing_order_reference
+    || row.orderReference || row.order_reference || '').trim();
+}
+
+export function isSavingsAuditEntry(row = {}, goals = []) {
+  const reference = savingsOrderReference(row);
+  return normalizeBankText(row.label).startsWith('epargne ')
+    || normalizeBankText(row.category).startsWith('epargne')
+    || row.type === 'savings_transfer'
+    || (row.savingsDirection || row.savings_direction) === 'in'
+    || Boolean(reference && goals.some(goal => goal.active !== false
+      && savingsOrderReference(goal) === reference));
+}
+
+export function bankStandingOrderReferences(row = {}) {
+  const text = `${row.details || ''} ${row.communication || ''} ${row.rawDetails || ''} ${row.label || ''}`;
+  return [...new Set([...text.matchAll(/\bORDRE\s+PERMANENT(?:\s+INSTANTAN[EÉ])?\s+(\d+)\b/gi)]
+    .map(match => match[1]))];
+}
+
+// One monthly control per OP: dates are informative, amounts remain independently checked.
+// No entry is written, and duplicate executions/configurations are never silently accepted.
+export function auditMonthlySavings(bankRows, expenses, month) {
+  const byReference = new Map();
+  expenses.forEach(expense => {
+    const reference = savingsOrderReference(expense);
+    const key = reference || `unconfigured-${expense.id}`;
+    const entry = byReference.get(key) || { reference, expenses: [], bank: [] };
+    entry.expenses.push(expense);
+    byReference.set(key, entry);
+  });
+  bankRows.forEach(row => {
+    if (String(row.date || '').slice(0, 7) !== month || Number(row.amount) >= 0) return;
+    const references = bankStandingOrderReferences(row);
+    // A malformed row carrying several different OPs requires manual inspection.
+    if (references.length === 1 && byReference.has(references[0])) {
+      byReference.get(references[0]).bank.push(row);
+    }
+  });
+  return [...byReference.values()].map(entry => {
+    const expected = Math.abs(Number(entry.expenses[0].amount) || 0);
+    const actual = entry.bank.reduce((total, row) => total + Math.abs(Number(row.amount)), 0);
+    const status = !entry.reference ? 'unconfigured'
+      : entry.expenses.length > 1 || entry.bank.length > 1 ? 'ambiguous'
+        : !entry.bank.length ? 'pending'
+          : Math.abs(actual - expected) > 0.05 ? 'amount-mismatch' : 'matched';
+    return { ...entry, expected, actual, status, label: entry.expenses[0].label };
+  });
+}
