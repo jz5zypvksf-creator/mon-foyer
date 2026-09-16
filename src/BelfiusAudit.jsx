@@ -10,6 +10,7 @@ import {
 import { bankPersonAliasMatch, isBankCreditAppOperation } from './belfiusMatchingRules.js';
 import { formatMoney, parseMoney } from './domain/money/money.js';
 import { auditMonthlySavings, isSavingsAuditEntry } from './lib/monthlySavingsAudit.js';
+import { auditJwDonationAllocation, isJwDonation } from './lib/donationAllocationRules.js';
 
 const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
@@ -763,6 +764,11 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
  */
 export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
+  const donationAllocation = auditJwDonationAllocation(bankRows, operations, auditMonth,
+    recurringExpenses.filter(expense => expense.active !== false && recurringOccursInMonth(expense, auditMonth)
+      && (expense.paymentMethod || expense.payment_method || 'Compte Belfius') === 'Compte Belfius'));
+  const allocatedDonationBank = new Set(donationAllocation?.bank || []);
+  const allocatedDonationApp = new Set(donationAllocation?.app || []);
   const savingsExpenses = recurringExpenses.filter(expense => (
     expense.active !== false
     && (expense.paymentMethod || expense.payment_method || 'Compte Belfius') === 'Compte Belfius'
@@ -773,7 +779,8 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
   const savingsAudit = auditMonthlySavings(bankRows, savingsExpenses, auditMonth);
   // Savings are audited before expense filtering, using OP + month, not shared words.
   const savingsBankRows = new Set(savingsAudit.flatMap(entry => entry.bank));
-  const expenseRecurrences = recurringExpenses.filter(expense => !isSavingsAuditEntry(expense, savingsGoals));
+  const expenseRecurrences = recurringExpenses.filter(expense => !isSavingsAuditEntry(expense, savingsGoals))
+    .filter(expense => !donationAllocation || !isJwDonation(expense));
   const compensations = attachSavingsAppRows(findSavingsCompensations(bankRows, auditMonth), operations, auditMonth);
   const compensationFundingRows = new Set(compensations.map(({ funding }) => funding));
   const compensationAppRows = new Set(compensations.map(({ appFunding }) => appFunding).filter(Boolean));
@@ -784,9 +791,11 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .filter((row) => String(row.date || '').slice(0, 7) === auditMonth)
     .filter((row) => !compensationFundingRows.has(row))
     .filter((row) => !savingsBankRows.has(row))
+    .filter((row) => !allocatedDonationBank.has(row))
     .filter((row) => !classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching)
     .map((row) => ({ ...row }));
   const persistedAppRows = operations
+    .filter((row) => !allocatedDonationApp.has(row))
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
     .filter((row) => !String(row.label || '').startsWith('Ajustement Belfius'))
     .filter((row) => !isBeobankSavingsAppRow(row))
@@ -945,6 +954,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     groups,
     compensations,
     savingsAudit,
+    donationAllocation,
     missing,
     extra,
     bankRows: monthBankRows,
@@ -1049,6 +1059,7 @@ export default function BelfiusAudit({
     && (entry.status !== 'pending' || safeMonth < cutoffDate.slice(0, 7)));
   const savingsPending = (result?.savingsAudit || []).filter(entry => entry.status === 'pending'
     && safeMonth >= cutoffDate.slice(0, 7));
+  const donationIssues = result?.donationAllocation && result.donationAllocation.status !== 'matched' ? 1 : 0;
   const futureExtra = monthExtra.filter((row) => cutoffDate && String(row.date || '') > cutoffDate);
   const matchedApps = result?.matched?.map((entry) => entry.app) || [];
   const actionableExtra = monthExtra.filter((row) => !cutoffDate || String(row.date || '') < cutoffDate).filter((row) => isTrueOrphanAppOperation(row, { cutoffDate })).filter((row) => !matchedApps.some((matched) => matched.id !== row.id && sameAppIdentity(matched, row)));
@@ -1060,12 +1071,13 @@ export default function BelfiusAudit({
     && actionableExtra.length === 0
     && savingsIssues.length === 0
     && savingsPending.length === 0
+    && donationIssues === 0
     && result.review.length === 0,
   );
   const balanceMonth = parseBalanceMonth(audit?.balanceDate);
   const csvMonthOpening = calculateCsvMonthOpening(audit);
   const isBalanced = auditIsClean && Math.abs(difference) < 0.01;
-  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length + savingsIssues.length + savingsPending.length;
+  const remainingToTreat = (result?.review.length || 0) + monthMissing.length + actionableExtra.length + savingsIssues.length + savingsPending.length + donationIssues;
   const strongFingerprintCount = (audit?.rows || []).filter((row) => hasStrongCommunicationFingerprint(row, recurringExpenses)).length;
   const {
     pendingAmount,
@@ -1075,7 +1087,9 @@ export default function BelfiusAudit({
     bankBalance: audit?.balance,
     pendingRows: actionableExtra,
     missingBankRows: monthMissing,
-    reviewRows: result?.review || [],
+    reviewRows: [ ...(result?.review || []),
+      ...(donationIssues ? [{ bank: { amount: -result.donationAllocation.difference } }] : []),
+    ],
   });
 
   useEffect(() => {
@@ -1087,13 +1101,13 @@ export default function BelfiusAudit({
       pendingAmount,
       remaining: remainingToTreat,
       confirmations: result?.review.length || 0,
-      anomalies: monthMissing.length + actionableExtra.length + savingsIssues.length,
+      anomalies: monthMissing.length + actionableExtra.length + savingsIssues.length + donationIssues,
       clean: auditIsClean && Math.abs(difference) < 0.01,
       sourceFile: audit.fileName || 'CSV Belfius',
       openingMonth: csvMonthOpening.month,
       openingBalance: csvMonthOpening.balance,
     });
-  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, csvMonthOpening.balance, csvMonthOpening.month, difference, monthMissing.length, actionableExtra.length, savingsIssues.length, pendingAmount, remainingToTreat, result?.review.length]);
+  }, [audit?.balance, audit?.balanceDate, audit?.importedAt, auditIsClean, csvMonthOpening.balance, csvMonthOpening.month, difference, monthMissing.length, actionableExtra.length, savingsIssues.length, donationIssues, pendingAmount, remainingToTreat, result?.review.length]);
 
   return (
     <section className="panel belfius-audit">
@@ -1144,6 +1158,22 @@ export default function BelfiusAudit({
             <div className="audit-kpi danger"><span><i className="audit-dot" />Anomalies Belfius</span><strong>{monthMissing.length}</strong></div>
             <div className="audit-kpi danger"><span><i className="audit-dot" />Écritures sans mouvement</span><strong>{actionableExtra.length}</strong></div>
           </div>
+
+          {result.donationAllocation && (
+            <details className={`audit-details ${donationIssues ? 'status-review' : 'status-safe'}`} open>
+              <summary>Dons JW.ORG — {result.donationAllocation.status === 'matched' ? 'ventilation rapprochée' : 'ventilation à compléter ou vérifier'}</summary>
+              <p className="audit-section-note">{result.donationAllocation.bank.length} débits Belfius : {formatMoney(result.donationAllocation.bankTotal)} · {result.donationAllocation.app.length} écritures Mon Foyer : {formatMoney(result.donationAllocation.appTotal)}.</p>
+              {result.donationAllocation.expectedTotal !== null && <p className="audit-section-note">Prévision du mois : {formatMoney(result.donationAllocation.expectedTotal)}.</p>}
+              <p className="audit-section-note">Les destinations sont conservées. Les débits de même montant sont contrôlés ensemble, sans attribuer arbitrairement une référence bancaire à une destination.</p>
+              {result.donationAllocation.app.map(row => <article key={row.id} className="audit-missing-row"><strong>{row.label}</strong><b>{formatMoney(row.amount)}</b></article>)}
+              {result.donationAllocation.status === 'incomplete' && <p className="audit-section-note">Reste à ventiler : {result.donationAllocation.remainingAmounts.map(formatMoney).join(' + ')} = {formatMoney(result.donationAllocation.difference)}. La prévision globale n’est pas ajoutée une seconde fois.</p>}
+              {['ambiguous', 'mismatch'].includes(result.donationAllocation.status) && <p className="audit-section-note">Vérifier les références, les montants et les destinations : la ventilation n’est pas validée automatiquement.</p>}
+              {result.donationAllocation.status === 'expected-mismatch' && <p className="audit-section-note">Les écritures correspondent aux débits importés, mais le total diffère de la prévision mensuelle. Vérifier le relevé et le montant prévu.</p>}
+              <details><summary>Voir les débits bancaires et leurs références</summary>
+                {result.donationAllocation.bank.map((row, index) => <article key={row.id || index} className="audit-missing-row"><span>{row.date} · Réf. {result.donationAllocation.bankReferences[index] || 'non renseignée'}</span><b>{formatMoney(Math.abs(row.amount))}</b></article>)}
+              </details>
+            </details>
+          )}
 
           {result.savingsAudit.length > 0 && (
             <details className={`audit-details ${savingsIssues.length ? 'status-danger' : result.savingsAudit.some(entry => entry.status !== 'matched') ? 'status-review' : 'status-safe'}`} open>
