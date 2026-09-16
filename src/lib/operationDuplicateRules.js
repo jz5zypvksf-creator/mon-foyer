@@ -1,3 +1,5 @@
+import { haveDistinctDonationDestinations } from './donationAllocationRules.js';
+
 function normalize(value) {
   return String(value || '')
     .toLowerCase()
@@ -34,6 +36,7 @@ export function findPotentialOperationDuplicate(candidate, operations = [], excl
       if (Math.abs(Number(operation.amount || 0) - amount) > 0.005) return null;
       if (paymentMethod(operation) !== paymentMethod(candidate)) return null;
       if ((operation.person || 'Foyer') !== (candidate.person || 'Foyer')) return null;
+      if (haveDistinctDonationDestinations(operation, candidate)) return null;
 
       const sameType = (operation.type || '') === (candidate.type || '');
       const sameCategory = (operation.category || '') === (candidate.category || '');
