@@ -11,12 +11,12 @@ import { bankPersonAliasMatch, isBankCreditAppOperation } from './belfiusMatchin
 import { formatMoney, parseMoney } from './domain/money/money.js';
 import { auditMonthlySavings, isSavingsAuditEntry } from './lib/monthlySavingsAudit.js';
 import { auditJwDonationAllocation, isJwDonation } from './lib/donationAllocationRules.js';
+import { loadPersistedAudit, persistAudit } from './lib/belfiusAuditStorage.js';
 
 const AMOUNT_TOLERANCE = 0.05;
 const DATE_TOLERANCE_DAYS = 2;
 const BANK_POSTING_GRACE_DAYS = 5;
 const DAY_MS = 86400000;
-const AUDIT_STORAGE_KEY = 'mon-foyer-belfius-audit-v1';
 const LEARNING_STORAGE_KEY = 'mon-foyer-belfius-learning-v1';
 
 function loadLearnedRules() {
@@ -30,26 +30,6 @@ function loadLearnedRules() {
 
 function persistLearnedRules(rules) {
   localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(rules));
-}
-
-function loadPersistedAudit() {
-  try {
-    const stored = localStorage.getItem(AUDIT_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored);
-    return parsed?.rows && Array.isArray(parsed.rows) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function persistAudit(audit) {
-  try {
-    if (!audit) localStorage.removeItem(AUDIT_STORAGE_KEY);
-    else localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(audit));
-  } catch {
-    // Un échec de stockage local ne doit jamais bloquer l'audit courant.
-  }
 }
 
 // RC2.1 — référentiel explicite des principaux libellés bancaires.
@@ -983,6 +963,7 @@ export default function BelfiusAudit({
   onAddBankOperation,
   onSavingsDetected,
   onAuditSnapshot,
+  onCsvImported,
   onEditAppOperation,
 }) {
   // RC2.4.4 : le dernier relevé reste disponible entre les ouvertures de l'application.
@@ -1009,6 +990,7 @@ export default function BelfiusAudit({
       };
       setAudit(parsedAudit);
       persistAudit(parsedAudit);
+      onCsvImported?.(parsedAudit);
       if (typeof onSavingsDetected === 'function') {
         onSavingsDetected(detectSavingsTransfers(parsedAudit.rows, savingsGoals), parsedAudit);
       }

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, Copy, Trash2 } from 'lucide-react';
 import { formatMoney } from './domain/money/money.js';
 import './DuplicateAudit.css';
+import { haveDistinctDonationDestinations } from './lib/donationAllocationRules.js';
 
 function normalize(value) {
   return String(value || '')
@@ -61,6 +62,7 @@ function recurringExactSignature(row) {
 }
 
 function recurringProbable(left, right) {
+  if (haveDistinctDonationDestinations(left, right)) return false;
   if (Math.abs(Number(left.amount || 0) - Number(right.amount || 0)) > 0.01) return false;
   if ((left.person || 'Foyer') !== (right.person || 'Foyer')) return false;
   if ((left.category || '') !== (right.category || '')) return false;
@@ -85,6 +87,7 @@ function mentionsDifferentNamedPersons(left, right) {
 }
 
 function operationProbable(left, right) {
+  if (haveDistinctDonationDestinations(left, right)) return false;
   if ((left.date || '') !== (right.date || '')) return false;
   if (Math.abs(Number(left.amount || 0) - Number(right.amount || 0)) > 0.01) return false;
   if ((left.type || '') !== (right.type || '')) return false;

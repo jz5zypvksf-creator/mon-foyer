@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { loadPersistedAudit } from './lib/belfiusAuditStorage.js';
 import {
   Banknote,
   Beef,
@@ -591,6 +592,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('home');
   const [bankSavings, setBankSavings] = useState({});
   const [belfiusSnapshot, setBelfiusSnapshot] = useState(null);
+  const [importedBelfiusAudit, setImportedBelfiusAudit] = useState(loadPersistedAudit);
   const [monthEndAudit, setMonthEndAudit] = useState(null);
   const [monthEndAuditRunning, setMonthEndAuditRunning] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
@@ -768,11 +770,13 @@ export default function App() {
   );
 
   const outstandingRecurringExpenses = useMemo(() => findOutstandingRecurringExpenses({
+    bankRows: importedBelfiusAudit?.rows || [],
+    savingsGoals: data.savingsGoals || [],
     recurringExpenses: data.recurringFixedExpenses || [],
     operations: data.operations,
     selectedMonth,
     currentDate: today,
-  }), [data.operations, data.recurringFixedExpenses, selectedMonth, today]);
+  }), [data.operations, data.recurringFixedExpenses, data.savingsGoals, importedBelfiusAudit, selectedMonth, today]);
 
   const pendingCsvImportTotal = useMemo(
     () => outstandingRecurringExpenses.reduce((sum, operation) => (
@@ -3322,6 +3326,7 @@ export default function App() {
           <section className="view">
             <DuplicateAudit mode="recurring" recurringExpenses={data.recurringFixedExpenses || []} onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)} />
             <BelfiusAudit
+              onCsvImported={setImportedBelfiusAudit}
               operations={data.operations}
               appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
               selectedMonth={selectedMonth}
