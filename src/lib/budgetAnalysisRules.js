@@ -1,4 +1,5 @@
 import { ACCOUNTING_NATURES, accountingNature } from './accountingClassification.js';
+import { auditMonthlySavings, isSavingsAuditEntry } from './monthlySavingsAudit.js';
 import {
   isMastercardPaymentMethod,
   mastercardSettlementDate,
@@ -159,8 +160,17 @@ export function recurringHasExecutedMatch(expense, operations = [], selectedMont
  */
 export function findOutstandingRecurringExpenses({
   recurringExpenses = [], operations = [], selectedMonth = '', currentDate = '',
+  bankRows = [], savingsGoals = [],
 } = {}) {
   if (!selectedMonth || selectedMonth !== String(currentDate || '').slice(0, 7)) return [];
+
+  const savings = recurringExpenses.filter(expense => isSavingsAuditEntry(expense, savingsGoals)
+    && recurringIsDueInMonth(expense, selectedMonth)
+    && (expense.paymentMethod || expense.payment_method || 'Compte Belfius') === 'Compte Belfius');
+  const savingsIds = new Set(savings.map(expense => expense.id));
+  const matchedSavingsIds = new Set(auditMonthlySavings(bankRows, savings, selectedMonth)
+    .filter(entry => entry.status === 'matched')
+    .flatMap(entry => entry.expenses.map(expense => expense.id)));
 
   return recurringExpenses.flatMap((expense) => {
     const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
@@ -174,7 +184,9 @@ export function findOutstandingRecurringExpenses({
     const dueDate = settlementDate || purchaseDate;
     if (!dueDate || dueDate.slice(0, 7) !== selectedMonth || dueDate > currentDate) return [];
     if (amount(expense.amount) <= 0) return [];
-    if (recurringHasExecutedMatch(expense, operations, selectedMonth, currentDate)) return [];
+    if (savingsIds.has(expense.id)) {
+      if (matchedSavingsIds.has(expense.id)) return [];
+    } else if (recurringHasExecutedMatch(expense, operations, selectedMonth, currentDate)) return [];
 
     return [{
       id: `outstanding-recurring-${expense.id}-${selectedMonth}`,
