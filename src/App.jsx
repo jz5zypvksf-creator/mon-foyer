@@ -37,7 +37,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
-import { formatMoney, parseMoney } from './domain/money/money.js';
+import { formatMoney, moneyToCents, parseMoney } from './domain/money/money.js';
 import { budgetIncomeTotalForMonth, forecastBalances, careBalances } from './budgetMonthRules.js';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
 import MonthEndAudit from './MonthEndAudit.jsx';
@@ -327,9 +327,13 @@ function formatSupabaseRecurringError(error) {
  * Cette frontière protège le reste de l’application des noms snake_case de la base.
  */
 function normalizeOperation(operation) {
+  const amount = Number(operation.amount);
   return {
     ...operation,
-    amount: Number(operation.amount),
+    amount,
+    amountCents: Number.isSafeInteger(Number(operation.amountCents ?? operation.amount_cents))
+      ? Number(operation.amountCents ?? operation.amount_cents)
+      : moneyToCents(amount),
     store: operation.store || '',
     paymentMethod: operation.payment_method || operation.paymentMethod || 'Compte Belfius',
     settlesPaymentMethod: operation.settles_payment_method || operation.settlesPaymentMethod || '',
@@ -553,6 +557,7 @@ function normalizeRemoteState(remote) {
       id: expense.id,
       label: expense.label,
       amount: Number(expense.amount),
+      amountCents: moneyToCents(expense.amount),
       day: Number(expense.day),
       person: expense.person,
       category: expense.category,
@@ -1346,6 +1351,7 @@ export default function App() {
             recurringFixedExpenses: rows.map((expense) => ({
               ...expense,
               amount: Number(expense.amount),
+              amountCents: moneyToCents(expense.amount),
               day: Number(expense.day),
               directDebitReference: expense.direct_debit_reference || '',
               structuredCommunication: expense.structured_communication || '',
