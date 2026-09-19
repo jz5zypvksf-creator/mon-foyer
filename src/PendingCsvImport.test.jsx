@@ -28,3 +28,24 @@ it('updates pending savings on upload and keeps the result after reopening', asy
   render(<Harness />);
   expect(screen.getByTestId('pending').textContent).toBe('0');
 });
+
+it('updates every ordinary pending recurrence after CSV upload', async () => {
+  const ordinaryRecurring = [{ id: 'psa', label: 'PSA Finance', amount: 478.78,
+    day: 15, paymentMethod: 'Compte Belfius', frequency: 'monthly' }];
+  function OrdinaryHarness() {
+    const [audit, setAudit] = useState(null);
+    const pending = findOutstandingRecurringExpenses({ recurringExpenses: ordinaryRecurring,
+      selectedMonth: '2026-09', currentDate: '2026-09-19', bankRows: audit?.rows || [] });
+    return <><output data-testid="ordinary-pending">{pending.length}</output>
+      <BelfiusAudit operations={[]} recurringExpenses={ordinaryRecurring} selectedMonth="2026-09"
+        appBelfiusBalance={0} onCsvImported={setAudit} /></>;
+  }
+
+  const view = render(<OrdinaryHarness />);
+  expect(screen.getByTestId('ordinary-pending').textContent).toBe('1');
+  const csv = 'Compte contrepartie;Date de comptabilisation;Montant;Nom contrepartie;Transaction;Communications\nBE00;14/09/2026;-478,78;STELLANTIS FINANCIAL SERVICES BELUX SA;DOMICILIATION;';
+  fireEvent.change(view.container.querySelector('input[type="file"]'), { target: { files: [{
+    name: 'bank.csv', arrayBuffer: async () => new TextEncoder().encode(csv).buffer,
+  }] } });
+  await waitFor(() => expect(screen.getByTestId('ordinary-pending').textContent).toBe('0'));
+});
