@@ -202,6 +202,64 @@ test('un montant bancaire identique résorbe la projection même si le libellé 
   }).length, 0);
 });
 
+test('le CSV lève globalement les attentes ordinaires par montant, date et bénéficiaire', () => {
+  const recurringExpenses = [
+    { id: 'psa', label: 'PSA Finance', amount: 478.78, day: 15,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' },
+    { id: 'proximus', label: 'Proximus Internet', amount: 82.50, day: 12,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' },
+    { id: 'missing', label: 'Assurance absente', amount: 55, day: 10,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' },
+  ];
+  const bankRows = [
+    { date: '2026-09-14', amount: -478.78, label: 'STELLANTIS FINANCIAL SERVICES BELUX SA' },
+    { date: '2026-09-13', amount: -82.50, label: 'PROXIMUS' },
+  ];
+
+  const outstanding = findOutstandingRecurringExpenses({
+    recurringExpenses, bankRows, operations: [],
+    selectedMonth: '2026-09', currentDate: '2026-09-19',
+  });
+  assert.deepEqual(outstanding.map(row => row.recurringExpenseId), ['missing']);
+});
+
+test('une ligne CSV ne valide jamais deux échéances et un bénéficiaire différent reste en attente', () => {
+  const recurringExpenses = [
+    { id: 'first', label: 'Proximus Internet', amount: 82.50, day: 12,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' },
+    { id: 'second', label: 'Proximus GSM', amount: 82.50, day: 12,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' },
+    { id: 'unrelated', label: 'Fournisseur sans rapport', amount: 40, day: 12,
+      paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' },
+  ];
+  const bankRows = [
+    { date: '2026-09-12', amount: -82.50, label: 'PROXIMUS' },
+    { date: '2026-09-12', amount: -40, label: 'AUTRE BENEFICIAIRE' },
+  ];
+
+  const outstanding = findOutstandingRecurringExpenses({
+    recurringExpenses, bankRows, operations: [],
+    selectedMonth: '2026-09', currentDate: '2026-09-19',
+  });
+  assert.equal(outstanding.filter(row => ['first', 'second'].includes(row.recurringExpenseId)).length, 1);
+  assert.ok(outstanding.some(row => row.recurringExpenseId === 'unrelated'));
+});
+
+test('un débit hors tolérance de date ou avec un montant différent reste en attente', () => {
+  const recurringExpense = { id: 'psa', label: 'PSA Finance', amount: 478.78, day: 15,
+    paymentMethod: 'Compte Belfius', frequency: 'monthly', startDate: '2026-01-01' };
+  for (const bankRow of [
+    { date: '2026-09-14', amount: -478, label: 'STELLANTIS FINANCIAL SERVICES BELUX SA' },
+    { date: '2026-09-30', amount: -478.78, label: 'STELLANTIS FINANCIAL SERVICES BELUX SA' },
+  ]) {
+    const outstanding = findOutstandingRecurringExpenses({
+      recurringExpenses: [recurringExpense], bankRows: [bankRow], operations: [],
+      selectedMonth: '2026-09', currentDate: '2026-09-30',
+    });
+    assert.equal(outstanding.length, 1);
+  }
+});
+
 test('une échéance future ne devient jamais une ligne virtuelle passée', () => {
   const outstanding = findOutstandingRecurringExpenses({
     recurringExpenses: [{
