@@ -1,3 +1,5 @@
+import { amountCents } from '../domain/money/money.js';
+
 const normalize = (value) => String(value || '')
   .toLowerCase()
   .normalize('NFD')
@@ -27,11 +29,11 @@ export function isMastercardSettlementOperation(operation) {
 export function mastercardStatementMatchEvidence(bankRow, operation, options = {}) {
   if (!isMastercardStatementRow(bankRow) || !isMastercardSettlementOperation(operation)) return null;
 
-  const amountTolerance = Number(options.amountTolerance ?? 0.05);
+  const amountToleranceCents = Number(options.amountToleranceCents ?? 5);
   const dateToleranceDays = Number(options.dateToleranceDays ?? 2);
-  const bankAmount = Math.abs(Number(bankRow?.amount) || 0);
-  const operationAmount = Math.abs(Number(operation?.amount) || 0);
-  if (Math.abs(bankAmount - operationAmount) > amountTolerance) return null;
+  const bankAmount = Math.abs(amountCents(bankRow));
+  const operationAmount = Math.abs(amountCents(operation));
+  if (Math.abs(bankAmount - operationAmount) > amountToleranceCents) return null;
 
   const bankDate = String(bankRow?.date || '');
   const operationDate = String(operation?.date || '');
