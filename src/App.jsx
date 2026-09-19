@@ -84,6 +84,7 @@ import {
   isMastercardPaymentMethod,
   MASTERCARD_MASKED_NUMBER,
   MASTERCARD_PAYMENT_METHOD,
+  mastercardRecurringForecast,
   mastercardSettlementDate,
   recurringSourceMonthForBudget,
 } from './lib/cardPaymentRules.js';
@@ -744,14 +745,14 @@ export default function App() {
     return calculatePaymentBalances(operationsUpToCutoff);
   }, [balanceCutoff, data.operations]);
 
-  const mastercardOutstanding = Math.max(0, -Number(paymentBalances[MASTERCARD_PAYMENT_METHOD] || 0));
-  const mastercardNextDebitDate = useMemo(() => data.operations
-    .filter((operation) => isMastercardPaymentMethod(operation.paymentMethod)
-      && operation.settlementDate
-      && operation.settlementDate >= today
-      && operation.date <= balanceCutoff)
-    .map((operation) => operation.settlementDate)
-    .sort()[0] || '', [balanceCutoff, data.operations, today]);
+  const mastercardForecast = useMemo(() => mastercardRecurringForecast({
+    recurringExpenses: data.recurringFixedExpenses || [],
+    operations: data.operations,
+    asOfDate: today,
+  }), [data.operations, data.recurringFixedExpenses, today]);
+  const mastercardRecordedOutstanding = Math.max(0, -Number(paymentBalances[MASTERCARD_PAYMENT_METHOD] || 0));
+  const mastercardOutstanding = mastercardRecordedOutstanding + mastercardForecast.total;
+  const mastercardNextDebitDate = mastercardOutstanding > 0 ? mastercardForecast.nextDebitDate : '';
 
   const liveBelfiusSnapshot = useMemo(
     () => calculateLiveBankSnapshot(belfiusSnapshot, data.operations, today),
@@ -2717,6 +2718,16 @@ export default function App() {
                       ? `Prélèvement Belfius prévu le ${new Date(`${mastercardNextDebitDate}T12:00:00`).toLocaleDateString('fr-BE')}`
                       : 'Aucun prélèvement Mastercard en attente'}
                   </span>
+                  {mastercardForecast.charges.length > 0 && (
+                    <ul className="mastercard-expected-charges" aria-label="Prélèvements Mastercard attendus">
+                      {mastercardForecast.charges.map((charge) => (
+                        <li key={charge.id}>
+                          <span>{charge.label}</span>
+                          <strong>{formatMoney(-charge.amount)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <small>Informatif : affectera le budget du mois du prélèvement Belfius.</small>
                 </div>
               </div>
