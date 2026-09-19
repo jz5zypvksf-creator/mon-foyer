@@ -6,6 +6,7 @@ import {
   mastercardSettlementDate,
   recurringSourceMonthForBudget,
 } from './cardPaymentRules.js';
+import { amountCents } from '../domain/money/money.js';
 
 export const PENDING_CSV_IMPORT_STATUS = "Débité en banque - En attente d'import CSV";
 
@@ -138,7 +139,7 @@ function operationEffectiveDate(operation) {
 }
 
 export function recurringHasExecutedMatch(expense, operations = [], selectedMonth = '', currentDate = '') {
-  const expectedAmount = Math.abs(amount(expense?.amount));
+  const expectedAmount = Math.abs(amountCents(expense));
   const expectedPaymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
 
   return operations.some((operation) => {
@@ -149,7 +150,7 @@ export function recurringHasExecutedMatch(expense, operations = [], selectedMont
     if (nature !== ACCOUNTING_NATURES.EXPENSE && nature !== ACCOUNTING_NATURES.CARD_PURCHASE) return false;
 
     const labelMatch = labelsAreSimilar(expense?.label, operation?.label);
-    const amountMatch = Math.abs(Math.abs(amount(operation?.amount)) - expectedAmount) <= 0.01;
+    const amountMatch = Math.abs(amountCents(operation)) === expectedAmount;
     const actualPaymentMethod = operation?.paymentMethod || operation?.payment_method || 'Compte Belfius';
     return labelMatch || (amountMatch && actualPaymentMethod === expectedPaymentMethod);
   });
