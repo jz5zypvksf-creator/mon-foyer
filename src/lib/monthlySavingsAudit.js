@@ -1,4 +1,5 @@
 import { normalizeBankText } from '../belfiusMatchingRules.js';
+import { amountCents } from '../domain/money/money.js';
 
 export function savingsOrderReference(row = {}) {
   return String(row.directDebitReference || row.direct_debit_reference
@@ -34,7 +35,7 @@ export function auditMonthlySavings(bankRows, expenses, month) {
     byReference.set(key, entry);
   });
   bankRows.forEach(row => {
-    if (String(row.date || '').slice(0, 7) !== month || Number(row.amount) >= 0) return;
+    if (String(row.date || '').slice(0, 7) !== month || amountCents(row) >= 0) return;
     const references = bankStandingOrderReferences(row);
     // A malformed row carrying several different OPs requires manual inspection.
     if (references.length === 1 && byReference.has(references[0])) {
@@ -42,12 +43,14 @@ export function auditMonthlySavings(bankRows, expenses, month) {
     }
   });
   return [...byReference.values()].map(entry => {
-    const expected = Math.abs(Number(entry.expenses[0].amount) || 0);
-    const actual = entry.bank.reduce((total, row) => total + Math.abs(Number(row.amount)), 0);
+    const expectedCents = Math.abs(amountCents(entry.expenses[0]));
+    const actualCents = entry.bank.reduce((total, row) => total + Math.abs(amountCents(row)), 0);
+    const expected = expectedCents / 100;
+    const actual = actualCents / 100;
     const status = !entry.reference ? 'unconfigured'
       : entry.expenses.length > 1 || entry.bank.length > 1 ? 'ambiguous'
         : !entry.bank.length ? 'pending'
-          : Math.abs(actual - expected) > 0.05 ? 'amount-mismatch' : 'matched';
-    return { ...entry, expected, actual, status, label: entry.expenses[0].label };
+          : actualCents !== expectedCents ? 'amount-mismatch' : 'matched';
+    return { ...entry, expected, actual, expectedCents, actualCents, status, label: entry.expenses[0].label };
   });
 }
