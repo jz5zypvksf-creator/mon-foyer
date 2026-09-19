@@ -1,10 +1,12 @@
 import { normalizeBankText } from '../belfiusMatchingRules.js';
 import { amountCents } from '../domain/money/money.js';
+import { savingsRuleForExpense } from '../savingsOrderRules.js';
 
 export function savingsOrderReference(row = {}) {
-  return String(row.directDebitReference || row.direct_debit_reference
+  const explicit = String(row.directDebitReference || row.direct_debit_reference
     || row.standingOrderReference || row.standing_order_reference
     || row.orderReference || row.order_reference || '').trim();
+  return explicit || savingsRuleForExpense(row)?.op || '';
 }
 
 export function isSavingsAuditEntry(row = {}, goals = []) {
