@@ -16,6 +16,16 @@ const BANK_PERSON_ALIASES = Object.freeze([
   { bank: ['pluta janina'], app: ['nonna'] },
 ]);
 
+const RECURRING_BENEFICIARY_ALIASES = Object.freeze([
+  { bank: ['stellantis financial', 'psa finance'], app: ['stellantis financial', 'psa finance'] },
+  { bank: ['mega power online', 'mega'], app: ['mega', 'electricite', 'gaz', 'energie'] },
+  { bank: ['ethias'], app: ['ethias'] },
+  { bank: ['proximus'], app: ['proximus', 'tv internet', 'gsm'] },
+  { bank: ['test achats', 'test aankoop'], app: ['test achats'] },
+  { bank: ['ag insurance'], app: ['ag assurance', 'remboursement maison esther'] },
+  { bank: ['setca'], app: ['syndicat'] },
+]);
+
 export function bankPersonAliasMatch(bankRow, appRow) {
   const bankText = normalizeBankText(bankHaystack(bankRow));
   const appText = normalizeBankText(`${appRow?.person || ''} ${appRow?.label || ''} ${appRow?.store || ''}`);
@@ -27,6 +37,46 @@ export function bankPersonAliasMatch(bankRow, appRow) {
 
 function bankHaystack(row) {
   return `${row?.directDebitReference || ''} ${row?.label || ''} ${row?.communication || ''} ${row?.details || ''} ${row?.rawDetails || ''}`;
+}
+
+function recurringLabelText(expense) {
+  return normalizeBankText(`${expense?.label || ''} ${expense?.store || ''}`);
+}
+
+export function recurringBeneficiaryMatch(bankRow, expense) {
+  const bankText = normalizeBankText(bankHaystack(bankRow));
+  const appText = recurringLabelText(expense);
+  if (!bankText || !appText) return false;
+  if (bankText.includes(appText) || appText.includes(bankText)) return true;
+
+  const meaningfulTokens = appText.split(' ').filter(token => token.length >= 5);
+  if (meaningfulTokens.some(token => bankText.includes(token))) return true;
+
+  return RECURRING_BENEFICIARY_ALIASES.some(alias => (
+    alias.bank.some(needle => bankText.includes(needle))
+    && alias.app.some(needle => appText.includes(needle))
+  ));
+}
+
+export function recurringBankMatchEvidence(bankRow, expense, expectedDate = '') {
+  const bankAmount = Number(bankRow?.amount || 0);
+  const expectedAmount = Math.abs(Number(expense?.amount || 0));
+  if (bankAmount >= 0 || !expectedAmount) return null;
+  if (Math.abs(Math.abs(bankAmount) - expectedAmount) > 0.05) return null;
+
+  const bankDate = String(bankRow?.date || '');
+  if (!bankDate || !expectedDate) return null;
+  const dayDistance = Math.abs(
+    Date.parse(`${bankDate}T12:00:00Z`) - Date.parse(`${expectedDate}T12:00:00Z`),
+  ) / 86400000;
+  if (!Number.isFinite(dayDistance) || dayDistance > 14) return null;
+
+  const communication = strongCommunicationMatch(bankRow, expense);
+  if (communication) return { confidence: 100, dayDistance, reason: communication.kind };
+  if (recurringBeneficiaryMatch(bankRow, expense)) {
+    return { confidence: 90, dayDistance, reason: 'beneficiary' };
+  }
+  return null;
 }
 
 export function isBeobankTransfer(row) {
