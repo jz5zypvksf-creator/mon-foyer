@@ -1,6 +1,7 @@
 // V32 — règles de rapprochement bancaire déterministes.
 // Les preuves fortes (mandat, communication, OP) restent prioritaires sur montant/date.
 import { savingsRuleForText } from './savingsOrderRules.js';
+import { amountCents } from './domain/money/money.js';
 
 export function normalizeBankText(value) {
   return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -59,10 +60,10 @@ export function recurringBeneficiaryMatch(bankRow, expense) {
 }
 
 export function recurringBankMatchEvidence(bankRow, expense, expectedDate = '') {
-  const bankAmount = Number(bankRow?.amount || 0);
-  const expectedAmount = Math.abs(Number(expense?.amount || 0));
+  const bankAmount = amountCents(bankRow);
+  const expectedAmount = Math.abs(amountCents(expense));
   if (bankAmount >= 0 || !expectedAmount) return null;
-  if (Math.abs(Math.abs(bankAmount) - expectedAmount) > 0.05) return null;
+  if (Math.abs(bankAmount) !== expectedAmount) return null;
 
   const bankDate = String(bankRow?.date || '');
   if (!bankDate || !expectedDate) return null;
@@ -80,7 +81,7 @@ export function recurringBankMatchEvidence(bankRow, expense, expectedDate = '') 
 }
 
 export function isBeobankTransfer(row) {
-  return Boolean(row && Number(row.amount) < 0 && normalizeBankText(bankHaystack(row)).includes('beobank'));
+  return Boolean(row && amountCents(row) < 0 && normalizeBankText(bankHaystack(row)).includes('beobank'));
 }
 
 export function strongCommunicationMatch(bankRow, recurringExpense) {
@@ -136,7 +137,7 @@ function configuredSavingsRuleForText(value, savingsGoals = []) {
 }
 
 export function classifyBankBusinessRule(row, savingsGoals = []) {
-  if (!row || Number(row.amount) >= 0) return null;
+  if (!row || amountCents(row) >= 0) return null;
   const savingsRule = configuredSavingsRuleForText(bankHaystack(row), savingsGoals)
     || savingsRuleForText(bankHaystack(row));
   if (savingsRule) return {
