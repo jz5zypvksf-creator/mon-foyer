@@ -73,4 +73,36 @@ describe('parseur du véritable format CSV Belfius', () => {
     });
     expect(outstanding.map((row) => row.recurringExpenseId)).toEqual(['absent']);
   });
+
+  it('rapproche les dix attentes réelles, y compris MEGA ventilé et les OP hérités', () => {
+    const csv = [
+      'Dernier solde;-185,81 EUR', 'Date/heure du dernier solde;19-09-26 09:42', headers.join(';'),
+      csvRow({ date: '04-09-26', amount: '-20,94', beneficiary: 'TEST ACHATS/TEST AANKOOP', transaction: 'VOTRE DOMICILIATION EUROPEENNE 06180633975 POUR TEST ACHATS/TEST AANKOOP' }),
+      csvRow({ date: '07-09-26', amount: '-21,4', beneficiary: 'ETHIAS', transaction: 'VOTRE DOMICILIATION EUROPEENNE 2019/10/09-00325 POUR ETHIAS' }),
+      csvRow({ date: '07-09-26', amount: '-17,49', beneficiary: 'ETHIAS', transaction: 'VOTRE DOMICILIATION EUROPEENNE 2019/10/09-00324 POUR ETHIAS' }),
+      csvRow({ date: '10-09-26', amount: '-677,07', beneficiary: 'ETHIAS nv / ETHIAS SA', transaction: 'VOTRE DOMICILIATION EUROPEENNE 82769037335202 POUR ETHIAS nv / ETHIAS SA' }),
+      csvRow({ date: '09-09-26', amount: '-88,88', beneficiary: 'ETHIAS nv / ETHIAS SA', transaction: 'VOTRE DOMICILIATION EUROPEENNE 82769217834401 POUR ETHIAS nv / ETHIAS SA' }),
+      csvRow({ date: '04-09-26', amount: '-400', beneficiary: 'WILEUR-DU BOIS ALAIN', transaction: 'ORDRE PERMANENT 18893403 Vehicule' }),
+      csvRow({ date: '01-09-26', amount: '-350', beneficiary: 'MEGA (POWER ONLINE SA)', transaction: 'VOTRE DOMICILIATION EUROPEENNE POUR MEGA (POWER ONLINE SA)' }),
+      csvRow({ date: '04-09-26', amount: '-16,79', beneficiary: 'SETCa LIEGE', transaction: 'VOTRE DOMICILIATION EUROPEENNE POUR SETCa LIEGE' }),
+      csvRow({ date: '03-09-26', amount: '-100', beneficiary: 'AWDB BEOBANK', transaction: 'ORDRE PERMANENT 18833987 POUR AWDB BEOBANK' }),
+    ].join('\r\n');
+    const recurringExpenses = [
+      ['test', 'TEST ACHATS/TEST AANKOOP', 20.94, 6],
+      ['health1', 'ETHIAS Soins de santé Esther 1', 21.40, 7],
+      ['health2', 'ETHIAS Soins de santé Esther 2', 17.49, 7],
+      ['house2', 'ETHIAS nv / ETHIAS SA - Ethias Maison 2', 677.07, 10],
+      ['loan', 'ETHIAS nv / ETHIAS SA Solde emprunt travaux', 88.88, 10],
+      ['peugeot', 'Épargne solde Peugeot', 400, 4],
+      ['mega1', 'MEGA (POWER ONLINE SA)', 130, 3],
+      ['mega2', 'MEGA (POWER ONLINE SA)', 220, 3],
+      ['setca', 'SETCa LIEGE - Syndicat Alain', 16.79, 3],
+      ['leisure', 'Épargne loisirs', 100, 3],
+    ].map(([id, label, amount, day]) => ({ id, label, amount, day, frequency: 'monthly',
+      startDate: '2026-01-01', paymentMethod: 'Compte Belfius' }));
+    const outstanding = findOutstandingRecurringExpenses({
+      recurringExpenses, bankRows: parseBelfius(csv).rows, selectedMonth: '2026-09', currentDate: '2026-09-19',
+    });
+    expect(outstanding).toEqual([]);
+  });
 });
