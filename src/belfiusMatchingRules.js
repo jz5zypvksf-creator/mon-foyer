@@ -27,6 +27,13 @@ const RECURRING_BENEFICIARY_ALIASES = Object.freeze([
   { bank: ['setca'], app: ['syndicat'] },
 ]);
 
+const RECURRING_FAMILIES = Object.freeze([
+  { key: 'ethias', bank: ['ethias'], app: ['ethias'] },
+  { key: 'test-achats', bank: ['test achats', 'test aankoop'], app: ['test achats', 'test aankoop'] },
+]);
+
+export const RECURRING_BANK_DATE_TOLERANCE_DAYS = 5;
+
 export function bankPersonAliasMatch(bankRow, appRow) {
   const bankText = normalizeBankText(bankHaystack(bankRow));
   const appText = normalizeBankText(`${appRow?.person || ''} ${appRow?.label || ''} ${appRow?.store || ''}`);
@@ -48,6 +55,11 @@ export function recurringBeneficiaryMatch(bankRow, expense) {
   const bankText = normalizeBankText(bankHaystack(bankRow));
   const appText = recurringLabelText(expense);
   if (!bankText || !appText) return false;
+  const familyMatch = RECURRING_FAMILIES.some((family) => (
+    family.bank.some((needle) => bankText.includes(needle))
+    && family.app.some((needle) => appText.includes(needle))
+  ));
+  if (familyMatch) return true;
   if (bankText.includes(appText) || appText.includes(bankText)) return true;
 
   const meaningfulTokens = appText.split(' ').filter(token => token.length >= 5);
@@ -70,12 +82,12 @@ export function recurringBankMatchEvidence(bankRow, expense, expectedDate = '') 
   const dayDistance = Math.abs(
     Date.parse(`${bankDate}T12:00:00Z`) - Date.parse(`${expectedDate}T12:00:00Z`),
   ) / 86400000;
-  if (!Number.isFinite(dayDistance) || dayDistance > 14) return null;
+  if (!Number.isFinite(dayDistance) || dayDistance > RECURRING_BANK_DATE_TOLERANCE_DAYS) return null;
 
   const communication = strongCommunicationMatch(bankRow, expense);
   if (communication) return { confidence: 100, dayDistance, reason: communication.kind };
   if (recurringBeneficiaryMatch(bankRow, expense)) {
-    return { confidence: 90, dayDistance, reason: 'beneficiary' };
+    return { confidence: 90, dayDistance, reason: 'beneficiary-family' };
   }
   return null;
 }
