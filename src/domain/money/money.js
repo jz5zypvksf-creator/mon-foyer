@@ -40,6 +40,26 @@ export function parseMoney(value) {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
+/**
+ * Représentation canonique utilisée par le rapprochement comptable.
+ * Les données historiques peuvent rester exprimées en euros : toutes les
+ * comparaisons passent néanmoins par un entier en centimes.
+ */
+export function moneyToCents(value) {
+  const parsed = parseMoney(value);
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) : 0;
+}
+
+export function amountCents(recordOrValue) {
+  if (recordOrValue && typeof recordOrValue === 'object') {
+    const rawCents = recordOrValue.amountCents ?? recordOrValue.amount_cents;
+    const stored = Number(rawCents);
+    if (rawCents !== null && rawCents !== undefined && rawCents !== '' && Number.isSafeInteger(stored)) return stored;
+    return moneyToCents(recordOrValue.amount);
+  }
+  return moneyToCents(recordOrValue);
+}
+
 /** Formate toujours un montant EUR avec exactement deux décimales. */
 export function formatMoney(value) {
   return new Intl.NumberFormat('fr-BE', {
