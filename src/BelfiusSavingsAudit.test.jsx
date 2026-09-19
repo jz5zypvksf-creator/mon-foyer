@@ -18,8 +18,7 @@ const orders = recurring.map((expense, index) => ({
   id: `bank-${index}`, date: '2026-09-04', amount: -expense.amount,
   label: 'Bénéficiaire', details: `ORDRE PERMANENT ${expense.id} POUR compte`,
 }));
-// Un nouvel OP non configuré portant le mot « Épargne » recréait les six prévisions.
-const unknown = { id: 'new-order', date: '2026-09-01', amount: -300,
+const taxesOrder = { id: 'taxes-order', date: '2026-09-01', amount: -300,
   label: 'Bénéficiaire', details: 'ORDRE PERMANENT INSTANTANE 20401142 Épargne Taxes' };
 
 describe('ordres permanents mensuels dans l’audit', () => {
@@ -46,10 +45,10 @@ describe('ordres permanents mensuels dans l’audit', () => {
     expect(onAuditSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ clean: false, remaining: 1, anomalies: 1 }));
   });
 
-  it('ne recrée pas les six épargnes comme dépenses orphelines devant un OP inconnu', () => {
-    const result = reconcileBelfiusRows([...orders, unknown], [], '2026-09', recurring);
+  it('reconnaît le nouvel OP Taxes sans recréer les six épargnes comme dépenses orphelines', () => {
+    const result = reconcileBelfiusRows([...orders, taxesOrder], [], '2026-09', recurring);
     expect(result.extra).toHaveLength(0);
-    expect(result.missing.map(row => row.id)).toEqual(['new-order']);
+    expect(result.missing).toHaveLength(0);
     expect(result.savingsAudit).toHaveLength(6);
     expect(result.savingsAudit.every(entry => entry.status === 'matched')).toBe(true);
     expect(result.splits).toHaveLength(0);
