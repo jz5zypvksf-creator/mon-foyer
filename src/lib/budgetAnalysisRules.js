@@ -1,5 +1,6 @@
 import { ACCOUNTING_NATURES, accountingNature } from './accountingClassification.js';
 import { auditMonthlySavings, isSavingsAuditEntry } from './monthlySavingsAudit.js';
+import { recurringBankMatchEvidence } from '../belfiusMatchingRules.js';
 import {
   isMastercardPaymentMethod,
   mastercardSettlementDate,
@@ -154,6 +155,36 @@ export function recurringHasExecutedMatch(expense, operations = [], selectedMont
   });
 }
 
+function matchedOrdinaryRecurringIds(recurringExpenses, bankRows, selectedMonth, currentDate, savingsIds) {
+  const candidates = [];
+  recurringExpenses.forEach(expense => {
+    if (savingsIds.has(expense.id)) return;
+    const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
+    if (paymentMethod !== 'Compte Belfius') return;
+    const sourceMonth = recurringSourceMonthForBudget(paymentMethod, selectedMonth);
+    if (!recurringIsDueInMonth(expense, sourceMonth)) return;
+    const expectedDate = dateInMonth(sourceMonth, expense?.day);
+    if (!expectedDate || expectedDate > currentDate) return;
+
+    bankRows.forEach((bankRow, bankIndex) => {
+      if (String(bankRow?.date || '').slice(0, 7) !== selectedMonth) return;
+      const evidence = recurringBankMatchEvidence(bankRow, expense, expectedDate);
+      if (evidence) candidates.push({ expenseId: expense.id, bankIndex, ...evidence });
+    });
+  });
+
+  candidates.sort((left, right) => right.confidence - left.confidence
+    || left.dayDistance - right.dayDistance);
+  const matchedExpenses = new Set();
+  const usedBankRows = new Set();
+  candidates.forEach(candidate => {
+    if (matchedExpenses.has(candidate.expenseId) || usedBankRows.has(candidate.bankIndex)) return;
+    matchedExpenses.add(candidate.expenseId);
+    usedBankRows.add(candidate.bankIndex);
+  });
+  return matchedExpenses;
+}
+
 /**
  * Retourne les échéances récurrentes déjà dues mais absentes des écritures importées.
  * Ces lignes sont des projections de lecture : elles ne doivent jamais être persistées.
@@ -171,6 +202,9 @@ export function findOutstandingRecurringExpenses({
   const matchedSavingsIds = new Set(auditMonthlySavings(bankRows, savings, selectedMonth)
     .filter(entry => entry.status === 'matched')
     .flatMap(entry => entry.expenses.map(expense => expense.id)));
+  const matchedBankRecurringIds = matchedOrdinaryRecurringIds(
+    recurringExpenses, bankRows, selectedMonth, currentDate, savingsIds,
+  );
 
   return recurringExpenses.flatMap((expense) => {
     const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
@@ -186,7 +220,8 @@ export function findOutstandingRecurringExpenses({
     if (amount(expense.amount) <= 0) return [];
     if (savingsIds.has(expense.id)) {
       if (matchedSavingsIds.has(expense.id)) return [];
-    } else if (recurringHasExecutedMatch(expense, operations, selectedMonth, currentDate)) return [];
+    } else if (matchedBankRecurringIds.has(expense.id)
+      || recurringHasExecutedMatch(expense, operations, selectedMonth, currentDate)) return [];
 
     return [{
       id: `outstanding-recurring-${expense.id}-${selectedMonth}`,
