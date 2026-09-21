@@ -3,10 +3,30 @@ import assert from 'node:assert/strict';
 import {
   buildDailyBudgetSeries,
   buildMonthClosingChecks,
+  currentLiquiditySummary,
   mastercardReconciliation,
 } from './desktopDashboardRules.js';
 
 const mastercard = 'Mastercard Platinum •••• 4397';
+
+test('sépare strictement le disponible Belfius des chèques-repas', () => {
+  const result = currentLiquiditySummary({
+    paymentBalances: {
+      'Compte Belfius': 500,
+      'Chèques repas Alain': 80.12,
+      'Chèques repas Esther': 60,
+      [mastercard]: -9.99,
+    },
+    liveBelfiusSnapshot: { expectedBalance: 487.35 },
+  });
+
+  assert.equal(result.belfius, 487.35);
+  assert.equal(result.mealVoucherTotal, 140.12);
+  assert.deepEqual(result.mealVouchers, [
+    { method: 'Chèques repas Alain', balance: 80.12 },
+    { method: 'Chèques repas Esther', balance: 60 },
+  ]);
+});
 
 test('place les achats Mastercard dans le mois et au jour de leur prélèvement', () => {
   const series = buildDailyBudgetSeries({

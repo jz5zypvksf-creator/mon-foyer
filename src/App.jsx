@@ -84,13 +84,18 @@ import {
   isMastercardPaymentMethod,
   MASTERCARD_MASKED_NUMBER,
   MASTERCARD_PAYMENT_METHOD,
+  mastercardPendingSettlementDate,
   mastercardRecurringForecast,
   mastercardSettlementDate,
   recurringSourceMonthForBudget,
 } from './lib/cardPaymentRules.js';
 import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
 import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
-import { buildDailyBudgetSeries, buildMonthClosingChecks } from './lib/desktopDashboardRules.js';
+import {
+  buildDailyBudgetSeries,
+  buildMonthClosingChecks,
+  currentLiquiditySummary,
+} from './lib/desktopDashboardRules.js';
 import { incomeReceivedForNextMonth } from './lib/monthlyAccountingPresentation.js';
 import { findPotentialOperationDuplicate } from './lib/operationDuplicateRules.js';
 import {
@@ -757,23 +762,26 @@ export default function App() {
   }), [data.operations, data.recurringFixedExpenses, today]);
   const mastercardRecordedOutstanding = Math.max(0, -Number(paymentBalances[MASTERCARD_PAYMENT_METHOD] || 0));
   const mastercardOutstanding = mastercardRecordedOutstanding + mastercardForecast.total;
-  const mastercardNextDebitDate = mastercardOutstanding > 0 ? mastercardForecast.nextDebitDate : '';
+  const mastercardRecordedDebitDate = useMemo(
+    () => mastercardPendingSettlementDate(data.operations),
+    [data.operations],
+  );
+  const mastercardNextDebitDate = mastercardOutstanding > 0
+    ? (mastercardRecordedOutstanding > 0 && mastercardRecordedDebitDate
+      ? mastercardRecordedDebitDate
+      : mastercardForecast.nextDebitDate)
+    : '';
 
   const liveBelfiusSnapshot = useMemo(
     () => calculateLiveBankSnapshot(belfiusSnapshot, data.operations, today),
     [belfiusSnapshot, data.operations, today],
   );
 
-  const availableForPayments = useMemo(
-    () => PAYMENT_METHODS.reduce((sum, method) => {
-      if (method === MASTERCARD_PAYMENT_METHOD) return sum;
-      if (method === 'Compte Belfius' && liveBelfiusSnapshot) {
-        return sum + Number(liveBelfiusSnapshot.expectedBalance || 0);
-      }
-      return sum + Number(paymentBalances[method] || 0);
-    }, 0),
+  const liquiditySummary = useMemo(
+    () => currentLiquiditySummary({ paymentBalances, liveBelfiusSnapshot }),
     [liveBelfiusSnapshot, paymentBalances],
   );
+  const availableForPayments = liquiditySummary.belfius;
 
   const outstandingRecurringExpenses = useMemo(() => findOutstandingRecurringExpenses({
     bankRows: importedBelfiusAudit?.rows || [],
@@ -907,10 +915,8 @@ export default function App() {
     const otherSavings = activeGoals
       .filter((goal) => savingsBucketForDisplay(goal) !== 'vacances')
       .reduce((sum, goal) => sum + Number(goal.saved || 0), 0);
-    const mealVouchers = PAYMENT_METHODS
-      .filter((method) => method.toLowerCase().includes('chèque'))
-      .reduce((sum, method) => sum + Number(paymentBalances[method] || 0), 0);
-    const belfius = Number(liveBelfiusSnapshot?.expectedBalance ?? paymentBalances['Compte Belfius'] ?? 0);
+    const mealVouchers = liquiditySummary.mealVoucherTotal;
+    const belfius = liquiditySummary.belfius;
     return {
       belfius,
       beobank,
@@ -919,7 +925,7 @@ export default function App() {
       mastercard: mastercardOutstanding,
       net: belfius + beobank + otherSavings + mealVouchers - mastercardOutstanding,
     };
-  }, [data.savingsGoals, liveBelfiusSnapshot, mastercardOutstanding, paymentBalances]);
+  }, [data.savingsGoals, liquiditySummary, mastercardOutstanding]);
 
   const budgetAnalysis = useMemo(() => analyzeBudget({
     operations: data.operations,
@@ -2665,27 +2671,19 @@ export default function App() {
               <div>
                 <span>Disponible total actuel</span>
                 <strong>{formatMoney(availableForPayments)}</strong>
+                <small className="hero-current-account-label">Compte Belfius uniquement</small>
                 {pendingCsvImportTotal > 0 ? (
                   <small className="hero-anticipated-balance">
                     Solde net anticipé : {formatMoney(anticipatedNetBalance)}
                   </small>
                 ) : null}
                 <div className="hero-balance-grid">
-                  {PAYMENT_METHODS.filter((method) => method !== MASTERCARD_PAYMENT_METHOD).map((method) => (
-                    <div key={method}>
-                      <span>{method === 'Compte Belfius' ? 'Solde Belfius actuel' : method}</span>
-                      {(() => {
-                        const displayedBalance = method === 'Compte Belfius' && liveBelfiusSnapshot
-                          ? Number(liveBelfiusSnapshot.expectedBalance || 0)
-                          : Number(paymentBalances[method] || 0);
-                        return (
-                          <em className={displayedBalance >= 0 ? 'positive' : 'negative'}>
-                            {formatMoney(displayedBalance)}
-                          </em>
-                        );
-                      })()}
-                    </div>
-                  ))}
+                  <div>
+                    <span>Solde Belfius actuel</span>
+                    <em className={availableForPayments >= 0 ? 'positive' : 'negative'}>
+                      {formatMoney(availableForPayments)}
+                    </em>
+                  </div>
                   {liveBelfiusSnapshot && (
                     <>
                       <div>
@@ -2739,6 +2737,24 @@ export default function App() {
               </div>
               <PiggyBank size={42} />
                 </div>
+
+                <section className="panel meal-voucher-panel" aria-label="Chèques-repas informatifs">
+                  <div className="meal-voucher-heading">
+                    <div>
+                      <span>Chèques-repas · information</span>
+                      <small>Réservés aux dépenses alimentaires · exclus du disponible Belfius</small>
+                    </div>
+                    <strong>{formatMoney(liquiditySummary.mealVoucherTotal)}</strong>
+                  </div>
+                  <div className="meal-voucher-accounts">
+                    {liquiditySummary.mealVouchers.map((account) => (
+                      <div key={account.method}>
+                        <span>{account.method}</span>
+                        <strong>{formatMoney(account.balance)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
 
                 <section className="panel food-budget-panel">
               <div className="section-title">
@@ -2865,7 +2881,7 @@ export default function App() {
 
               <details className="forecast-details">
                 <summary>Détail du calcul</summary>
-                <div><span>Disponible total actuel</span><strong>{formatMoney(availableForPayments)}</strong></div>
+                <div><span>Disponible Belfius actuel</span><strong>{formatMoney(availableForPayments)}</strong></div>
                 <div><span>− Dépenses programmées</span><strong>− {formatMoney(scheduledExpenseTotal)}</strong></div>
                 <div><span>Budget nourriture restant (indicatif)</span><strong>{formatMoney(remainingFoodBudget)}</strong></div>
                 <div className="forecast-details-total">

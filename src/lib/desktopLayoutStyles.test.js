@@ -44,6 +44,10 @@ test('l’Historique masque les écritures futures du mois courant', () => {
   assert.match(app, /<strong>\{formatMoney\(availableForPayments\)\}<\/strong>/);
   assert.match(app, /pendingCsvImportTotal > 0 \?/);
   assert.match(app, /Solde net anticipé : \{formatMoney\(anticipatedNetBalance\)\}/);
+  assert.match(app, /Compte Belfius uniquement/);
+  assert.match(app, /Chèques-repas · information/);
+  assert.match(app, /exclus du disponible Belfius/);
+  assert.match(styles, /\.meal-voucher-panel\s*\{/);
   assert.match(styles, /\.hero-panel \.hero-anticipated-balance\s*\{[^}]*font-size:\s*0\.875rem;[^}]*opacity:\s*0\.75;/s);
   assert.match(operationHistory, /const currentMonth = today\.slice\(0, 7\);/);
   assert.match(operationHistory, /monthOperations\.filter\(\(operation\) => operation\.date <= today\)/);

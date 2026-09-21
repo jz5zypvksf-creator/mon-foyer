@@ -138,6 +138,15 @@ h2 {
   opacity: 0.75;
 }
 
+.hero-panel .hero-current-account-label {
+  display: block;
+  margin-top: 7px;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .hero-balance-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -178,6 +187,74 @@ h2 {
 
 .hero-balance-grid em.positive {
   color: #dff3e7;
+}
+
+.meal-voucher-panel {
+  display: grid;
+  gap: 12px;
+  border-color: #cfe0d8;
+  background: #f5faf7;
+}
+
+.meal-voucher-heading,
+.meal-voucher-accounts,
+.meal-voucher-accounts > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.meal-voucher-heading span,
+.meal-voucher-heading small {
+  display: block;
+}
+
+.meal-voucher-heading span {
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.meal-voucher-heading small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.meal-voucher-heading > strong {
+  color: #247552;
+  font-size: 1.35rem;
+  white-space: nowrap;
+}
+
+.meal-voucher-accounts {
+  align-items: stretch;
+}
+
+.meal-voucher-accounts > div {
+  flex: 1 1 0;
+  padding: 10px 12px;
+  border: 1px solid #dce9e2;
+  border-radius: 12px;
+  background: white;
+}
+
+.meal-voucher-accounts span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.meal-voucher-accounts strong {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .meal-voucher-heading,
+  .meal-voucher-accounts {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .leisure-launch-card {

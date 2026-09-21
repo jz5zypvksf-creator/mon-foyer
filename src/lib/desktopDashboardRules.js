@@ -9,6 +9,26 @@ const paymentMethod = (operation) => operation?.paymentMethod || operation?.paym
 const settlementDate = (operation) => operation?.settlementDate || operation?.settlement_date || '';
 const budgetMonth = (operation) => operation?.budgetMonth || operation?.budget_month || '';
 
+const normalizedText = (value) => String(value || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+export function currentLiquiditySummary({ paymentBalances = {}, liveBelfiusSnapshot = null } = {}) {
+  const belfius = amount(liveBelfiusSnapshot?.expectedBalance ?? paymentBalances['Compte Belfius']);
+  const mealVouchers = Object.entries(paymentBalances)
+    .filter(([method]) => normalizedText(method).includes('cheques repas'))
+    .map(([method, balance]) => ({ method, balance: amount(balance) }));
+
+  return {
+    belfius,
+    mealVouchers,
+    mealVoucherTotal: mealVouchers.reduce((sum, item) => sum + item.balance, 0),
+  };
+}
+
 export function operationAccountingMonth(operation) {
   if (paymentMethod(operation).toLowerCase().includes('mastercard') && settlementDate(operation)) {
     return settlementDate(operation).slice(0, 7);

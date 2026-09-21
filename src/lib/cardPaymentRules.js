@@ -5,9 +5,50 @@ function isoDate(year, monthIndex, day) {
   return new Date(Date.UTC(year, monthIndex, day));
 }
 
-function nextBusinessDay(date) {
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return isoDate(year, month - 1, day);
+}
+
+function addUtcDays(date, days) {
   const result = new Date(date);
-  while (result.getUTCDay() === 0 || result.getUTCDay() === 6) {
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+export function isBelgianLegalHoliday(value) {
+  const date = value instanceof Date ? value : new Date(`${String(value || '')}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return false;
+  const year = date.getUTCFullYear();
+  const key = date.toISOString().slice(5, 10);
+  const fixedHolidays = new Set(['01-01', '05-01', '07-21', '08-15', '11-01', '11-11', '12-25']);
+  if (fixedHolidays.has(key)) return true;
+
+  const easter = easterSunday(year);
+  const movableHolidays = [
+    addUtcDays(easter, 1),
+    addUtcDays(easter, 39),
+    addUtcDays(easter, 50),
+  ].map((holiday) => holiday.toISOString().slice(0, 10));
+  return movableHolidays.includes(date.toISOString().slice(0, 10));
+}
+
+function nextBelgianBusinessDay(date) {
+  const result = new Date(date);
+  while (result.getUTCDay() === 0 || result.getUTCDay() === 6 || isBelgianLegalHoliday(result)) {
     result.setUTCDate(result.getUTCDate() + 1);
   }
   return result;
@@ -20,9 +61,9 @@ export function mastercardSettlementDate(purchaseDate) {
   const year = Number(yearText);
   const monthIndex = Number(monthText) - 1;
   const day = Number(dayText);
-  // Cycle clôturé le 7 : prélèvement le 16, reporté au lundi si nécessaire.
+  // Cycle clôturé le 7 : prélèvement le 15, reporté au prochain jour ouvrable belge.
   const settlementMonth = day <= 7 ? monthIndex : monthIndex + 1;
-  return nextBusinessDay(isoDate(year, settlementMonth, 16)).toISOString().slice(0, 10);
+  return nextBelgianBusinessDay(isoDate(year, settlementMonth, 15)).toISOString().slice(0, 10);
 }
 
 export function isMastercardPaymentMethod(value) {
@@ -120,6 +161,32 @@ export function nextMastercardSettlementDate(asOfDate, operations = []) {
     settlementDate = mastercardSettlementDate(`${shiftMonth(currentMonth, 1)}-01`);
   }
   return settlementDate;
+}
+
+export function mastercardPendingSettlementDate(operations = []) {
+  const lastRecordedSettlement = operations
+    .filter((operation) => (
+      operation?.type === 'card_settlement'
+      && (operation?.settlesPaymentMethod || operation?.settles_payment_method) === MASTERCARD_PAYMENT_METHOD
+    ))
+    .map((operation) => String(operation?.date || ''))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort()
+    .at(-1) || '';
+
+  return operations
+    .filter((operation) => (
+      isMastercardPaymentMethod(operation?.paymentMethod || operation?.payment_method)
+      && operation?.type !== 'card_settlement'
+      && Number(operation?.amount) > 0
+    ))
+    .map((operation) => String(
+      operation?.settlementDate
+      || operation?.settlement_date
+      || mastercardSettlementDate(operation?.date),
+    ))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date > lastRecordedSettlement)
+    .sort()[0] || '';
 }
 
 /**
