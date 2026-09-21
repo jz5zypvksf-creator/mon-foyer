@@ -12,10 +12,11 @@ import { amountCents, formatMoney, moneyToCents } from './domain/money/money.js'
 import { auditMonthlySavings, isSavingsAuditEntry } from './lib/monthlySavingsAudit.js';
 import { auditJwDonationAllocation, isJwDonation } from './lib/donationAllocationRules.js';
 import { loadPersistedAudit, persistAudit } from './lib/belfiusAuditStorage.js';
+import matchingConfig from './matchingConfig.json' with { type: 'json' };
 
-const AMOUNT_TOLERANCE_CENTS = 0;
-const DATE_TOLERANCE_DAYS = 2;
-const BANK_POSTING_GRACE_DAYS = 5;
+const AMOUNT_TOLERANCE_CENTS = matchingConfig.tolerances.amountCents;
+const DATE_TOLERANCE_DAYS = matchingConfig.tolerances.generalDateDays;
+const BANK_POSTING_GRACE_DAYS = matchingConfig.tolerances.bankPostingGraceDays;
 const DAY_MS = 86400000;
 const LEARNING_STORAGE_KEY = 'mon-foyer-belfius-learning-v1';
 
@@ -35,29 +36,7 @@ function persistLearnedRules(rules) {
 // RC2.1 — référentiel explicite des principaux libellés bancaires.
 // Les termes d'application sont volontairement larges uniquement lorsque le bénéficiaire
 // permet d'identifier une famille fiable. Un alias ne valide jamais le montant à lui seul.
-const BELFIUS_ALIASES = [
-  { bank: ['donate jw org', 'donate jw'], app: ['jw donate', 'donate jw'] },
-  { bank: ['setca'], app: ['syndicat'] },
-  { bank: ['ag insurance'], app: ['ag assurance', 'remboursement maison esther'] },
-  { bank: ['sd worx'], app: ['salaire alain'] },
-  { bank: ['office national de l emploi'], app: ['onem'] },
-  { bank: ['rexel belgium'], app: ['salaire esther'] },
-  { bank: ['stellantis financial', 'psa finance'], app: ['psa finance'] },
-  {
-    bank: ['mega power online', 'mega'],
-    app: ['mega', 'electricite', 'gaz', 'energie'],
-  },
-  { bank: ['proximus'], app: ['proximus', 'tv internet', 'gsm'] },
-  { bank: ['test achats', 'test aankoop'], app: ['test achats'] },
-  { bank: ['dats24', 'q8 easy', 'total'], app: ['carburant', 'essence', 'diesel'] },
-  {
-    bank: ['delhaize', 'lidl', 'carrefour', 'colruyt'],
-    app: ['courses', 'nourriture', 'alimentaire', 'produits menagers', 'sanitaire', 'hygiene'],
-  },
-  { bank: ['pluxee'], app: ['cheques repassage', 'cheques repas', 'pluxee'] },
-  { bank: ['ethias'], app: ['ethias maison', 'emprunt maison'] },
-  { bank: ['lanza michel'], app: ['coiffeur', 'soins personnels'] },
-];
+const BELFIUS_ALIASES = matchingConfig.belfiusAliases;
 
 export function parseDate(value) {
   const raw = String(value || '').trim();
@@ -330,7 +309,7 @@ function findSavingsCompensations(bankRows, auditMonth) {
   return expenses.flatMap((expense) => {
     const selected = fundingRows.find(({ row, index }) => (
       !usedFunding.has(index)
-      && dateDistance(row.date, expense.date) <= 5
+      && dateDistance(row.date, expense.date) <= DATE_TOLERANCE_DAYS
       && Math.abs(amountCents(row)) === Math.abs(amountCents(expense))
       && compensationLabelsMatch(expense, row)
     ));
@@ -422,7 +401,7 @@ function recurringAlreadyRepresented(expense, operations, expectedDate) {
   const compatibleRows = (operations || []).filter((row) => (
     row?.type !== 'income'
     && row?.type !== 'reimbursement'
-    && dateDistance(row?.date, expectedDate) <= 14
+    && dateDistance(row?.date, expectedDate) <= DATE_TOLERANCE_DAYS
     && recurringBelongsToAppRow(expense, row)
   ));
   const directlyRepresented = compatibleRows.some((row) => (
@@ -467,7 +446,7 @@ function recurringAuditCandidates(bankRows, recurringExpenses, persistedAppRows,
     };
     const hasCompatibleBankMovement = (bankRows || []).some((bankRow) => (
       Number(bankRow?.amount || 0) < 0
-      && dateDistance(bankRow.date, date) <= 14
+      && dateDistance(bankRow.date, date) <= DATE_TOLERANCE_DAYS
       && (aliasMatch(bankRow, candidate)
         || labelsLikelyMatch(bankRow, candidate)
         || Boolean(strongCommunicationMatch(bankRow, expense)))
@@ -602,9 +581,9 @@ function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
   const directDebitRecurring = (recurringExpenses || []).find((expense) => recurringBelongsToAppRow(expense, appRow) && ['direct-debit', 'bank-reference'].includes(strongCommunicationMatch(bankRow, expense)?.kind));
   if (directDebitRecurring) return { auto: true, confidence: 100, reason: `Domiciliation Belfius reconnue : ${directDebitRecurring.label}`, recurring: directDebitRecurring };
   const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);
-  if (learned && dayDelta <= 14) return learned;
+  if (learned && dayDelta <= DATE_TOLERANCE_DAYS) return learned;
   const strongBusinessIdentity = directLabel || alias || Boolean(recurring);
-  if (dayDelta > DATE_TOLERANCE_DAYS && !(strongBusinessIdentity && dayDelta <= 14)) return null;
+  if (dayDelta > DATE_TOLERANCE_DAYS && !(strongBusinessIdentity && dayDelta <= DATE_TOLERANCE_DAYS)) return null;
 
   if (recurring && recurring.__directDebitMatch) {
     return { auto: true, confidence: 100, reason: `Référence de domiciliation Belfius reconnue : ${recurring.label}`, recurring };
