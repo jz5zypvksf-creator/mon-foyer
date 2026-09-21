@@ -1,0 +1,140 @@
+{
+  "tolerances": {
+    "amountCents": 0,
+    "generalDateDays": 5,
+    "bankPostingGraceDays": 5,
+    "recurringDateDays": 5
+  },
+  "belfiusAliases": [
+    { "bank": ["donate jw org", "donate jw"], "app": ["jw donate", "donate jw"] },
+    { "bank": ["setca"], "app": ["syndicat"] },
+    { "bank": ["ag insurance"], "app": ["ag assurance", "remboursement maison esther"] },
+    { "bank": ["sd worx"], "app": ["salaire alain"] },
+    { "bank": ["office national de l emploi"], "app": ["onem"] },
+    { "bank": ["rexel belgium"], "app": ["salaire esther"] },
+    { "bank": ["stellantis financial", "psa finance"], "app": ["psa finance"] },
+    { "bank": ["mega power online", "mega"], "app": ["mega", "electricite", "gaz", "energie"] },
+    { "bank": ["proximus"], "app": ["proximus", "tv internet", "gsm"] },
+    {
+      "bank": ["test achats", "test aankoop", "test achats test aankoop"],
+      "app": ["test achats", "test aankoop", "test achats test aankoop"]
+    },
+    { "bank": ["dats24", "q8 easy", "total"], "app": ["carburant", "essence", "diesel"] },
+    {
+      "bank": ["delhaize", "lidl", "carrefour", "colruyt"],
+      "app": ["courses", "nourriture", "alimentaire", "produits menagers", "sanitaire", "hygiene"]
+    },
+    { "bank": ["pluxee"], "app": ["cheques repassage", "cheques repas", "pluxee"] },
+    {
+      "bank": ["ethias", "ethias nv", "ethias sa", "ethias nv ethias sa"],
+      "app": [
+        "ethias", "ethias maison", "ethias maison 1", "ethias maison 2",
+        "ethias emprunt", "ethias solde emprunt travaux", "ethias soins",
+        "ethias soins de sante", "ethias soins de sante esther 1",
+        "ethias soins de sante esther 2", "emprunt maison"
+      ]
+    },
+    { "bank": ["lanza michel"], "app": ["coiffeur", "soins personnels"] }
+  ],
+  "bankPersonAliases": [
+    { "bank": ["pluta janina"], "app": ["nonna"] }
+  ],
+  "recurringBeneficiaryAliases": [
+    { "bank": ["stellantis financial", "psa finance"], "app": ["stellantis financial", "psa finance"] },
+    { "bank": ["mega power online", "mega"], "app": ["mega", "electricite", "gaz", "energie"] },
+    {
+      "bank": ["ethias", "ethias nv", "ethias sa", "ethias nv ethias sa"],
+      "app": [
+        "ethias", "ethias maison", "ethias maison 1", "ethias maison 2",
+        "ethias emprunt", "ethias solde emprunt travaux", "ethias soins",
+        "ethias soins de sante", "ethias soins de sante esther 1",
+        "ethias soins de sante esther 2", "emprunt maison"
+      ]
+    },
+    { "bank": ["proximus"], "app": ["proximus", "tv internet", "gsm"] },
+    {
+      "bank": ["test achats", "test aankoop", "test achats test aankoop"],
+      "app": ["test achats", "test aankoop", "test achats test aankoop"]
+    },
+    { "bank": ["ag insurance"], "app": ["ag assurance", "remboursement maison esther"] },
+    { "bank": ["setca"], "app": ["syndicat"] }
+  ],
+  "recurringFamilies": [
+    {
+      "key": "ethias",
+      "bank": ["ethias", "ethias nv", "ethias sa", "ethias nv ethias sa"],
+      "app": [
+        "ethias", "ethias maison", "ethias maison 1", "ethias maison 2",
+        "ethias emprunt", "ethias solde emprunt travaux", "ethias soins",
+        "ethias soins de sante", "ethias soins de sante esther 1",
+        "ethias soins de sante esther 2", "emprunt maison"
+      ]
+    },
+    {
+      "key": "test-achats",
+      "bank": ["test achats", "test aankoop", "test achats test aankoop"],
+      "app": ["test achats", "test aankoop", "test achats test aankoop"]
+    }
+  ],
+  "savingsOrders": [
+    {
+      "op": "18833987",
+      "bucket": "vacances",
+      "label": "Vacances / Loisirs",
+      "expectedMonthly": 100,
+      "labelKeywords": ["loisir", "loisirs", "vacance", "vacances"]
+    },
+    {
+      "op": "18833985",
+      "bucket": "frais_maison",
+      "label": "Frais divers maison / foyer",
+      "expectedMonthly": 100,
+      "labelKeywords": ["maison", "foyer", "frais maison"]
+    },
+    {
+      "op": "18838193",
+      "bucket": "garage",
+      "label": "Garage / Entretien véhicule",
+      "expectedMonthly": 100,
+      "labelKeywords": ["vehicule", "véhicule", "garage", "voiture"]
+    },
+    {
+      "op": "20401142",
+      "bucket": "taxes",
+      "label": "Taxes / Impôts",
+      "expectedMonthly": 300,
+      "labelKeywords": ["taxe", "taxes", "impot", "impots", "impôt", "impôts"]
+    },
+    {
+      "op": "18893403",
+      "bucket": "solde_peugeot",
+      "label": "Épargne solde Peugeot",
+      "expectedMonthly": null,
+      "labelKeywords": ["solde peugeot", "peugeot"]
+    },
+    {
+      "op": "17178591",
+      "bucket": "pension_alain",
+      "label": "Épargne pension Alain",
+      "expectedMonthly": 110,
+      "labelKeywords": ["pension alain"]
+    },
+    {
+      "op": "17178594",
+      "bucket": "pension_esther",
+      "label": "Épargne pension Esther",
+      "expectedMonthly": 110,
+      "labelKeywords": ["pension esther"]
+    }
+  ],
+  "businessRules": {
+    "beobank": {
+      "bankIncludes": ["beobank"],
+      "destination": "Vacances / Loisirs",
+      "bucket": "vacances",
+      "kind": "internal-savings-transfer",
+      "auto": true,
+      "excludeFromExpenseMatching": true
+    }
+  }
+}
