@@ -2,6 +2,7 @@
 // Les preuves fortes (mandat, communication, OP) restent prioritaires sur montant/date.
 import { savingsRuleForText } from './savingsOrderRules.js';
 import { amountCents } from './domain/money/money.js';
+import matchingConfig from './matchingConfig.json' with { type: 'json' };
 
 export function normalizeBankText(value) {
   return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -13,26 +14,11 @@ export function isBankCreditAppOperation(operation) {
   return operation?.type === 'income' || operation?.type === 'reimbursement';
 }
 
-const BANK_PERSON_ALIASES = Object.freeze([
-  { bank: ['pluta janina'], app: ['nonna'] },
-]);
+const BANK_PERSON_ALIASES = matchingConfig.bankPersonAliases;
+const RECURRING_BENEFICIARY_ALIASES = matchingConfig.recurringBeneficiaryAliases;
+const RECURRING_FAMILIES = matchingConfig.recurringFamilies;
 
-const RECURRING_BENEFICIARY_ALIASES = Object.freeze([
-  { bank: ['stellantis financial', 'psa finance'], app: ['stellantis financial', 'psa finance'] },
-  { bank: ['mega power online', 'mega'], app: ['mega', 'electricite', 'gaz', 'energie'] },
-  { bank: ['ethias'], app: ['ethias'] },
-  { bank: ['proximus'], app: ['proximus', 'tv internet', 'gsm'] },
-  { bank: ['test achats', 'test aankoop'], app: ['test achats'] },
-  { bank: ['ag insurance'], app: ['ag assurance', 'remboursement maison esther'] },
-  { bank: ['setca'], app: ['syndicat'] },
-]);
-
-const RECURRING_FAMILIES = Object.freeze([
-  { key: 'ethias', bank: ['ethias'], app: ['ethias'] },
-  { key: 'test-achats', bank: ['test achats', 'test aankoop'], app: ['test achats', 'test aankoop'] },
-]);
-
-export const RECURRING_BANK_DATE_TOLERANCE_DAYS = 5;
+export const RECURRING_BANK_DATE_TOLERANCE_DAYS = matchingConfig.tolerances.recurringDateDays;
 
 export function bankPersonAliasMatch(bankRow, appRow) {
   const bankText = normalizeBankText(bankHaystack(bankRow));
@@ -93,7 +79,10 @@ export function recurringBankMatchEvidence(bankRow, expense, expectedDate = '') 
 }
 
 export function isBeobankTransfer(row) {
-  return Boolean(row && amountCents(row) < 0 && normalizeBankText(bankHaystack(row)).includes('beobank'));
+  const rule = matchingConfig.businessRules.beobank;
+  const bankText = normalizeBankText(bankHaystack(row));
+  return Boolean(row && amountCents(row) < 0
+    && rule.bankIncludes.some((needle) => bankText.includes(normalizeBankText(needle))));
 }
 
 export function strongCommunicationMatch(bankRow, recurringExpense) {
@@ -164,10 +153,7 @@ export function classifyBankBusinessRule(row, savingsGoals = []) {
     // polluer le rapprochement général ni apparaître comme "opérations Belfius absentes".
     excludeFromExpenseMatching: true,
   };
-  if (isBeobankTransfer(row)) return {
-    key: 'beobank', destination: 'Vacances / Loisirs', bucket: 'vacances',
-    kind: 'internal-savings-transfer', auto: true, excludeFromExpenseMatching: true,
-  };
+  if (isBeobankTransfer(row)) return { key: 'beobank', ...matchingConfig.businessRules.beobank };
   return null;
 }
 
@@ -189,6 +175,4 @@ export function explainOrphanAppOperation(appRow, cutoffDate = '') {
   return 'Écriture Mon Foyer sans correspondance bancaire après rapprochement complet.';
 }
 
-export const BELFIUS_BUSINESS_RULES = Object.freeze({
-  beobank: { destination: 'Vacances / Loisirs', bucket: 'vacances', kind: 'internal-savings-transfer', auto: true, excludeFromExpenseMatching: true },
-});
+export const BELFIUS_BUSINESS_RULES = Object.freeze(matchingConfig.businessRules);
