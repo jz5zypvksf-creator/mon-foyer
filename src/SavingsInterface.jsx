@@ -4,14 +4,10 @@ import BeobankStatementImport from './BeobankStatementImport.jsx';
 import './BeobankStatementImport.css';
 import './SavingsInterface.css';
 import { SAVINGS_ORDER_RULES, savingsRuleForBucket } from './savingsOrderRules.js';
-import { formatMoney } from './domain/money/money.js';
+import { formatMoney, formatMoneyInput } from './domain/money/money.js';
 
 function normalize(value) {
   return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-function inputMoney(value) {
-  return Number(value || 0).toFixed(2).replace('.', ',');
 }
 
 export function savingsBucketForDisplay(goal) {
@@ -60,16 +56,18 @@ function SavingsCard({ goal, detected = 0, onUpdate }) {
   const ratio = target > 0 ? Math.round((saved / target) * 100) : null;
   const progress = ratio === null ? 0 : Math.min(Math.max(ratio, 0), 100);
   const detectedOk = detected > 0;
-  const [draft, setDraft] = useState({ saved: inputMoney(saved), target: inputMoney(target) });
+  const [draft, setDraft] = useState({ saved: formatMoneyInput(saved), target: formatMoneyInput(target) });
 
   // Les valeurs Supabase arrivent après le premier rendu. Les champs doivent donc
   // suivre les données réelles et ne jamais conserver les valeurs initiales de démonstration.
   useEffect(() => {
-    setDraft({ saved: inputMoney(saved), target: inputMoney(target) });
+    setDraft({ saved: formatMoneyInput(saved), target: formatMoneyInput(target) });
   }, [goal.id, saved, target]);
 
   const commit = (field) => {
-    onUpdate(goal.id, field, draft[field]);
+    const formatted = formatMoneyInput(draft[field]);
+    setDraft((current) => ({ ...current, [field]: formatted }));
+    onUpdate(goal.id, field, formatted);
   };
 
   return (

@@ -11,6 +11,10 @@ vi.mock('./infrastructure/supabase/supabaseClient.js', () => ({
   supabase: { from: supabaseFrom },
 }));
 
+vi.mock('./DataBackupRecovery.jsx', () => ({
+  default: () => null,
+}));
+
 const STORAGE_KEY = 'mon-foyer-v1';
 
 function storedOperation(overrides = {}) {
@@ -84,6 +88,60 @@ describe('formulaire des opérations', () => {
       )))).toBe(true);
     });
     expect(supabaseFrom).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['130', '130,00'],
+    ['130.00', '130,00'],
+    ['130,0', '130,00'],
+    ['9.99', '9,99'],
+  ])('normalise visuellement le montant %s en %s à la sortie du champ', async (typed, expected) => {
+    const user = userEvent.setup();
+    render(<App />);
+    const form = await openAddForm(user);
+    const amount = within(form).getByRole('textbox', { name: 'Montant' });
+
+    await user.type(amount, typed);
+    await user.tab();
+
+    expect(amount).toHaveValue(expected);
+  });
+
+  it('affiche immédiatement deux décimales lors de la modification', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ operations: [storedOperation({ amount: 220 })] }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Historique' }));
+    const operationRow = screen.getByText('Remboursement test').closest('article');
+    await user.click(within(operationRow).getByRole('button', { name: 'Modifier' }));
+
+    expect(screen.getByRole('textbox', { name: 'Montant' })).toHaveValue('220,00');
+  });
+
+  it('affiche immédiatement 220,00 lors de la modification du frais récurrent MEGA', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      recurringFixedExpenses: [{
+        id: 'mega-electricite',
+        label: 'MEGA (POWER ONLINE SA)',
+        amount: 220,
+        day: 3,
+        person: 'Foyer',
+        category: 'electricite',
+        frequency: 'monthly',
+        paymentMethod: 'Compte Belfius',
+      }],
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Réglages' }));
+    await screen.findByRole('heading', { name: 'Frais fixes récurrents' });
+    const recurringRow = document.querySelector('.recurring-row');
+    await user.click(within(recurringRow).getByRole('button', { name: 'Modifier' }));
+
+    const recurringForm = document.querySelector('.recurring-form');
+    expect(within(recurringForm).getByRole('textbox', { name: 'Montant' })).toHaveValue('220,00');
   });
 
   it('signale un formulaire vide et bloque son envoi', async () => {

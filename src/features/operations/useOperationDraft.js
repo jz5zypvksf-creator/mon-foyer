@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { formatMoneyInput } from '../../domain/money/money.js';
 
 export function createEmptyOperationDraft() {
   const now = new Date();
@@ -25,7 +26,7 @@ export default function useOperationDraft({ createEmptyDraft = createEmptyOperat
   }, [createEmptyDraft]);
 
   const startEditing = useCallback((operation) => {
-    setDraft({ ...createEmptyDraft(), ...operation, amount: String(operation?.amount ?? '') });
+    setDraft({ ...createEmptyDraft(), ...operation, amount: formatMoneyInput(operation?.amount) });
     setEditingId(operation?.id || null);
   }, [createEmptyDraft]);
 

@@ -11,18 +11,16 @@ import {
   UserRoundCog,
 } from 'lucide-react';
 import { householdId, supabase } from '../../../infrastructure/supabase/supabaseClient.js';
-import { parseMoney } from '../../../domain/money/money.js';
+import { formatMoneyInput, parseMoney } from '../../../domain/money/money.js';
 import { normalizeStandingOrderReference, standingOrderAlreadyAssigned } from '../../../lib/configurationRules.js';
 import useBiometricAuth from '../hooks/useBiometricAuth.js';
 import './ProtectedSettings.css';
 
-const moneyInput = (value) => Number(value || 0).toFixed(2).replace('.', ',');
-
 function SavingsSettingRow({ goal, savingsGoals, onSaved }) {
   const [draft, setDraft] = useState(() => ({
     label: goal.label || '',
-    target: moneyInput(goal.target),
-    monthlyAmount: moneyInput(goal.monthly_amount ?? goal.monthlyAmount),
+    target: formatMoneyInput(goal.target ?? 0),
+    monthlyAmount: formatMoneyInput(goal.monthly_amount ?? goal.monthlyAmount ?? 0),
     standingOrderReference: goal.standing_order_reference || goal.standingOrderReference || '',
     standingOrderDay: goal.standing_order_day || goal.standingOrderDay || '',
     active: goal.active !== false,
@@ -32,8 +30,8 @@ function SavingsSettingRow({ goal, savingsGoals, onSaved }) {
   useEffect(() => {
     setDraft({
       label: goal.label || '',
-      target: moneyInput(goal.target),
-      monthlyAmount: moneyInput(goal.monthly_amount ?? goal.monthlyAmount),
+      target: formatMoneyInput(goal.target ?? 0),
+      monthlyAmount: formatMoneyInput(goal.monthly_amount ?? goal.monthlyAmount ?? 0),
       standingOrderReference: goal.standing_order_reference || goal.standingOrderReference || '',
       standingOrderDay: goal.standing_order_day || goal.standingOrderDay || '',
       active: goal.active !== false,
@@ -97,10 +95,10 @@ function SavingsSettingRow({ goal, savingsGoals, onSaved }) {
       </label>
       <div className="protected-grid">
         <label>Objectif
-          <input inputMode="decimal" value={draft.target} onChange={(event) => setDraft({ ...draft, target: event.target.value })} />
+          <input inputMode="decimal" value={draft.target} onChange={(event) => setDraft({ ...draft, target: event.target.value })} onBlur={() => setDraft((current) => ({ ...current, target: formatMoneyInput(current.target) }))} />
         </label>
         <label>Versement mensuel
-          <input inputMode="decimal" value={draft.monthlyAmount} onChange={(event) => setDraft({ ...draft, monthlyAmount: event.target.value })} />
+          <input inputMode="decimal" value={draft.monthlyAmount} onChange={(event) => setDraft({ ...draft, monthlyAmount: event.target.value })} onBlur={() => setDraft((current) => ({ ...current, monthlyAmount: formatMoneyInput(current.monthlyAmount) }))} />
         </label>
       </div>
       <div className="protected-grid">
@@ -156,7 +154,7 @@ export default function ProtectedSettings({
     const applicable = [...budgetSettings]
       .filter((row) => String(row.effective_month || row.effectiveMonth || '') <= selectedMonth)
       .sort((a, b) => String(b.effective_month || b.effectiveMonth).localeCompare(String(a.effective_month || a.effectiveMonth)))[0];
-    setFoodBudget(moneyInput(applicable?.food_budget ?? applicable?.foodBudget ?? 500));
+    setFoodBudget(formatMoneyInput(applicable?.food_budget ?? applicable?.foodBudget ?? 500));
   }, [budgetSettings, selectedMonth]);
 
   useEffect(() => {
@@ -310,7 +308,7 @@ export default function ProtectedSettings({
             <input type="month" value={effectiveMonth} onChange={(event) => setEffectiveMonth(event.target.value)} />
           </label>
           <label>Montant mensuel
-            <input inputMode="decimal" value={foodBudget} onChange={(event) => setFoodBudget(event.target.value)} />
+            <input inputMode="decimal" value={foodBudget} onChange={(event) => setFoodBudget(event.target.value)} onBlur={() => setFoodBudget((current) => formatMoneyInput(current))} />
           </label>
         </div>
         <button className="secondary-button" type="button" onClick={saveFoodBudget}><Save size={17} /> Enregistrer le budget</button>
@@ -339,11 +337,11 @@ export default function ProtectedSettings({
           </div>
           <label>Nom du nouveau compte<input value={newSavings.label} onChange={(event) => setNewSavings({ ...newSavings, label: event.target.value })} placeholder="Ex. Travaux terrasse" /></label>
           <div className="protected-grid">
-            <label>Solde initial<input inputMode="decimal" value={newSavings.saved} onChange={(event) => setNewSavings({ ...newSavings, saved: event.target.value })} /></label>
-            <label>Objectif<input inputMode="decimal" value={newSavings.target} onChange={(event) => setNewSavings({ ...newSavings, target: event.target.value })} /></label>
+            <label>Solde initial<input inputMode="decimal" value={newSavings.saved} onChange={(event) => setNewSavings({ ...newSavings, saved: event.target.value })} onBlur={() => setNewSavings((current) => ({ ...current, saved: formatMoneyInput(current.saved) }))} /></label>
+            <label>Objectif<input inputMode="decimal" value={newSavings.target} onChange={(event) => setNewSavings({ ...newSavings, target: event.target.value })} onBlur={() => setNewSavings((current) => ({ ...current, target: formatMoneyInput(current.target) }))} /></label>
           </div>
           <div className="protected-grid">
-            <label>Versement mensuel<input inputMode="decimal" value={newSavings.monthlyAmount} onChange={(event) => setNewSavings({ ...newSavings, monthlyAmount: event.target.value })} /></label>
+            <label>Versement mensuel<input inputMode="decimal" value={newSavings.monthlyAmount} onChange={(event) => setNewSavings({ ...newSavings, monthlyAmount: event.target.value })} onBlur={() => setNewSavings((current) => ({ ...current, monthlyAmount: formatMoneyInput(current.monthlyAmount) }))} /></label>
             <label>Jour prévu<input type="number" min="1" max="31" value={newSavings.day} onChange={(event) => setNewSavings({ ...newSavings, day: event.target.value })} /></label>
           </div>
           <label>Numéro d’OP<input value={newSavings.op} onChange={(event) => setNewSavings({ ...newSavings, op: event.target.value })} /></label>

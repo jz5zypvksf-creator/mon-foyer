@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, Hotel, MapPin, Pencil, Plane, ReceiptText, Save, Utensils, X } from 'lucide-react';
 import BeobankStatementImport from './BeobankStatementImport.jsx';
 import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
-import { formatMoney, parseMoney } from './domain/money/money.js';
+import { formatMoney, formatMoneyInput, parseMoney } from './domain/money/money.js';
 import { isRetryableSyncError } from './lib/syncOutbox.js';
 import { leisureSyncFailureMessage } from './lib/leisureSyncStatus.js';
 import {
@@ -83,7 +83,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   const [entries, setEntries] = useState(loadEntries);
   const [draft, setDraft] = useState(makeDraft);
   const [editingId, setEditingId] = useState(null);
-  const [manualBalance, setManualBalance] = useState(String(goal?.saved ?? 0));
+  const [manualBalance, setManualBalance] = useState(() => formatMoneyInput(goal?.saved ?? 0));
   const [status, setStatus] = useState('');
   const [pendingSyncCount, setPendingSyncCount] = useState(() => readLeisureOutbox().length);
   const [historyMode, setHistoryMode] = useState('month');
@@ -124,7 +124,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
   );
 
   useEffect(() => {
-    setManualBalance(String(Number(goal?.saved || 0).toFixed(2)).replace('.', ','));
+    setManualBalance(formatMoneyInput(goal?.saved ?? 0));
   }, [goal?.id, goal?.saved]);
 
   useEffect(() => {
@@ -352,7 +352,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
       persistEntries(next);
       await saveSharedEntry(next.find((row) => row.id === editingId), nextBalance);
       await updateBalance(nextBalance);
-      setManualBalance(String(nextBalance.toFixed(2)).replace('.', ','));
+      setManualBalance(formatMoneyInput(nextBalance));
       setEditingId(null);
       setDraft(makeDraft());
       setStatus('Dépense modifiée. Le solde Beobank et Épargne Vacances/Loisirs ont été recalculés.');
@@ -377,7 +377,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     persistEntries([row, ...entries]);
     await saveSharedEntry(row, balance - amount);
     await updateBalance(balance - amount);
-    setManualBalance(String((balance - amount).toFixed(2)).replace('.', ','));
+    setManualBalance(formatMoneyInput(balance - amount));
     setDraft(makeDraft());
     setSelectedMonth(row.date.slice(0, 7));
     setSelectedYear(row.date.slice(0, 4));
@@ -411,7 +411,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
     persistEntries(entries.filter((item) => item.id !== row.id));
     await deleteSharedEntry(row.id, balance + Number(row.amount || 0));
     await updateBalance(balance + Number(row.amount || 0));
-    setManualBalance(String((balance + Number(row.amount || 0)).toFixed(2)).replace('.', ','));
+    setManualBalance(formatMoneyInput(balance + Number(row.amount || 0)));
     if (editingId === row.id) cancelEdit();
     setStatus('Dépense supprimée et montant recrédité dans Vacances/Loisirs.');
   };
@@ -442,10 +442,10 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         <section className="panel leisure-balance-card">
           <div className="section-title"><h2>Mettre le solde à jour</h2></div>
           <div className="leisure-balance-row">
-            <input value={manualBalance} inputMode="decimal" onChange={(e) => setManualBalance(e.target.value)} aria-label="Solde Beobank" />
+            <input value={manualBalance} inputMode="decimal" onChange={(e) => setManualBalance(e.target.value)} onBlur={() => setManualBalance((current) => formatMoneyInput(current))} aria-label="Solde Beobank" />
             <button type="button" className="secondary-button" onClick={applyManualBalance}><Save size={17} /> Actualiser</button>
           </div>
-          <BeobankStatementImport currentBalance={balance} onApply={(nextBalance) => { setManualBalance(String(nextBalance).replace('.', ',')); updateBalance(nextBalance); setStatus('Solde Beobank importé et synchronisé.'); }} />
+          <BeobankStatementImport currentBalance={balance} onApply={(nextBalance) => { setManualBalance(formatMoneyInput(nextBalance)); updateBalance(nextBalance); setStatus('Solde Beobank importé et synchronisé.'); }} />
         </section>
 
         <section className="panel leisure-summary-card">
@@ -461,7 +461,7 @@ export default function LeisureVacations({ goal, onUpdateGoal, onBack }) {
         </div>
         <div className="leisure-form-grid">
           <label>Date<input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></label>
-          <label>Montant<input inputMode="decimal" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} placeholder="0,00" /></label>
+          <label>Montant<input inputMode="decimal" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} onBlur={() => setDraft((current) => ({ ...current, amount: formatMoneyInput(current.amount) }))} placeholder="0,00" /></label>
           <label>Vendeur / prestataire<input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Ex. TUI, restaurant, hôtel" /></label>
           <label>Lieu<input value={draft.place} onChange={(e) => setDraft({ ...draft, place: e.target.value })} placeholder="Ex. Antalya, Liège" /></label>
           <label>Catégorie<select value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>{CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>

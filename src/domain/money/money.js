@@ -1,3 +1,9 @@
+const EURO_INPUT_FORMATTER = new Intl.NumberFormat('fr-BE', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: false,
+});
+
 /**
  * Convertit une saisie monétaire humaine en nombre.
  * Accepte notamment les espaces ordinaires/insécables, EUR, €, la virgule
@@ -58,6 +64,18 @@ export function amountCents(recordOrValue) {
     return moneyToCents(recordOrValue.amount);
   }
   return moneyToCents(recordOrValue);
+}
+
+/**
+ * Formate la valeur d'un champ de saisie monétaire sans symbole de devise.
+ * Une valeur vide ou invalide est conservée afin que le formulaire puisse
+ * encore l'afficher et signaler précisément l'erreur à l'utilisateur.
+ */
+export function formatMoneyInput(value) {
+  const parsed = parseMoney(value);
+  if (!Number.isFinite(parsed)) return String(value ?? '').trim();
+
+  return EURO_INPUT_FORMATTER.format(Object.is(parsed, -0) ? 0 : parsed);
 }
 
 /** Formate toujours un montant EUR avec exactement deux décimales. */

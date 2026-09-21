@@ -37,7 +37,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { householdId, isSupabaseConfigured, supabase } from './infrastructure/supabase/supabaseClient.js';
-import { formatMoney, moneyToCents, parseMoney } from './domain/money/money.js';
+import { formatMoney, formatMoneyInput, moneyToCents, parseMoney } from './domain/money/money.js';
 import { budgetIncomeTotalForMonth, forecastBalances, careBalances } from './budgetMonthRules.js';
 import BudgetAnalysis from './BudgetAnalysis.jsx';
 import MonthEndAudit from './MonthEndAudit.jsx';
@@ -1713,7 +1713,7 @@ export default function App() {
     const recurringExpense = findMatchingRecurringExpense(operation);
     setDraft({
       ...operation,
-      amount: String(operation.amount),
+      amount: formatMoneyInput(operation.amount),
       recurrence: recurringExpense?.frequency || 'once',
       recurringDay: recurringExpense?.day || Number(operation.date.slice(8, 10)),
       recurringId: recurringExpense?.id || '',
@@ -1958,7 +1958,7 @@ export default function App() {
     setRecurringEditingId(expense.id);
     setRecurringDraft({
       label: expense.label,
-      amount: String(expense.amount ?? ''),
+      amount: formatMoneyInput(expense.amount),
       day: expense.day || 1,
       frequency: expense.frequency || 'monthly',
       startDate: expense.startDate || expense.start_date || currentDate(),
@@ -3047,7 +3047,14 @@ export default function App() {
               <div className="form-row">
                 <label>
                   Montant
-                  <input type="text" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="0,00" />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={draft.amount}
+                    onChange={(event) => setDraft({ ...draft, amount: event.target.value })}
+                    onBlur={() => setDraft((current) => ({ ...current, amount: formatMoneyInput(current.amount) }))}
+                    placeholder="0,00"
+                  />
                 </label>
                 <label>
                   Date
@@ -3465,6 +3472,7 @@ export default function App() {
                       inputMode="decimal"
                       value={recurringDraft.amount}
                       onChange={(event) => setRecurringDraft({ ...recurringDraft, amount: event.target.value })}
+                      onBlur={() => setRecurringDraft((current) => ({ ...current, amount: formatMoneyInput(current.amount) }))}
                       placeholder="0,00"
                     />
                   </label>
