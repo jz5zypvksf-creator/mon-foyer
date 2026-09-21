@@ -1,14 +1,8 @@
 // Registre métier des ordres permanents affectés à l'épargne.
 // Le numéro d'OP est l'identifiant bancaire stable; le montant peut varier.
-export const SAVINGS_ORDER_RULES = [
-  { op: '18833987', bucket: 'vacances', label: 'Vacances / Loisirs', expectedMonthly: 100 },
-  { op: '18833985', bucket: 'frais_maison', label: 'Frais divers maison / foyer', expectedMonthly: 100 },
-  { op: '18838193', bucket: 'garage', label: 'Garage / Entretien véhicule', expectedMonthly: 100 },
-  { op: '20401142', bucket: 'taxes', label: 'Taxes / Impôts', expectedMonthly: 300 },
-  { op: '18893403', bucket: 'solde_peugeot', label: 'Épargne solde Peugeot', expectedMonthly: null },
-  { op: '17178591', bucket: 'pension_alain', label: 'Épargne pension Alain', expectedMonthly: 110 },
-  { op: '17178594', bucket: 'pension_esther', label: 'Épargne pension Esther', expectedMonthly: 110 },
-];
+import matchingConfig from './matchingConfig.json' with { type: 'json' };
+
+export const SAVINGS_ORDER_RULES = matchingConfig.savingsOrders;
 
 export function savingsRuleForText(value) {
   const text = String(value || '');
@@ -30,12 +24,8 @@ export function savingsRuleForExpense(expense = {}) {
   const byBucket = savingsRuleForBucket(expense.bucket || expense.savingsBucket || expense.savings_bucket || '');
   if (byBucket) return byBucket;
   const label = normalizedLabel(expense.label);
-  if (label.includes('solde peugeot')) return savingsRuleForBucket('solde_peugeot');
-  if (label.includes('loisir') || label.includes('vacance')) return savingsRuleForBucket('vacances');
-  if (label.includes('taxe') || label.includes('impot')) return savingsRuleForBucket('taxes');
-  if (label.includes('vehicule') || label.includes('garage')) return savingsRuleForBucket('garage');
-  if (label.includes('maison') || label.includes('foyer')) return savingsRuleForBucket('frais_maison');
-  return null;
+  return SAVINGS_ORDER_RULES.find((rule) => (rule.labelKeywords || [])
+    .some((keyword) => label.includes(normalizedLabel(keyword)))) || null;
 }
 
 export function savingsTransferSourceLabel(bucket) {
