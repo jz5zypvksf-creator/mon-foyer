@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { loadPersistedAudit } from './lib/belfiusAuditStorage.js';
+import { loadBankMatchConfirmations } from './lib/belfiusConfirmationRules.js';
 import {
   Banknote,
   Beef,
@@ -604,6 +605,7 @@ export default function App() {
   const [bankSavings, setBankSavings] = useState({});
   const [belfiusSnapshot, setBelfiusSnapshot] = useState(null);
   const [importedBelfiusAudit, setImportedBelfiusAudit] = useState(loadPersistedAudit);
+  const [bankMatchConfirmations, setBankMatchConfirmations] = useState(loadBankMatchConfirmations);
   const [monthEndAudit, setMonthEndAudit] = useState(null);
   const [monthEndAuditRunning, setMonthEndAuditRunning] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth());
@@ -790,7 +792,8 @@ export default function App() {
     operations: data.operations,
     selectedMonth,
     currentDate: today,
-  }), [data.operations, data.recurringFixedExpenses, data.savingsGoals, importedBelfiusAudit, selectedMonth, today]);
+    bankMatchConfirmations,
+  }), [bankMatchConfirmations, data.operations, data.recurringFixedExpenses, data.savingsGoals, importedBelfiusAudit, selectedMonth, today]);
 
   const pendingCsvImportTotal = useMemo(
     () => outstandingRecurringExpenses.reduce((sum, operation) => (
@@ -3376,6 +3379,8 @@ export default function App() {
               onAuditSnapshot={persistBelfiusSnapshot}
               onEditAppOperation={editOperation}
               onAddBankOperation={addBankOperationFromAudit}
+              bankMatchConfirmations={bankMatchConfirmations}
+              onBankMatchConfirmationsChange={setBankMatchConfirmations}
             />
 
             <ProtectedSettings

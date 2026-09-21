@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import BelfiusAudit from './BelfiusAudit.jsx';
 import { loadPersistedAudit } from './lib/belfiusAuditStorage.js';
 import { findOutstandingRecurringExpenses } from './lib/budgetAnalysisRules.js';
+import {
+  bankRowFingerprint,
+  loadBankMatchConfirmations,
+  persistBankMatchConfirmations,
+} from './lib/belfiusConfirmationRules.js';
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 const recurring = [{ id: 'savings', label: 'Épargne véhicule', amount: 100,
@@ -48,4 +53,74 @@ it('updates every ordinary pending recurrence after CSV upload', async () => {
     name: 'bank.csv', arrayBuffer: async () => new TextEncoder().encode(csv).buffer,
   }] } });
   await waitFor(() => expect(screen.getByTestId('ordinary-pending').textContent).toBe('0'));
+});
+
+it('restaure après rechargement une confirmation bancaire vers plusieurs échéances', () => {
+  const bankRows = [{
+    id: 'bank-mega', date: '2026-09-01', amount: -350, amountCents: -35000,
+    label: 'MEGA (POWER ONLINE SA)', communication: 'ME1063232DOM001',
+  }];
+  const megaRecurring = [
+    { id: 'mega-electricity', label: 'MEGA Électricité', amount: 220, day: 3, paymentMethod: 'Compte Belfius' },
+    { id: 'mega-gas', label: 'MEGA Gaz', amount: 130, day: 3, paymentMethod: 'Compte Belfius' },
+  ];
+  persistBankMatchConfirmations([{
+    bankFingerprint: bankRowFingerprint(bankRows[0], bankRows),
+    targets: megaRecurring.map((expense) => ({
+      recurringExpenseId: expense.id,
+      appId: '',
+      label: expense.label,
+      amountCents: Math.round(expense.amount * 100),
+    })),
+    source: 'exact-group',
+    confirmedAt: '2026-09-21T10:00:00.000Z',
+  }]);
+
+  const reloaded = loadBankMatchConfirmations();
+  const pending = findOutstandingRecurringExpenses({
+    recurringExpenses: megaRecurring,
+    bankRows,
+    bankMatchConfirmations: reloaded,
+    selectedMonth: '2026-09',
+    currentDate: '2026-09-21',
+  });
+
+  expect(reloaded).toHaveLength(1);
+  expect(reloaded[0].targets.map((target) => target.recurringExpenseId)).toEqual([
+    'mega-electricity', 'mega-gas',
+  ]);
+  expect(pending).toEqual([]);
+});
+
+it('le bouton Valider persiste la décision et la retire immédiatement des confirmations', async () => {
+  localStorage.setItem('mon-foyer-belfius-audit-v1', JSON.stringify({
+    rows: [{
+      id: 'bank-manual', date: '2026-09-05', amount: -47.72, amountCents: -4772,
+      label: 'AUTRE COMMERCANT', communication: '', details: '',
+    }],
+    balance: 100,
+    balanceDate: '21-09-26',
+  }));
+  const onChange = vi.fn();
+  const view = render(<BelfiusAudit
+    operations={[{
+      id: 'app-manual', date: '2026-09-05', amount: 47.72, type: 'fixed',
+      label: 'Dépense reconnue par Alain', paymentMethod: 'Compte Belfius',
+    }]}
+    recurringExpenses={[]}
+    selectedMonth="2026-09"
+    appBelfiusBalance={100}
+    onBankMatchConfirmationsChange={onChange}
+  />);
+
+  fireEvent.click(screen.getByRole('button', { name: /Valider/ }));
+
+  await waitFor(() => expect(screen.queryByRole('button', { name: /Valider/ })).not.toBeInTheDocument());
+  const persisted = loadBankMatchConfirmations();
+  expect(persisted).toHaveLength(1);
+  expect(persisted[0].targets[0].appId).toBe('app-manual');
+  expect(onChange).toHaveBeenCalledWith(expect.arrayContaining([
+    expect.objectContaining({ bankFingerprint: expect.stringContaining('occurrence:0') }),
+  ]));
+  view.unmount();
 });

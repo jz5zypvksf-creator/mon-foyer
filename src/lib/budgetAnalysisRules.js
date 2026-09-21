@@ -11,6 +11,7 @@ import {
   recurringSourceMonthForBudget,
 } from './cardPaymentRules.js';
 import { amountCents } from '../domain/money/money.js';
+import { confirmedRecurringIdsForBankRows } from './belfiusConfirmationRules.js';
 
 export const PENDING_CSV_IMPORT_STATUS = "Débité en banque - En attente d'import CSV";
 
@@ -226,9 +227,14 @@ function matchedOrdinaryRecurringIds(recurringExpenses, bankRows, selectedMonth,
  */
 export function findOutstandingRecurringExpenses({
   recurringExpenses = [], operations = [], selectedMonth = '', currentDate = '',
-  bankRows = [], savingsGoals = [],
+  bankRows = [], savingsGoals = [], bankMatchConfirmations = [],
 } = {}) {
   if (!selectedMonth || selectedMonth !== String(currentDate || '').slice(0, 7)) return [];
+
+  const confirmedRecurringIds = confirmedRecurringIdsForBankRows(
+    bankMatchConfirmations,
+    bankRows,
+  );
 
   const savings = recurringExpenses.filter(expense => isSavingsAuditEntry(expense, savingsGoals)
     && recurringIsDueInMonth(expense, selectedMonth)
@@ -253,6 +259,7 @@ export function findOutstandingRecurringExpenses({
     const dueDate = settlementDate || purchaseDate;
     if (!dueDate || dueDate.slice(0, 7) !== selectedMonth || dueDate > currentDate) return [];
     if (amount(expense.amount) <= 0) return [];
+    if (confirmedRecurringIds.has(String(expense.id || ''))) return [];
     if (savingsIds.has(expense.id)) {
       if (matchedSavingsIds.has(expense.id)) return [];
     } else if (matchedBankRecurringIds.has(expense.id)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { reconcileBelfiusRows } from './BelfiusAudit.jsx';
+import { bankRowFingerprint } from './lib/belfiusConfirmationRules.js';
 
 const bankRow = (id, overrides = {}) => ({
   id,
@@ -106,14 +107,37 @@ describe('rapprochement bancaire Belfius', () => {
         details: 'Domiciliation européenne MEGA',
       }),
     ], [], '2026-09', [
-      { id: 'electricity', day: 3, amount: 220, category: 'electricite', person: 'Foyer', label: 'MEGA (POWER ONLINE SA)', frequency: 'monthly' },
-      { id: 'gas', day: 3, amount: 130, category: 'gaz', person: 'Foyer', label: 'MEGA (POWER ONLINE SA)', frequency: 'monthly' },
+      { id: 'electricity', day: 3, amount: 220, category: 'electricite', person: 'Foyer', label: 'MEGA (POWER ONLINE SA)', frequency: 'monthly', directDebitReference: 'ME1063232DOM001' },
+      { id: 'gas', day: 3, amount: 130, category: 'gaz', person: 'Foyer', label: 'MEGA (POWER ONLINE SA)', frequency: 'monthly', directDebitReference: 'ME1063232DOM001' },
     ]);
 
     expect(result.splits).toHaveLength(1);
     expect(result.splits[0].app.map((row) => row.recurringExpenseId)).toEqual(['electricity', 'gas']);
+    expect(result.review).toHaveLength(0);
     expect(result.missing).toHaveLength(0);
     expect(result.extra).toHaveLength(0);
+  });
+
+  it('isole une confirmation à une seule occurrence bancaire identique', () => {
+    const bankRows = [
+      bankRow('bank-0', { date: '2026-09-02', amount: -25, label: 'COMMERCE IDENTIQUE' }),
+      bankRow('bank-1', { date: '2026-09-02', amount: -25, label: 'COMMERCE IDENTIQUE' }),
+    ];
+    const recurring = [{
+      id: 'recurring-25', day: 2, amount: 25, category: 'divers', person: 'Foyer',
+      label: 'Dépense confirmée', frequency: 'monthly',
+    }];
+    const confirmations = [{
+      bankFingerprint: bankRowFingerprint(bankRows[0], bankRows),
+      targets: [{ recurringExpenseId: 'recurring-25', appId: '', amountCents: 2500 }],
+      source: 'manual', confirmedAt: '2026-09-21T10:00:00.000Z',
+    }];
+
+    const result = reconcileBelfiusRows(bankRows, [], '2026-09', recurring, [], [], confirmations);
+
+    expect(result.matched).toHaveLength(1);
+    expect(result.matched[0].bank.id).toBe('bank-0');
+    expect(result.missing.map((row) => row.id)).toEqual(['bank-1']);
   });
 
   it('consomme les dons identiques dans leur ordre FIFO sans ambiguïté', () => {

@@ -12,6 +12,14 @@ import { amountCents, formatMoney, moneyToCents } from './domain/money/money.js'
 import { auditMonthlySavings, isSavingsAuditEntry } from './lib/monthlySavingsAudit.js';
 import { auditJwDonationAllocation, isJwDonation } from './lib/donationAllocationRules.js';
 import { loadPersistedAudit, persistAudit } from './lib/belfiusAuditStorage.js';
+import {
+  bankRowFingerprint,
+  confirmationForBankRow,
+  confirmedRecurringIdsForBankRows,
+  loadBankMatchConfirmations,
+  mergeBankMatchConfirmations,
+  persistBankMatchConfirmations,
+} from './lib/belfiusConfirmationRules.js';
 import matchingConfig from './matchingConfig.json' with { type: 'json' };
 
 const AMOUNT_TOLERANCE_CENTS = matchingConfig.tolerances.amountCents;
@@ -423,7 +431,13 @@ function recurringAlreadyRepresented(expense, operations, expectedDate) {
   ));
 }
 
-function recurringAuditCandidates(bankRows, recurringExpenses, persistedAppRows, auditMonth) {
+function recurringAuditCandidates(
+  bankRows,
+  recurringExpenses,
+  persistedAppRows,
+  auditMonth,
+  confirmedRecurringIds = new Set(),
+) {
   return (recurringExpenses || []).flatMap((expense) => {
     const paymentMethod = expense?.paymentMethod || expense?.payment_method || 'Compte Belfius';
     if (expense?.active === false || paymentMethod !== 'Compte Belfius') return [];
@@ -451,7 +465,9 @@ function recurringAuditCandidates(bankRows, recurringExpenses, persistedAppRows,
         || labelsLikelyMatch(bankRow, candidate)
         || Boolean(strongCommunicationMatch(bankRow, expense)))
     ));
-    return hasCompatibleBankMovement ? [candidate] : [];
+    return hasCompatibleBankMovement || confirmedRecurringIds.has(String(expense.id || ''))
+      ? [candidate]
+      : [];
   });
 }
 
@@ -512,36 +528,12 @@ function isBeobankSavingsAppRow(row) {
   return text.includes('beobank') || text.includes('epargne loisirs') || text.includes('epargne vacances');
 }
 
-function learnedTargetMatches(rule, appRow) {
-  if (!rule?.target || !appRow) return false;
-  const target = rule.target;
-  if (target.id) return target.id === appRow.id;
-  if (target.label && normalize(target.label) === normalize(appRow.label)) return true;
-  if (target.category && target.category === appRow.category) {
-    if (!target.store) return true;
-    return normalize(target.store) === normalize(appRow.store || '');
-  }
-  return false;
-}
-
-function learnedEvidence(bankRow, appRow, learnedRules) {
-  const rule = (learnedRules || []).find((item) => learnedBankIdentityMatches(item, bankRow) && learnedTargetMatches(item, appRow));
-  if (!rule) return null;
-  return {
-    auto: true,
-    confidence: 100,
-    reason: 'Correspondance apprise et confirmée précédemment',
-    recurring: null,
-    learned: true,
-  };
-}
-
 function suggestionForBankRow(bankRow, learnedRules) {
   const rule = (learnedRules || []).find((item) => learnedBankIdentityMatches(item, bankRow));
   return rule?.target || null;
 }
 
-function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
+function matchEvidence(bankRow, appRow, recurringExpenses) {
   const isStatement = isMastercardStatementRow(bankRow);
   const isSettlement = isMastercardSettlementOperation(appRow);
   if (isStatement || isSettlement) {
@@ -575,13 +567,11 @@ function matchEvidence(bankRow, appRow, recurringExpenses, learnedRules = []) {
     }
   } else if (amountDeltaCents !== AMOUNT_TOLERANCE_CENTS) return null;
 
-  const learned = learnedEvidence(bankRow, appRow, learnedRules);
   const directLabel = labelsLikelyMatch(bankRow, appRow);
   const alias = aliasMatch(bankRow, appRow);
   const directDebitRecurring = (recurringExpenses || []).find((expense) => recurringBelongsToAppRow(expense, appRow) && ['direct-debit', 'bank-reference'].includes(strongCommunicationMatch(bankRow, expense)?.kind));
   if (directDebitRecurring) return { auto: true, confidence: 100, reason: `Domiciliation Belfius reconnue : ${directDebitRecurring.label}`, recurring: directDebitRecurring };
   const recurring = findRecurringMatch(bankRow, appRow, recurringExpenses);
-  if (learned && dayDelta <= DATE_TOLERANCE_DAYS) return learned;
   const strongBusinessIdentity = directLabel || alias || Boolean(recurring);
   if (dayDelta > DATE_TOLERANCE_DAYS && !(strongBusinessIdentity && dayDelta <= DATE_TOLERANCE_DAYS)) return null;
 
@@ -779,7 +769,46 @@ function possibleBankGroup(appRow, indexedBankRows, recurringExpenses) {
  * Les correspondances automatiques exigent une preuve forte ; les cas ambigus restent
  * proposés à l’utilisateur pour confirmation explicite.
  */
-export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurringExpenses, learnedRules = [], savingsGoals = []) {
+function confirmationTargetMatches(target, appRow) {
+  const targetRecurringId = String(target?.recurringExpenseId || target?.recurring_expense_id || '');
+  const appRecurringId = String(appRow?.recurringExpenseId || appRow?.recurring_expense_id || '');
+  if (targetRecurringId) return targetRecurringId === appRecurringId;
+  const targetAppId = String(target?.appId || target?.app_id || '');
+  return Boolean(targetAppId && targetAppId === String(appRow?.id || ''));
+}
+
+function confirmationForAssociation(bankRow, appRows, source = 'manual') {
+  return {
+    bankFingerprint: bankRow?.bankFingerprint || '',
+    targets: appRows.map((appRow) => ({
+      recurringExpenseId: appRow?.recurringExpenseId || appRow?.recurring_expense_id || '',
+      appId: appRow?.id || '',
+      label: appRow?.label || '',
+      amountCents: Math.abs(amountCents(appRow)),
+    })),
+    source,
+    confirmedAt: new Date().toISOString(),
+  };
+}
+
+function sameConfirmationTargets(left, right) {
+  const targetKey = (value) => (value?.targets || [])
+    .map((target) => `${target.recurringExpenseId || ''}:${target.appId || ''}:${target.amountCents || 0}`)
+    .sort()
+    .join('|');
+  return String(left?.bankFingerprint || '') === String(right?.bankFingerprint || '')
+    && targetKey(left) === targetKey(right);
+}
+
+export function reconcileBelfiusRows(
+  bankRows,
+  operations,
+  selectedMonth,
+  recurringExpenses,
+  learnedRules = [],
+  savingsGoals = [],
+  confirmedMatches = [],
+) {
   const auditMonth = selectedMonth || new Date().toISOString().slice(0, 7);
   const donationAllocation = auditJwDonationAllocation(bankRows, operations, auditMonth,
     recurringExpenses.filter(expense => expense.active !== false && recurringOccursInMonth(expense, auditMonth)
@@ -810,7 +839,7 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     .filter((row) => !savingsBankRows.has(row))
     .filter((row) => !allocatedDonationBank.has(row))
     .filter((row) => !classifyBankBusinessRule(row, savingsGoals)?.excludeFromExpenseMatching)
-    .map((row) => ({ ...row }));
+    .map((row) => ({ ...row, bankFingerprint: bankRowFingerprint(row, bankRows) }));
   const persistedAppRows = operations
     .filter((row) => !allocatedDonationApp.has(row))
     .filter((row) => (row.paymentMethod || row.payment_method || 'Compte Belfius') === 'Compte Belfius')
@@ -824,9 +853,16 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
     // bancaire suivant, sans être déplacée dans le grand livre ni comptée comme extra.
     .filter((row) => ledgerRowCanPostDuringAudit(row, auditMonth, monthBankRows))
     .map((row) => ({ ...row, amount: Number(row.amount) || 0 }));
+  const confirmedRecurringIds = confirmedRecurringIdsForBankRows(confirmedMatches, bankRows);
   const appRows = [
     ...persistedAppRows,
-    ...recurringAuditCandidates(monthBankRows, expenseRecurrences, persistedAppRows, auditMonth),
+    ...recurringAuditCandidates(
+      monthBankRows,
+      expenseRecurrences,
+      persistedAppRows,
+      auditMonth,
+      confirmedRecurringIds,
+    ),
   ];
 
   const usedBank = new Set();
@@ -870,6 +906,77 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
   // 2) Les OP d'épargne ont déjà été isolés par numéro exact + mois dans
   // savingsAudit et retirés de monthBankRows avant cette boucle.
 
+  // Les décisions déjà confirmées sont rejouées avant toute heuristique. Une
+  // empreinte désigne une occurrence bancaire unique et ne peut donc jamais
+  // consommer une autre ligne identique du relevé.
+  monthBankRows.forEach((bankRow, bankIndex) => {
+    if (usedBank.has(bankIndex) || pendingBank.has(bankIndex)) return;
+    const confirmation = confirmationForBankRow(confirmedMatches, bankRow, monthBankRows);
+    if (!confirmation) return;
+    const selected = [];
+    const selectedIndexes = new Set();
+    (confirmation.targets || []).forEach((target) => {
+      const index = appRows.findIndex((appRow, appIndex) => (
+        !usedApp.has(appIndex)
+        && !selectedIndexes.has(appIndex)
+        && confirmationTargetMatches(target, appRow)
+      ));
+      if (index >= 0) {
+        selectedIndexes.add(index);
+        selected.push({ index, row: appRows[index] });
+      }
+    });
+    if (selected.length !== (confirmation.targets || []).length || selected.length === 0) return;
+    if (selected.length > 1) {
+      const confirmedTotal = selected.reduce((sum, { row }) => sum + Math.abs(amountCents(row)), 0);
+      if (confirmedTotal !== Math.abs(amountCents(bankRow))) return;
+    }
+    usedBank.add(bankIndex);
+    selected.forEach(({ index }) => usedApp.add(index));
+    if (selected.length === 1) {
+      matched.push({
+        bank: bankRow,
+        app: selected[0].row,
+        auto: true,
+        confidence: 100,
+        learned: true,
+        reason: 'Correspondance confirmée par empreinte bancaire',
+      });
+    } else {
+      splits.push({
+        bank: bankRow,
+        app: selected.map(({ row }) => row),
+        confidence: 100,
+        reason: 'Ventilation confirmée par empreinte bancaire et total exact',
+      });
+    }
+  });
+
+  // Les ventilations exactes 1 ligne Belfius → n échéances sont examinées
+  // avant les propositions individuelles. Cela évite que MEGA 350 € soit
+  // bloqué par deux faux écarts 130 €/220 € partageant la même référence.
+  monthBankRows.forEach((bankRow, bankIndex) => {
+    if (usedBank.has(bankIndex) || pendingBank.has(bankIndex)) return;
+    const availableApp = appRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ index }) => !usedApp.has(index));
+    const hasExactSingle = availableApp.some(({ row }) => (
+      Math.abs(amountCents(row)) === Math.abs(amountCents(bankRow))
+      && Boolean(matchEvidence(bankRow, row, expenseRecurrences))
+    ));
+    if (hasExactSingle) return;
+    const split = possibleSplit(bankRow, availableApp, expenseRecurrences);
+    if (!split) return;
+    usedBank.add(bankIndex);
+    split.forEach(({ index }) => usedApp.add(index));
+    splits.push({
+      bank: bankRow,
+      app: split.map(({ row }) => row),
+      confidence: 100,
+      reason: 'Ventilation reconnue avant ambiguïté par cohérence et total exact',
+    });
+  });
+
   // 3) Domiciliations, puis 4) dépenses ordinaires. matchEvidence donne la
   // priorité à la référence forte avant les alias/libellés normalisés.
   monthBankRows.forEach((bankRow, bankIndex) => {
@@ -878,15 +985,13 @@ export function reconcileBelfiusRows(bankRows, operations, selectedMonth, recurr
       .map((row, index) => ({
         row,
         index,
-        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, expenseRecurrences, learnedRules),
+        evidence: usedApp.has(index) ? null : matchEvidence(bankRow, row, expenseRecurrences),
       }))
       .filter(({ evidence }) => evidence)
       .sort((left, right) => right.evidence.confidence - left.evidence.confidence
         || dateDistance(left.row.date, bankRow.date) - dateDistance(right.row.date, bankRow.date));
 
     const automatic = candidates.filter(({ evidence }) => evidence.auto);
-    const learnedAutomatic = automatic.filter(({ evidence }) => evidence.learned || String(evidence.reason || '').toLowerCase().includes('apprise'));
-    if (learnedAutomatic.length === 1) { const selected = learnedAutomatic[0]; usedBank.add(bankIndex); usedApp.add(selected.index); matched.push({ bank: bankRow, app: selected.row, ...selected.evidence }); return; }
     // A five-cent tolerance must not make an exact purchase ambiguous with a nearby one.
     // This preference only applies after semantic evidence has established both candidates.
     const exactAmountAutomatic = automatic.filter(({ row }) => (
@@ -1036,16 +1141,51 @@ export default function BelfiusAudit({
   onAuditSnapshot,
   onCsvImported,
   onEditAppOperation,
+  bankMatchConfirmations,
+  onBankMatchConfirmationsChange,
 }) {
   // RC2.4.4 : le dernier relevé reste disponible entre les ouvertures de l'application.
   const [audit, setAudit] = useState(loadPersistedAudit);
   const [error, setError] = useState('');
   const [learnedRules, setLearnedRules] = useState(loadLearnedRules);
+  const [localBankConfirmations, setLocalBankConfirmations] = useState(loadBankMatchConfirmations);
   const [confirmationMessage, setConfirmationMessage] = useState('');
-  const result = useMemo(
-    () => audit ? reconcileBelfiusRows(audit.rows, operations, selectedMonth, recurringExpenses, learnedRules, savingsGoals) : null,
-    [audit, learnedRules, operations, recurringExpenses, savingsGoals, selectedMonth],
+  const effectiveBankConfirmations = useMemo(
+    () => mergeBankMatchConfirmations(localBankConfirmations, bankMatchConfirmations || []),
+    [bankMatchConfirmations, localBankConfirmations],
   );
+  const result = useMemo(
+    () => audit ? reconcileBelfiusRows(
+      audit.rows,
+      operations,
+      selectedMonth,
+      recurringExpenses,
+      learnedRules,
+      savingsGoals,
+      effectiveBankConfirmations,
+    ) : null,
+    [audit, effectiveBankConfirmations, learnedRules, operations, recurringExpenses, savingsGoals, selectedMonth],
+  );
+
+  const saveBankConfirmations = (additions) => {
+    const next = persistBankMatchConfirmations(
+      mergeBankMatchConfirmations(effectiveBankConfirmations, additions),
+    );
+    setLocalBankConfirmations(next);
+    onBankMatchConfirmationsChange?.(next);
+    return next;
+  };
+
+  useEffect(() => {
+    if (!result?.splits?.length) return;
+    const additions = result.splits
+      .filter(({ bank, app }) => bank?.bankFingerprint && app?.length > 1)
+      .map(({ bank, app }) => confirmationForAssociation(bank, app, 'exact-group'))
+      .filter((candidate) => !effectiveBankConfirmations.some((existing) => (
+        sameConfirmationTargets(existing, candidate)
+      )));
+    if (additions.length) saveBankConfirmations(additions);
+  }, [effectiveBankConfirmations, result?.splits]);
 
   const handleFile = async (event) => {
     const file = event.target.files?.[0];
@@ -1100,6 +1240,9 @@ export default function BelfiusAudit({
     const nextRules = [...learnedRules.filter((item) => !sameIdentity(item)), rule];
     persistLearnedRules(nextRules);
     setLearnedRules(nextRules);
+    saveBankConfirmations([
+      confirmationForAssociation(bankRow, [appRow], 'manual'),
+    ]);
     setConfirmationMessage('Correspondance validée et mémorisée : ' + bankRow.label + ' → ' + appRow.label + '.');
   };
 
