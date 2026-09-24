@@ -3,6 +3,7 @@ const DATABASE_VERSION = 1;
 const STATE_STORE = 'state';
 const IMPORT_STORE = 'belfius-imports';
 const DURABLE_KEY_PREFIX = 'mon-foyer-';
+const LOCAL_REVISIONS_KEY = '__mon-foyer-durable-revisions-v1';
 
 function requestValue(request) {
   return new Promise((resolve, reject) => {
@@ -73,12 +74,55 @@ function durableEntries(storage) {
   return entries;
 }
 
+function parseTimestamp(value) {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function valueTimestamp(key, value) {
+  try {
+    const parsed = JSON.parse(value);
+    if (key === 'mon-foyer-belfius-audit-v1' || key === 'mon-foyer-belfius-snapshot-v1') {
+      return parseTimestamp(parsed?.importedAt);
+    }
+    if (key === 'mon-foyer-belfius-confirmations-v1' && Array.isArray(parsed)) {
+      return parsed.reduce(
+        (latest, confirmation) => Math.max(latest, parseTimestamp(confirmation?.confirmedAt)),
+        Number.NEGATIVE_INFINITY,
+      );
+    }
+  } catch {
+    // Les valeurs non JSON utilisent uniquement la révision technique locale.
+  }
+  return Number.NEGATIVE_INFINITY;
+}
+
+function readLocalRevisions(storage) {
+  try {
+    const parsed = JSON.parse(storage?.getItem(LOCAL_REVISIONS_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalRevisions(storage, revisions) {
+  try {
+    storage?.setItem(LOCAL_REVISIONS_KEY, JSON.stringify(revisions));
+  } catch {
+    // IndexedDB et le cache mémoire restent disponibles si localStorage est plein.
+  }
+}
+
 export function createClientPersistence({
   database = createIndexedDbBackend(),
   storage = globalThis.localStorage,
+  now = () => new Date().toISOString(),
 } = {}) {
   const memory = new Map();
   const pendingWrites = new Set();
+  const stateWriteChains = new Map();
+  const localRevisions = readLocalRevisions(storage);
 
   const enqueue = (promise) => {
     if (!promise?.then) return;
@@ -87,13 +131,25 @@ export function createClientPersistence({
     guarded.finally(() => pendingWrites.delete(guarded));
   };
 
-  const writeLocal = (key, value) => {
+  const writeLocal = (key, value, updatedAt = now()) => {
     try {
       storage?.setItem(key, value);
+      localRevisions[key] = updatedAt;
+      writeLocalRevisions(storage, localRevisions);
       memory.delete(key);
     } catch {
       memory.set(key, value);
     }
+  };
+
+  const enqueueStateMutation = (key, mutation) => {
+    if (!database) return;
+    const previous = stateWriteChains.get(key) || Promise.resolve();
+    const next = previous.catch(() => undefined).then(mutation);
+    stateWriteChains.set(key, next);
+    enqueue(next.finally(() => {
+      if (stateWriteChains.get(key) === next) stateWriteChains.delete(key);
+    }));
   };
 
   return {
@@ -103,22 +159,72 @@ export function createClientPersistence({
       }
       try {
         const records = await database.getAllState();
+        const localEntries = new Map(durableEntries(storage));
         const indexedKeys = new Set();
-        records.forEach(({ key, value }) => {
+        let restored = 0;
+        let preserved = 0;
+
+        records.forEach(({ key, value, updatedAt }) => {
           if (!key?.startsWith(DURABLE_KEY_PREFIX) || typeof value !== 'string') return;
           indexedKeys.add(key);
-          writeLocal(key, value);
+          const localValue = localEntries.get(key);
+          if (typeof localValue !== 'string') {
+            writeLocal(key, value, updatedAt || now());
+            restored += 1;
+            return;
+          }
+          if (localValue === value) {
+            const latestRevision = parseTimestamp(localRevisions[key]) >= parseTimestamp(updatedAt)
+              ? localRevisions[key]
+              : updatedAt;
+            if (latestRevision) {
+              localRevisions[key] = latestRevision;
+              writeLocalRevisions(storage, localRevisions);
+            }
+            return;
+          }
+
+          const localBusinessTime = valueTimestamp(key, localValue);
+          const indexedBusinessTime = valueTimestamp(key, value);
+          const hasComparableBusinessTimes = Number.isFinite(localBusinessTime)
+            && Number.isFinite(indexedBusinessTime);
+          const localTime = hasComparableBusinessTimes
+            ? localBusinessTime
+            : parseTimestamp(localRevisions[key]);
+          const indexedTime = hasComparableBusinessTimes
+            ? indexedBusinessTime
+            : parseTimestamp(updatedAt);
+
+          // Une valeur locale différente sans révision est une écriture antérieure à
+          // l'introduction des métadonnées. Elle reste prioritaire afin qu'un CSV
+          // réellement importé ne soit jamais remplacé par un ancien snapshot.
+          if (indexedTime > localTime && Number.isFinite(localTime)) {
+            writeLocal(key, value, updatedAt || now());
+            restored += 1;
+            return;
+          }
+
+          const localUpdatedAt = localRevisions[key] || now();
+          writeLocal(key, localValue, localUpdatedAt);
+          enqueueStateMutation(key, () => database.putState({
+            key,
+            value: localValue,
+            updatedAt: localUpdatedAt,
+          }));
+          preserved += 1;
         });
 
         let migrated = 0;
-        durableEntries(storage).forEach(([key, value]) => {
+        localEntries.forEach((value, key) => {
           if (!indexedKeys.has(key) && typeof value === 'string') {
             migrated += 1;
-            enqueue(database.putState({ key, value, updatedAt: new Date().toISOString() }));
+            const updatedAt = localRevisions[key] || now();
+            writeLocal(key, value, updatedAt);
+            enqueueStateMutation(key, () => database.putState({ key, value, updatedAt }));
           }
         });
         await this.flush();
-        return { mode: 'indexedDB', restored: records.length, migrated };
+        return { mode: 'indexedDB', restored, migrated, preserved };
       } catch {
         return { mode: 'localStorage', restored: 0 };
       }
@@ -135,17 +241,18 @@ export function createClientPersistence({
 
     write(key, value) {
       const serialized = String(value);
-      writeLocal(key, serialized);
-      if (database) {
-        enqueue(database.putState({ key, value: serialized, updatedAt: new Date().toISOString() }));
-      }
+      const updatedAt = now();
+      writeLocal(key, serialized, updatedAt);
+      enqueueStateMutation(key, () => database.putState({ key, value: serialized, updatedAt }));
       return serialized;
     },
 
     remove(key) {
       memory.delete(key);
+      delete localRevisions[key];
       try { storage?.removeItem(key); } catch { /* IndexedDB reste supprimable. */ }
-      if (database) enqueue(database.deleteState(key));
+      writeLocalRevisions(storage, localRevisions);
+      enqueueStateMutation(key, () => database.deleteState(key));
     },
 
     recordBelfiusImport(audit) {

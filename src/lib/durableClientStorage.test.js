@@ -13,8 +13,8 @@ function createMemoryStorage(initial = {}) {
   };
 }
 
-function createMemoryDatabase() {
-  const state = new Map();
+function createMemoryDatabase(initialState = []) {
+  const state = new Map(initialState.map((record) => [record.key, structuredClone(record)]));
   const imports = new Map();
   return {
     async getAllState() { return [...state.values()]; },
@@ -83,4 +83,53 @@ test('une panne IndexedDB ne bloque jamais la sauvegarde localStorage', async ()
   persistence.write('mon-foyer-belfius-audit-v1', '{"rows":[]}');
   await persistence.flush();
   assert.equal(storage.getItem('mon-foyer-belfius-audit-v1'), '{"rows":[]}');
+});
+
+test('un CSV local plus récent remplace le vieux snapshot IndexedDB pendant l’hydratation', async () => {
+  const key = 'mon-foyer-belfius-audit-v1';
+  const oldAudit = JSON.stringify({ importedAt: '2026-09-20T08:00:00.000Z', rows: [{ amountCents: -4178 }] });
+  const freshAudit = JSON.stringify({ importedAt: '2026-09-24T10:00:00.000Z', rows: [{ amountCents: -65197 }] });
+  const storage = createMemoryStorage({ [key]: freshAudit });
+  const database = createMemoryDatabase([{
+    key,
+    value: oldAudit,
+    updatedAt: '2026-09-20T08:00:01.000Z',
+  }]);
+  const persistence = createClientPersistence({
+    database,
+    storage,
+    now: () => '2026-09-24T10:00:01.000Z',
+  });
+
+  const result = await persistence.hydrate();
+
+  assert.equal(result.preserved, 1);
+  assert.equal(persistence.read(key), freshAudit);
+  assert.equal((await database.getAllState())[0].value, freshAudit);
+});
+
+test('les écritures d’une même clé restent ordonnées afin que le dernier import gagne', async () => {
+  const values = new Map();
+  const database = {
+    async getAllState() { return []; },
+    async putState(record) {
+      if (record.value === 'ancien') await new Promise((resolve) => setTimeout(resolve, 10));
+      values.set(record.key, structuredClone(record));
+    },
+    async deleteState(key) { values.delete(key); },
+    async putImport() {},
+    async getAllImports() { return []; },
+  };
+  const timestamps = ['2026-09-24T10:00:00.000Z', '2026-09-24T10:00:01.000Z'];
+  const persistence = createClientPersistence({
+    database,
+    storage: createMemoryStorage(),
+    now: () => timestamps.shift(),
+  });
+
+  persistence.write('mon-foyer-belfius-audit-v1', 'ancien');
+  persistence.write('mon-foyer-belfius-audit-v1', 'nouveau');
+  await persistence.flush();
+
+  assert.equal(values.get('mon-foyer-belfius-audit-v1').value, 'nouveau');
 });

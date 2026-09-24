@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   loadPersistedAudit,
   loadPersistedBelfiusSnapshot,
+  persistAudit,
   persistBelfiusSnapshotLocally,
 } from './lib/belfiusAuditStorage.js';
 import { loadBankMatchConfirmations } from './lib/belfiusConfirmationRules.js';
@@ -668,6 +669,18 @@ export default function App() {
     setData(nextData);
     persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
   };
+
+  const applyImportedBelfiusAudit = useCallback((audit) => {
+    if (!audit || !Array.isArray(audit.rows)) {
+      setImportedBelfiusAudit(null);
+      return;
+    }
+    // Une nouvelle référence force immédiatement le recalcul des attentes React.
+    // La même valeur devient ensuite la source durable pour le prochain démarrage.
+    const importedAudit = { ...audit, rows: [...audit.rows] };
+    setImportedBelfiusAudit(importedAudit);
+    persistAudit(importedAudit);
+  }, []);
 
   const mergeData = (partialData) => {
     setData((current) => {
@@ -3386,7 +3399,7 @@ export default function App() {
           <section className="view">
             <DuplicateAudit mode="recurring" recurringExpenses={data.recurringFixedExpenses || []} onDeleteRecurring={(row) => deleteRecurringFixedExpense(row.id)} />
             <BelfiusAudit
-              onCsvImported={setImportedBelfiusAudit}
+              onCsvImported={applyImportedBelfiusAudit}
               operations={data.operations}
               appBelfiusBalance={paymentBalances['Compte Belfius'] || 0}
               selectedMonth={selectedMonth}
