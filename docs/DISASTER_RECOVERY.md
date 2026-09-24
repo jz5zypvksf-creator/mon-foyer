@@ -1,6 +1,6 @@
 # Plan de reprise après sinistre — Mon Foyer
 
-Dernière vérification : 24 août 2026.
+Dernière vérification : 24 septembre 2026.
 
 Ce document permet de reconstruire l'application sans dépendre de l'ordinateur actuel. Il distingue trois sauvegardes : le code, la base Supabase et l'export financier JSON.
 
@@ -12,6 +12,20 @@ Ce document permet de reconstruire l'application sans dépendre de l'ordinateur 
 | Base partagée | projet Supabase | comptes, RLS, tables, migrations et données synchronisées |
 | Copie portable | sauvegarde JSON téléchargée depuis Réglages | données financières, Loisirs, messages et dernier audit Belfius |
 | Configuration | variables Vercel/Supabase, jamais dans Git | URL Supabase, clé publique anon, identifiant du foyer |
+
+## 1.1 Persistance locale indépendante de Vercel
+
+L'application hydrate désormais son état client depuis IndexedDB avant le premier rendu React.
+Chaque écriture critique reste aussi reflétée dans `localStorage` pour conserver la compatibilité
+avec les versions précédentes et assurer un repli si IndexedDB est indisponible. Sont notamment
+conservés : l'état principal du foyer et les statuts de contrôle, le dernier audit et le dernier
+solde Belfius, l'historique des imports CSV analysés, les empreintes de rapprochement confirmées,
+les règles apprises et les mouvements d'épargne déjà appliqués.
+
+Cette couche ne dépend d'aucun fichier du système Vercel : un redéploiement, une mise en veille ou
+un remplacement d'instance ne peut donc pas l'effacer. Elle reste toutefois attachée au profil du
+navigateur. Une suppression volontaire des données du site, une navigation privée ou la perte de
+l'appareil exigent une restauration depuis Supabase ou une sauvegarde JSON externe.
 
 Le dépôt GitHub ne doit jamais contenir un export financier réel, un mot de passe, une clé privée ou le numéro complet d'une carte.
 

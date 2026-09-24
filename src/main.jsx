@@ -3,7 +3,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import OfflineStatus from './OfflineStatus.jsx';
 import NotificationReminders from './NotificationReminders.jsx';
+import { hydrateDurableClientState } from './lib/durableClientStorage.js';
 import './styles.css';
+
+await hydrateDurableClientState();
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>

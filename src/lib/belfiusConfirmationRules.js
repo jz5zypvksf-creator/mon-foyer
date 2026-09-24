@@ -1,3 +1,5 @@
+import { persistDurableLocalValue, readDurableLocalValue } from './durableClientStorage.js';
+
 export const BELFIUS_CONFIRMATIONS_STORAGE_KEY = 'mon-foyer-belfius-confirmations-v1';
 
 function normalizedText(value) {
@@ -82,7 +84,7 @@ export function mergeBankMatchConfirmations(current = [], additions = []) {
 
 export function loadBankMatchConfirmations() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(BELFIUS_CONFIRMATIONS_STORAGE_KEY) || '[]');
+    const parsed = JSON.parse(readDurableLocalValue(BELFIUS_CONFIRMATIONS_STORAGE_KEY) || '[]');
     return mergeBankMatchConfirmations([], Array.isArray(parsed) ? parsed : []);
   } catch {
     return [];
@@ -92,7 +94,7 @@ export function loadBankMatchConfirmations() {
 export function persistBankMatchConfirmations(confirmations = []) {
   const normalized = mergeBankMatchConfirmations([], confirmations);
   try {
-    localStorage.setItem(BELFIUS_CONFIRMATIONS_STORAGE_KEY, JSON.stringify(normalized));
+    persistDurableLocalValue(BELFIUS_CONFIRMATIONS_STORAGE_KEY, JSON.stringify(normalized));
   } catch {
     // Une indisponibilité du stockage ne doit pas bloquer l'audit en cours.
   }

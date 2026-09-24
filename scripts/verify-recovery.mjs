@@ -6,6 +6,7 @@ const requiredFiles = [
   'public/manifest.json',
   'public/sw.js',
   'scripts/build-service-worker.mjs',
+  'src/lib/durableClientStorage.js',
   'docs/DISASTER_RECOVERY.md',
   'supabase-secure-rls-v2.sql',
   'supabase-bank-snapshots.sql',

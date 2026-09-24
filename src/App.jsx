@@ -1,5 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { loadPersistedAudit } from './lib/belfiusAuditStorage.js';
+import {
+  loadPersistedAudit,
+  loadPersistedBelfiusSnapshot,
+  persistBelfiusSnapshotLocally,
+} from './lib/belfiusAuditStorage.js';
 import { loadBankMatchConfirmations } from './lib/belfiusConfirmationRules.js';
 import {
   Banknote,
@@ -92,6 +96,7 @@ import {
 } from './lib/cardPaymentRules.js';
 import { isMastercardStatementCommunication } from './lib/mastercardStatementRules.js';
 import { LAST_BACKUP_STORAGE_KEY } from './lib/backupRules.js';
+import { persistDurableLocalValue, readDurableLocalValue } from './lib/durableClientStorage.js';
 import {
   buildDailyBudgetSeries,
   buildMonthClosingChecks,
@@ -264,7 +269,7 @@ const defaultState = {
 
 function loadState() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = readDurableLocalValue(STORAGE_KEY);
     if (!stored) return defaultState;
     const parsed = JSON.parse(stored);
     return {
@@ -603,7 +608,7 @@ export default function App() {
   const [data, setData] = useState(loadState);
   const [activeView, setActiveView] = useState('home');
   const [bankSavings, setBankSavings] = useState({});
-  const [belfiusSnapshot, setBelfiusSnapshot] = useState(null);
+  const [belfiusSnapshot, setBelfiusSnapshot] = useState(loadPersistedBelfiusSnapshot);
   const [importedBelfiusAudit, setImportedBelfiusAudit] = useState(loadPersistedAudit);
   const [bankMatchConfirmations, setBankMatchConfirmations] = useState(loadBankMatchConfirmations);
   const [monthEndAudit, setMonthEndAudit] = useState(null);
@@ -651,15 +656,23 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!belfiusSnapshot) return;
+    persistBelfiusSnapshotLocally(belfiusSnapshot);
+    if (belfiusSnapshot.importedAt) {
+      persistDurableLocalValue('mon-foyer-last-belfius-audit-at', belfiusSnapshot.importedAt);
+    }
+  }, [belfiusSnapshot]);
+
   const saveData = (nextData) => {
     setData(nextData);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+    persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
   };
 
   const mergeData = (partialData) => {
     setData((current) => {
       const nextData = { ...current, ...partialData };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
       return nextData;
     });
   };
@@ -676,7 +689,7 @@ export default function App() {
         if (cancelled || error || !rows?.length) return;
         setData((current) => {
           const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...rows.map((row) => ({ ...row, target: Number(row.target), saved: Number(row.saved) }))] };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+          persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
           return nextData;
         });
       } else {
@@ -685,7 +698,7 @@ export default function App() {
           const additions = missing.filter((goal) => !nowExisting.has(goal.bucket)).map((goal) => ({ ...goal, id: `local-savings-${goal.bucket}` }));
           if (!additions.length) return current;
           const nextData = { ...current, savingsGoals: [...current.savingsGoals, ...additions] };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+          persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
           return nextData;
         });
       }
@@ -1247,10 +1260,7 @@ export default function App() {
       if (!carePeopleResult.error && carePeopleResult.data?.length) setCarePeople(carePeopleResult.data);
       setRemoteBudgetLoaded(true);
       if (!snapshotResult.error && snapshotResult.data) {
-        if (snapshotResult.data.imported_at) {
-          localStorage.setItem('mon-foyer-last-belfius-audit-at', snapshotResult.data.imported_at);
-        }
-        setBelfiusSnapshot({
+        const remoteSnapshot = {
           balance: Number(snapshotResult.data.balance || 0),
           balanceDate: snapshotResult.data.balance_date || '',
           importedAt: snapshotResult.data.imported_at || '',
@@ -1268,6 +1278,13 @@ export default function App() {
           liveBalanceDate: snapshotResult.data.live_balance_date || '',
           liveBalanceSource: snapshotResult.data.live_balance_source || '',
           liveOperationState: snapshotResult.data.live_operation_state || {},
+        };
+        setBelfiusSnapshot((current) => {
+          const currentTime = Date.parse(current?.importedAt || '');
+          const remoteTime = Date.parse(remoteSnapshot.importedAt || '');
+          return Number.isFinite(currentTime) && (!Number.isFinite(remoteTime) || currentTime > remoteTime)
+            ? current
+            : remoteSnapshot;
         });
       }
       setSyncStatus('Synchronise avec Supabase');
@@ -1710,7 +1727,7 @@ export default function App() {
         operation,
       );
       const nextData = { ...current, operations, recurringFixedExpenses, savingsGoals };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
       return nextData;
     });
     setDraft(makeEmptyOperation());
@@ -1946,7 +1963,7 @@ export default function App() {
           goal.id === id ? { ...goal, [field]: numericValue } : goal,
         ),
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
       return nextData;
     });
 
@@ -2210,7 +2227,7 @@ export default function App() {
     if (!transfers.length) return;
 
     let applied = {};
-    try { applied = JSON.parse(localStorage.getItem(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
+    try { applied = JSON.parse(readDurableLocalValue(APPLIED_SAVINGS_STORAGE_KEY) || '{}'); } catch { applied = {}; }
 
     // RC2.4.6 : le CSV Belfius identifie les transferts, mais ne connait pas le solde reel
     // du compte d'epargne externe (ex. Beobank). Au premier releve observe, on etablit
@@ -2225,7 +2242,7 @@ export default function App() {
           baseline: true,
         };
       });
-      localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
+      persistDurableLocalValue(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
       return;
     }
 
@@ -2267,7 +2284,7 @@ export default function App() {
         return next;
       });
       const nextData = { ...current, savingsGoals };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      persistDurableLocalValue(STORAGE_KEY, JSON.stringify(nextData));
 
       if (USE_REMOTE_BUDGET && changedGoals.length) {
         changedGoals.forEach((goal) => {
@@ -2289,7 +2306,7 @@ export default function App() {
         source: auditMeta.fileName || 'Belfius CSV',
       };
     });
-    localStorage.setItem(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
+    persistDurableLocalValue(APPLIED_SAVINGS_STORAGE_KEY, JSON.stringify(applied));
   };
 
   const persistBelfiusSnapshot = async (snapshot) => {
@@ -2315,7 +2332,7 @@ export default function App() {
       liveOperationState: {},
     };
     setBelfiusSnapshot(normalized);
-    localStorage.setItem('mon-foyer-last-belfius-audit-at', normalized.importedAt);
+    persistDurableLocalValue('mon-foyer-last-belfius-audit-at', normalized.importedAt);
     if (!USE_REMOTE_BUDGET) return;
     const { error } = await supabase.from('bank_snapshots').upsert({
       household_id: householdId,
@@ -2581,7 +2598,7 @@ export default function App() {
           return;
         }
         migratedLeisureExpenses = localLeisureExpenses.length;
-        localStorage.setItem('mon-foyer-leisure-supabase-migrated-v1', 'done');
+        persistDurableLocalValue('mon-foyer-leisure-supabase-migrated-v1', 'done');
       }
     } catch {
       setMigrationStatus('Migration dépenses Loisirs impossible: données locales illisibles.');
@@ -3394,7 +3411,7 @@ export default function App() {
               onSavingsGoalsChange={(updater) => setData((current) => {
                 const savingsGoals = typeof updater === 'function' ? updater(current.savingsGoals) : updater;
                 const next = { ...current, savingsGoals };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                persistDurableLocalValue(STORAGE_KEY, JSON.stringify(next));
                 return next;
               })}
             />

@@ -12,6 +12,7 @@ import { amountCents, formatMoney, moneyToCents } from './domain/money/money.js'
 import { auditMonthlySavings, isSavingsAuditEntry } from './lib/monthlySavingsAudit.js';
 import { auditJwDonationAllocation, isJwDonation } from './lib/donationAllocationRules.js';
 import { loadPersistedAudit, persistAudit } from './lib/belfiusAuditStorage.js';
+import { persistDurableLocalValue, readDurableLocalValue } from './lib/durableClientStorage.js';
 import {
   bankRowFingerprint,
   confirmationForBankRow,
@@ -30,7 +31,7 @@ const LEARNING_STORAGE_KEY = 'mon-foyer-belfius-learning-v1';
 
 function loadLearnedRules() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(LEARNING_STORAGE_KEY) || '[]');
+    const parsed = JSON.parse(readDurableLocalValue(LEARNING_STORAGE_KEY) || '[]');
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -38,7 +39,7 @@ function loadLearnedRules() {
 }
 
 function persistLearnedRules(rules) {
-  localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(rules));
+  persistDurableLocalValue(LEARNING_STORAGE_KEY, JSON.stringify(rules));
 }
 
 // RC2.1 — référentiel explicite des principaux libellés bancaires.
