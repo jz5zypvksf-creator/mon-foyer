@@ -35,21 +35,38 @@ it('updates pending savings on upload and keeps the result after reopening', asy
   expect(screen.getByTestId('pending').textContent).toBe('0');
 });
 
-it('updates every ordinary pending recurrence after CSV upload', async () => {
-  const ordinaryRecurring = [{ id: 'psa', label: 'PSA Finance', amount: 478.78,
-    day: 15, paymentMethod: 'Compte Belfius', frequency: 'monthly' }];
+it('remplace les cinq attentes historiques par des lignes blanches après le CSV réel', async () => {
+  const ordinaryRecurring = [
+    { id: 'ethias', label: 'ETHIAS Maison 1', amount: 651.97, day: 1,
+      category: 'assurances', paymentMethod: 'Compte Belfius', frequency: 'monthly' },
+    { id: 'ag', label: 'AG Assurance Maison Esther', amount: 41.78, day: 1,
+      category: 'assurances', paymentMethod: 'Compte Belfius', frequency: 'monthly' },
+    { id: 'home', label: 'Remboursement maison Esther', amount: 76.64, day: 1,
+      category: 'emprunt_maison', paymentMethod: 'Compte Belfius', frequency: 'monthly' },
+    { id: 'household-savings', label: 'Épargne frais divers foyer', amount: 100, day: 1,
+      category: 'epargne', directDebitReference: '18833985', paymentMethod: 'Compte Belfius', frequency: 'monthly' },
+    { id: 'taxes', label: 'Taxes / Impôts', amount: 300, day: 1,
+      category: 'epargne', directDebitReference: '20401142', paymentMethod: 'Compte Belfius', frequency: 'monthly' },
+  ];
   function OrdinaryHarness() {
     const [audit, setAudit] = useState(null);
     const pending = findOutstandingRecurringExpenses({ recurringExpenses: ordinaryRecurring,
-      selectedMonth: '2026-09', currentDate: '2026-09-19', bankRows: audit?.rows || [] });
+      selectedMonth: '2026-09', currentDate: '2026-09-24', bankRows: audit?.rows || [] });
     return <><output data-testid="ordinary-pending">{pending.length}</output>
       <BelfiusAudit operations={[]} recurringExpenses={ordinaryRecurring} selectedMonth="2026-09"
         appBelfiusBalance={0} onCsvImported={setAudit} /></>;
   }
 
   const view = render(<OrdinaryHarness />);
-  expect(screen.getByTestId('ordinary-pending').textContent).toBe('1');
-  const csv = 'Compte contrepartie;Date de comptabilisation;Montant;Nom contrepartie;Transaction;Communications\nBE00;14/09/2026;-478,78;STELLANTIS FINANCIAL SERVICES BELUX SA;DOMICILIATION;';
+  expect(screen.getByTestId('ordinary-pending').textContent).toBe('5');
+  const csv = [
+    'Compte contrepartie;Date de comptabilisation;Montant;Nom contrepartie;Transaction;Communications',
+    'BE73;01/09/2026;-651,97;ETHIAS nv / ETHIAS SA;VOTRE DOMICILIATION EUROPEENNE 82769215152101;',
+    'BE94;01/09/2026;-41,78;AG INSURANCE;VOTRE DOMICILIATION EUROPEENNE 100106706;',
+    'BE17;01/09/2026;-76,64;AG Insurance nv / AG Insurance SA;VOTRE DOMICILIATION EUROPEENNE 053124603120;',
+    'BE25;03/09/2026;-100,00;Wileur Du Bois;ORDRE PERMANENT 18833985;',
+    'BE59;01/09/2026;-300,00;Esther Brigante;ORDRE PERMANENT INSTANTANE 20401142;',
+  ].join('\r\n');
   fireEvent.change(view.container.querySelector('input[type="file"]'), { target: { files: [{
     name: 'bank.csv', arrayBuffer: async () => new TextEncoder().encode(csv).buffer,
   }] } });
@@ -61,15 +78,18 @@ it('updates every ordinary pending recurrence after CSV upload', async () => {
     label: 'Échéance toujours en attente', amount: 50, paymentMethod: 'Compte Belfius',
     virtualRecurring: true, pendingCsvImport: true, statusLabel: "En attente d'import CSV",
   };
-  const confirmed = {
-    id: 'confirmed', date: '2026-09-14', person: 'Foyer', type: 'fixed', category: 'divers',
-    label: 'PSA Finance confirmée par le CSV', amount: 478.78, paymentMethod: 'Compte Belfius',
-    virtualRecurring: true, pendingCsvImport: false,
-  };
+  const confirmed = ordinaryRecurring.map((expense) => ({
+    ...expense,
+    date: '2026-09-01',
+    person: 'Foyer',
+    type: 'fixed',
+    virtualRecurring: true,
+    pendingCsvImport: false,
+  }));
   render(<OperationHistory
     operations={[]}
-    monthOperations={[waiting, confirmed]}
-    filteredMonthOperations={[waiting, confirmed]}
+    monthOperations={[waiting, ...confirmed]}
+    filteredMonthOperations={[waiting, ...confirmed]}
     categories={[]}
     selectedMonth="2026-09"
     historySearch=""
@@ -95,9 +115,12 @@ it('updates every ordinary pending recurrence after CSV upload', async () => {
 
   expect(screen.getByText('Échéance toujours en attente').closest('article'))
     .toHaveClass('virtual-recurring');
-  const confirmedRow = screen.getByText('PSA Finance confirmée par le CSV').closest('article');
-  expect(confirmedRow).toHaveClass('csv-confirmed');
-  expect(confirmedRow).not.toHaveClass('virtual-recurring');
+  ordinaryRecurring.forEach((expense) => {
+    const confirmedRow = screen.getByText(expense.label).closest('article');
+    expect(confirmedRow).toHaveClass('csv-confirmed');
+    expect(confirmedRow).not.toHaveClass('virtual-recurring');
+    expect(confirmedRow.querySelector('.virtual-recurring-status')).toBeNull();
+  });
 });
 
 it('restaure après rechargement une confirmation bancaire vers plusieurs échéances', () => {
