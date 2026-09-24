@@ -3,20 +3,24 @@ import { amountCents } from '../domain/money/money.js';
 import { savingsRuleForExpense } from '../savingsOrderRules.js';
 
 export function savingsOrderReference(row = {}) {
-  const explicit = String(row.directDebitReference || row.direct_debit_reference
-    || row.standingOrderReference || row.standing_order_reference
-    || row.orderReference || row.order_reference || '').trim();
+  const explicit = explicitSavingsOrderReference(row);
   return explicit || savingsRuleForExpense(row)?.op || '';
 }
 
+function explicitSavingsOrderReference(row = {}) {
+  return String(row.directDebitReference || row.direct_debit_reference
+    || row.standingOrderReference || row.standing_order_reference
+    || row.orderReference || row.order_reference || '').trim();
+}
+
 export function isSavingsAuditEntry(row = {}, goals = []) {
-  const reference = savingsOrderReference(row);
+  const explicitReference = explicitSavingsOrderReference(row);
   return normalizeBankText(row.label).startsWith('epargne ')
     || normalizeBankText(row.category).startsWith('epargne')
     || row.type === 'savings_transfer'
     || (row.savingsDirection || row.savings_direction) === 'in'
-    || Boolean(reference && goals.some(goal => goal.active !== false
-      && savingsOrderReference(goal) === reference));
+    || Boolean(explicitReference && goals.some(goal => goal.active !== false
+      && savingsOrderReference(goal) === explicitReference));
 }
 
 export function bankStandingOrderReferences(row = {}) {

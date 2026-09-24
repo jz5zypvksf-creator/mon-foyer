@@ -48,10 +48,14 @@ it('remplace les cinq attentes historiques par des lignes blanches après le CSV
     { id: 'taxes', label: 'Taxes / Impôts', amount: 300, day: 1,
       category: 'epargne', directDebitReference: '20401142', paymentMethod: 'Compte Belfius', frequency: 'monthly' },
   ];
+  const savingsGoals = [
+    { id: 'house', label: 'Maison', active: true, standingOrderReference: '18833985' },
+    { id: 'taxes-goal', label: 'Taxes / Impôts', active: true, standingOrderReference: '20401142' },
+  ];
   function OrdinaryHarness() {
     const [audit, setAudit] = useState(null);
     const pending = findOutstandingRecurringExpenses({ recurringExpenses: ordinaryRecurring,
-      selectedMonth: '2026-09', currentDate: '2026-09-24', bankRows: audit?.rows || [] });
+      savingsGoals, selectedMonth: '2026-09', currentDate: '2026-09-24', bankRows: audit?.rows || [] });
     return <><output data-testid="ordinary-pending">{pending.length}</output>
       <BelfiusAudit operations={[]} recurringExpenses={ordinaryRecurring} selectedMonth="2026-09"
         appBelfiusBalance={0} onCsvImported={setAudit} /></>;
