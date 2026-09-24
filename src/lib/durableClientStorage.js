@@ -4,6 +4,7 @@ const STATE_STORE = 'state';
 const IMPORT_STORE = 'belfius-imports';
 const DURABLE_KEY_PREFIX = 'mon-foyer-';
 const LOCAL_REVISIONS_KEY = '__mon-foyer-durable-revisions-v1';
+const BELFIUS_AUDIT_KEY = 'mon-foyer-belfius-audit-v1';
 
 function requestValue(request) {
   return new Promise((resolve, reject) => {
@@ -82,7 +83,7 @@ function parseTimestamp(value) {
 function valueTimestamp(key, value) {
   try {
     const parsed = JSON.parse(value);
-    if (key === 'mon-foyer-belfius-audit-v1' || key === 'mon-foyer-belfius-snapshot-v1') {
+    if (key === BELFIUS_AUDIT_KEY || key === 'mon-foyer-belfius-snapshot-v1') {
       return parseTimestamp(parsed?.importedAt);
     }
     if (key === 'mon-foyer-belfius-confirmations-v1' && Array.isArray(parsed)) {
@@ -139,6 +140,15 @@ export function createClientPersistence({
       memory.delete(key);
     } catch {
       memory.set(key, value);
+    }
+  };
+
+  const readLocal = (key) => {
+    try {
+      const value = storage?.getItem(key) ?? null;
+      return value === null && memory.has(key) ? memory.get(key) : value;
+    } catch {
+      return memory.get(key) ?? null;
     }
   };
 
@@ -223,20 +233,36 @@ export function createClientPersistence({
             enqueueStateMutation(key, () => database.putState({ key, value, updatedAt }));
           }
         });
+
+        let recoveredImports = 0;
+        const imports = await database.getAllImports();
+        const latestImport = imports
+          .filter((entry) => Array.isArray(entry?.audit?.rows))
+          .sort((left, right) => parseTimestamp(right?.importedAt)
+            - parseTimestamp(left?.importedAt))[0];
+        const currentAuditValue = readLocal(BELFIUS_AUDIT_KEY);
+        const currentAuditTime = valueTimestamp(BELFIUS_AUDIT_KEY, currentAuditValue);
+        const latestImportTime = parseTimestamp(latestImport?.importedAt || latestImport?.audit?.importedAt);
+        if (latestImport && latestImportTime > currentAuditTime) {
+          const value = JSON.stringify(latestImport.audit);
+          const updatedAt = latestImport.audit.importedAt || latestImport.importedAt || now();
+          writeLocal(BELFIUS_AUDIT_KEY, value, updatedAt);
+          enqueueStateMutation(BELFIUS_AUDIT_KEY, () => database.putState({
+            key: BELFIUS_AUDIT_KEY,
+            value,
+            updatedAt,
+          }));
+          recoveredImports = 1;
+        }
         await this.flush();
-        return { mode: 'indexedDB', restored, migrated, preserved };
+        return { mode: 'indexedDB', restored, migrated, preserved, recoveredImports };
       } catch {
         return { mode: 'localStorage', restored: 0 };
       }
     },
 
     read(key) {
-      try {
-        const value = storage?.getItem(key) ?? null;
-        return value === null && memory.has(key) ? memory.get(key) : value;
-      } catch {
-        return memory.get(key) ?? null;
-      }
+      return readLocal(key);
     },
 
     write(key, value) {

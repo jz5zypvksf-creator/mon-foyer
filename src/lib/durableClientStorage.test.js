@@ -13,9 +13,9 @@ function createMemoryStorage(initial = {}) {
   };
 }
 
-function createMemoryDatabase(initialState = []) {
+function createMemoryDatabase(initialState = [], initialImports = []) {
   const state = new Map(initialState.map((record) => [record.key, structuredClone(record)]));
-  const imports = new Map();
+  const imports = new Map(initialImports.map((record) => [record.id, structuredClone(record)]));
   return {
     async getAllState() { return [...state.values()]; },
     async putState(record) { state.set(record.key, structuredClone(record)); },
@@ -132,4 +132,31 @@ test('les écritures d’une même clé restent ordonnées afin que le dernier i
   await persistence.flush();
 
   assert.equal(values.get('mon-foyer-belfius-audit-v1').value, 'nouveau');
+});
+
+test('le dernier import historique répare automatiquement deux caches déjà obsolètes', async () => {
+  const key = 'mon-foyer-belfius-audit-v1';
+  const oldAudit = { importedAt: '2026-09-20T08:00:00.000Z', rows: [{ amountCents: -4178 }] };
+  const freshAudit = { importedAt: '2026-09-24T10:00:00.000Z', rows: [{ amountCents: -7664 }] };
+  const database = createMemoryDatabase([{
+    key,
+    value: JSON.stringify(oldAudit),
+    updatedAt: '2026-09-20T08:00:01.000Z',
+  }], [{
+    id: '2026-09-24T10:00:00.000Z|belfius.csv',
+    importedAt: freshAudit.importedAt,
+    fileName: 'belfius.csv',
+    audit: freshAudit,
+  }]);
+  const persistence = createClientPersistence({
+    database,
+    storage: createMemoryStorage({ [key]: JSON.stringify(oldAudit) }),
+    now: () => '2026-09-24T10:00:01.000Z',
+  });
+
+  const result = await persistence.hydrate();
+
+  assert.equal(result.recoveredImports, 1);
+  assert.deepEqual(JSON.parse(persistence.read(key)), freshAudit);
+  assert.deepEqual(JSON.parse((await database.getAllState())[0].value), freshAudit);
 });
