@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import BelfiusAudit from './BelfiusAudit.jsx';
+import OperationHistory from './features/operations/OperationHistory.jsx';
 import { loadPersistedAudit } from './lib/belfiusAuditStorage.js';
 import { findOutstandingRecurringExpenses } from './lib/budgetAnalysisRules.js';
 import {
@@ -53,6 +54,50 @@ it('updates every ordinary pending recurrence after CSV upload', async () => {
     name: 'bank.csv', arrayBuffer: async () => new TextEncoder().encode(csv).buffer,
   }] } });
   await waitFor(() => expect(screen.getByTestId('ordinary-pending').textContent).toBe('0'));
+  view.unmount();
+
+  const waiting = {
+    id: 'waiting', date: '2026-09-18', person: 'Foyer', type: 'fixed', category: 'divers',
+    label: 'Échéance toujours en attente', amount: 50, paymentMethod: 'Compte Belfius',
+    virtualRecurring: true, pendingCsvImport: true, statusLabel: "En attente d'import CSV",
+  };
+  const confirmed = {
+    id: 'confirmed', date: '2026-09-14', person: 'Foyer', type: 'fixed', category: 'divers',
+    label: 'PSA Finance confirmée par le CSV', amount: 478.78, paymentMethod: 'Compte Belfius',
+    virtualRecurring: true, pendingCsvImport: false,
+  };
+  render(<OperationHistory
+    operations={[]}
+    monthOperations={[waiting, confirmed]}
+    filteredMonthOperations={[waiting, confirmed]}
+    categories={[]}
+    selectedMonth="2026-09"
+    historySearch=""
+    setHistorySearch={vi.fn()}
+    historyType="all"
+    setHistoryType={vi.fn()}
+    historyPerson="all"
+    setHistoryPerson={vi.fn()}
+    historyPeople={[]}
+    historyCategory="all"
+    setHistoryCategory={vi.fn()}
+    historyPaymentMethod="all"
+    setHistoryPaymentMethod={vi.fn()}
+    showReviewOnly={false}
+    setShowReviewOnly={vi.fn()}
+    reviewMap={new Map()}
+    historyTotals={{ balance: 0, income: 0, expenses: 0 }}
+    paymentBalances={{}}
+    today="2026-09-24"
+    onEditOperation={vi.fn()}
+    onDeleteOperation={vi.fn()}
+  />);
+
+  expect(screen.getByText('Échéance toujours en attente').closest('article'))
+    .toHaveClass('virtual-recurring');
+  const confirmedRow = screen.getByText('PSA Finance confirmée par le CSV').closest('article');
+  expect(confirmedRow).toHaveClass('csv-confirmed');
+  expect(confirmedRow).not.toHaveClass('virtual-recurring');
 });
 
 it('restaure après rechargement une confirmation bancaire vers plusieurs échéances', () => {

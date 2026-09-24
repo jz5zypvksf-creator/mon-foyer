@@ -52,5 +52,10 @@ test('l’Historique masque les écritures futures du mois courant', () => {
   assert.match(operationHistory, /const currentMonth = today\.slice\(0, 7\);/);
   assert.match(operationHistory, /monthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
   assert.match(operationHistory, /filteredMonthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
+  assert.match(operationHistory, /const awaitingCsvConfirmation = operation\.pendingCsvImport === true;/);
+  assert.match(operationHistory, /awaitingCsvConfirmation \? 'virtual-recurring' : ''/);
+  assert.match(operationHistory, /csvConfirmed \? 'csv-confirmed' : ''/);
+  assert.doesNotMatch(operationHistory, /operation\.virtualRecurring \? 'virtual-recurring' : ''/);
+  assert.match(operationHistory, /background:\s*'var\(--surface\)'[^}]*filter:\s*'none'/s);
   assert.doesNotMatch(app, /return effectiveMonthOperations\.filter\(\(operation\) => \{/);
 });

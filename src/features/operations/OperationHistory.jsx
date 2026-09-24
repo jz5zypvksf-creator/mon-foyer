@@ -53,19 +53,25 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
   const category = categories.find((item) => item.id === operation.category);
   const Icon = iconMap[category?.icon] || CircleEllipsis;
   const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';
+  const awaitingCsvConfirmation = operation.pendingCsvImport === true;
+  const csvConfirmed = operation.virtualRecurring === true && !awaitingCsvConfirmation;
+  const csvConfirmedStyle = csvConfirmed
+    ? { background: 'var(--surface)', color: 'var(--text)', filter: 'none' }
+    : undefined;
 
   return (
     <article className={[
       'operation-row',
       alerts?.length ? 'needs-review' : '',
-      operation.virtualRecurring ? 'virtual-recurring' : '',
-    ].filter(Boolean).join(' ')}>
+      awaitingCsvConfirmation ? 'virtual-recurring' : '',
+      csvConfirmed ? 'csv-confirmed' : '',
+    ].filter(Boolean).join(' ')} style={csvConfirmedStyle}>
       <span className="icon-bubble"><Icon size={18} /></span>
       <div>
         <strong>{operation.label}</strong>
         <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
         {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
-        {operation.pendingCsvImport && (
+        {awaitingCsvConfirmation && (
           <em className="virtual-recurring-status">{operation.statusLabel}</em>
         )}
         {operation.reviewStatus && operation.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
