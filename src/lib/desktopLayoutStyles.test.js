@@ -36,9 +36,9 @@ test('la synthèse et les modules complémentaires occupent deux colonnes indép
   assert.match(styles, /\.home-view\s+\.desktop-insights-column\s*>\s*\.desktop-dashboard\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*auto;/s);
 });
 
-test('l’Historique masque les écritures futures du mois courant', () => {
+test('l’Historique conserve toutes les écritures et harmonise les confirmations CSV', () => {
   assert.match(app, /return historyMonthOperations\.filter\(\(operation\) => \{/);
-  assert.match(app, /\.\.\.monthOperations, \.\.\.outstandingRecurringExpenses/);
+  assert.match(app, /\.\.\.monthOperations, \.\.\.outstandingRecurringExpenses, \.\.\.recurringHistoryPresentationRows/);
   assert.match(app, /operation\.statusLabel === PENDING_CSV_IMPORT_STATUS/);
   assert.match(app, /const anticipatedNetBalance = availableForPayments - pendingCsvImportTotal;/);
   assert.match(app, /<strong>\{formatMoney\(availableForPayments\)\}<\/strong>/);
@@ -49,12 +49,13 @@ test('l’Historique masque les écritures futures du mois courant', () => {
   assert.match(app, /exclus du disponible Belfius/);
   assert.match(styles, /\.meal-voucher-panel\s*\{/);
   assert.match(styles, /\.hero-panel \.hero-anticipated-balance\s*\{[^}]*font-size:\s*0\.875rem;[^}]*opacity:\s*0\.75;/s);
-  assert.match(operationHistory, /const currentMonth = today\.slice\(0, 7\);/);
-  assert.match(operationHistory, /monthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
-  assert.match(operationHistory, /filteredMonthOperations\.filter\(\(operation\) => operation\.date <= today\)/);
+  assert.match(operationHistory, /const visibleMonthOperations = monthOperations;/);
+  assert.match(operationHistory, /const visibleFilteredMonthOperations = filteredMonthOperations;/);
   assert.match(operationHistory, /const awaitingCsvConfirmation = operation\.pendingCsvImport === true;/);
   assert.match(operationHistory, /awaitingCsvConfirmation \? 'virtual-recurring' : ''/);
   assert.match(operationHistory, /csvConfirmed \? 'csv-confirmed' : ''/);
+  assert.match(operationHistory, /AWAITING_CSV_DISPLAY_STATUS/);
+  assert.match(operationHistory, /CONFIRMED_CSV_DISPLAY_STATUS/);
   assert.doesNotMatch(operationHistory, /operation\.virtualRecurring \? 'virtual-recurring' : ''/);
   assert.match(operationHistory, /background:\s*'var\(--surface\)'[^}]*filter:\s*'none'/s);
   assert.doesNotMatch(app, /return effectiveMonthOperations\.filter\(\(operation\) => \{/);

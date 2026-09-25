@@ -6,6 +6,11 @@ import OperationHistory from './features/operations/OperationHistory.jsx';
 import { loadPersistedAudit } from './lib/belfiusAuditStorage.js';
 import { findOutstandingRecurringExpenses } from './lib/budgetAnalysisRules.js';
 import {
+  AWAITING_CSV_DISPLAY_STATUS,
+  buildRecurringHistoryPresentationRows,
+  CONFIRMED_CSV_DISPLAY_STATUS,
+} from './features/operations/recurringHistoryPresentation.js';
+import {
   bankRowFingerprint,
   loadBankMatchConfirmations,
   persistBankMatchConfirmations,
@@ -77,19 +82,23 @@ it('remplace les cinq attentes historiques par des lignes blanches après le CSV
   await waitFor(() => expect(screen.getByTestId('ordinary-pending').textContent).toBe('0'));
   view.unmount();
 
+  const confirmedPresentationRows = buildRecurringHistoryPresentationRows({
+    recurringExpenses: ordinaryRecurring,
+    outstandingRecurringExpenses: [],
+    monthOperations: [],
+    selectedMonth: '2026-09',
+    balanceCutoff: '2026-09-24',
+    hasImportedCsv: true,
+  });
+  expect(confirmedPresentationRows).toHaveLength(5);
+  expect(confirmedPresentationRows.every((row) => row.csvConfirmedByImport)).toBe(true);
+
   const waiting = {
     id: 'waiting', date: '2026-09-18', person: 'Foyer', type: 'fixed', category: 'divers',
     label: 'Échéance toujours en attente', amount: 50, paymentMethod: 'Compte Belfius',
-    virtualRecurring: true, pendingCsvImport: true, statusLabel: "En attente d'import CSV",
+    virtualRecurring: true, pendingCsvImport: true, statusLabel: "Débité en banque - En attente d'import CSV",
   };
-  const confirmed = ordinaryRecurring.map((expense) => ({
-    ...expense,
-    date: '2026-09-01',
-    person: 'Foyer',
-    type: 'fixed',
-    virtualRecurring: true,
-    pendingCsvImport: false,
-  }));
+  const confirmed = confirmedPresentationRows;
   render(<OperationHistory
     operations={[]}
     monthOperations={[waiting, ...confirmed]}
@@ -119,11 +128,12 @@ it('remplace les cinq attentes historiques par des lignes blanches après le CSV
 
   expect(screen.getByText('Échéance toujours en attente').closest('article'))
     .toHaveClass('virtual-recurring');
+  expect(screen.getByText(AWAITING_CSV_DISPLAY_STATUS)).toBeInTheDocument();
   ordinaryRecurring.forEach((expense) => {
     const confirmedRow = screen.getByText(expense.label).closest('article');
     expect(confirmedRow).toHaveClass('csv-confirmed');
     expect(confirmedRow).not.toHaveClass('virtual-recurring');
-    expect(confirmedRow.querySelector('.virtual-recurring-status')).toBeNull();
+    expect(confirmedRow.querySelector('.virtual-recurring-status')).toHaveTextContent(CONFIRMED_CSV_DISPLAY_STATUS);
   });
 });
 

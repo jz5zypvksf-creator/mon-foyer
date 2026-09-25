@@ -22,6 +22,10 @@ import {
   reviewStatusLabel,
 } from '../../lib/operationReviewRules.js';
 import { formatMoney } from '../../domain/money/money.js';
+import {
+  AWAITING_CSV_DISPLAY_STATUS,
+  CONFIRMED_CSV_DISPLAY_STATUS,
+} from './recurringHistoryPresentation.js';
 
 const PAYMENT_METHODS = [
   'Compte Belfius',
@@ -54,7 +58,12 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
   const Icon = iconMap[category?.icon] || CircleEllipsis;
   const sign = (operation.type === 'income' || operation.type === 'reimbursement') ? '+' : '-';
   const awaitingCsvConfirmation = operation.pendingCsvImport === true;
-  const csvConfirmed = operation.virtualRecurring === true && !awaitingCsvConfirmation;
+  const csvConfirmed = operation.csvConfirmedByImport === true;
+  const csvDisplayStatus = awaitingCsvConfirmation
+    ? AWAITING_CSV_DISPLAY_STATUS
+    : csvConfirmed
+      ? CONFIRMED_CSV_DISPLAY_STATUS
+      : '';
   const csvConfirmedStyle = csvConfirmed
     ? { background: 'var(--surface)', color: 'var(--text)', filter: 'none' }
     : undefined;
@@ -71,8 +80,8 @@ function OperationRow({ operation, categories, alerts, onEdit, onDelete }) {
         <strong>{operation.label}</strong>
         <span>{operation.date} · {operation.person}{operation.store ? ` · ${operation.store}` : ''} · {operation.paymentMethod || 'Compte Belfius'}</span>
         {alerts?.length > 0 && <em>À vérifier: {alerts.join(', ')}</em>}
-        {awaitingCsvConfirmation && (
-          <em className="virtual-recurring-status">{operation.statusLabel}</em>
+        {csvDisplayStatus && (
+          <em className="virtual-recurring-status">{csvDisplayStatus}</em>
         )}
         {operation.reviewStatus && operation.reviewStatus !== OPERATION_REVIEW_STATUSES.UNREVIEWED && (
           <em className={`operation-review-badge review-${operation.reviewStatus}`}>
@@ -126,13 +135,8 @@ export default function OperationHistory({
   DuplicateAuditComponent,
 }) {
   const DuplicateAudit = DuplicateAuditComponent;
-  const currentMonth = today.slice(0, 7);
-  const visibleMonthOperations = selectedMonth === currentMonth
-    ? monthOperations.filter((operation) => operation.date <= today)
-    : monthOperations;
-  const visibleFilteredMonthOperations = selectedMonth === currentMonth
-    ? filteredMonthOperations.filter((operation) => operation.date <= today)
-    : filteredMonthOperations;
+  const visibleMonthOperations = monthOperations;
+  const visibleFilteredMonthOperations = filteredMonthOperations;
 
   return (
     <section className="view">
